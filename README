@@ -6,8 +6,10 @@
 ## Build
 
 ### Mac instructions
-For the below `ln -s` command please use whatever version of openssl that was installed by brew or previously on your system for part of the path i.e. `1.0.2k`
+- For `xcode-select --install` agree to the prompt, that pops-up after running the command
+- For the below `ln -s` command please use whatever version of openssl that was installed by brew or previously on your system for part of the path i.e. `1.0.2k`
 ```shell
+xcode-select --install
 brew install openssl
 ln -s /usr/local/Cellar/openssl/1.0.2k/include/openssl /usr/local/include/openssl
 brew install libyaml
@@ -58,5 +60,5 @@ make && make install
 
 ### Differences between Fork and Original
 - The only major change is that in `/src/mod_muc_room.erl` the flow for an incoming muc subscription message is changed.
-- Now when a user is online with a muc subscription to a room and a message is sent in that room, the user with the subscription will not get the message directly and the offline message flow will occur.
+- Now when a user is online with a muc subscription to a room and a message is sent in that room, the user with the subscription will not get the message directly and the offline message flow will occur (in the original, the user would get the message directly sent to them).
 - At line 4036 the `is_privacy_allow` method was added and from lines 4059 until the end of the `send_wrapped` method; the flow was modified.
