@@ -4029,35 +4029,57 @@ store_room(StateData) ->
 	    mod_muc:store_room(StateData#state.server_host,
 			       StateData#state.host, StateData#state.room,
 			       make_opts(StateData));
-       true ->
-	    ok
+      true ->
+        ok
     end.
+
+-spec is_privacy_allow(stanza()) -> boolean().
+is_privacy_allow(Packet) ->
+    To = xmpp:get_to(Packet),
+    LServer = To#jid.server,
+    allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
 
 -spec send_wrapped(jid(), jid(), stanza(), binary(), state()) -> ok.
 send_wrapped(From, To, Packet, Node, State) ->
     LTo = jid:tolower(To),
     LBareTo = jid:tolower(jid:remove_resource(To)),
+    IsSubscriber = case ?DICT:find(LBareTo, State#state.subscribers) of
+        {ok, #subscriber{nodes = NodeCheck, jid = _}} ->
+          lists:member(Node, NodeCheck);
+        _ ->
+          false
+    end,
+
     IsOffline = case ?DICT:find(LTo, State#state.users) of
 		    {ok, #user{last_presence = undefined}} -> true;
 		    error -> true;
 		    _ -> false
 		end,
-    if IsOffline ->
-	    case ?DICT:find(LBareTo, State#state.subscribers) of
-		{ok, #subscriber{nodes = Nodes, jid = JID}} ->
-	    case lists:member(Node, Nodes) of
-		true ->
-			    NewPacket = wrap(From, JID, Packet, Node),
-			    ejabberd_router:route(
-			      xmpp:set_from_to(NewPacket, State#state.jid, JID));
-		false ->
-		    ok
-	    end;
-	_ ->
-		    ok
-	    end;
-       true ->
-	    ejabberd_router:route(xmpp:set_from_to(Packet, From, To))
+
+    if IsSubscriber; IsOffline ->
+        case ?DICT:find(LBareTo, State#state.subscribers) of
+            {ok, #subscriber{nodes = Nodes, jid = JID}} ->
+                case lists:member(Node, Nodes) of
+                    true ->
+                      NewPacket = wrap(From, JID, Packet, Node),
+                      PacketToSend = xmpp:set_from_to(NewPacket, State#state.jid, JID),
+                      LServer = To#jid.lserver,
+                      ?DEBUG("Fancy new packet:~n~s", [xmpp:pp(PacketToSend)]),
+                      case is_privacy_allow(PacketToSend) of
+                          true ->
+                            ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, []);
+                          false ->
+                            ?DEBUG("Packet wasnt allowed due to privacy list: ~p", [Packet])
+                      end;
+                    false ->
+                      ?DEBUG("Not going to offline message hook flow ~n", []),
+                      ok
+                end;
+            _ ->
+              ok
+        end;
+        true ->
+          ejabberd_router:route(xmpp:set_from_to(Packet, From, To))
     end.
 
 -spec wrap(jid(), jid(), stanza(), binary()) -> message().
