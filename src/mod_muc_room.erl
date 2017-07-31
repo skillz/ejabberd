@@ -4064,7 +4064,7 @@ send_wrapped(From, To, Packet, Node, State) ->
                       NewPacket = wrap(From, JID, Packet, Node),
                       PacketToSend = xmpp:set_from_to(NewPacket, State#state.jid, JID),
                       LServer = To#jid.lserver,
-                      ?DEBUG("Fancy new packet:~n~s", [xmpp:pp(PacketToSend)]),
+                      ?DEBUG("This packet will be used:~n~s", [xmpp:pp(PacketToSend)]),
                       case is_privacy_allow(PacketToSend) of
                           true ->
                             ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, []);
