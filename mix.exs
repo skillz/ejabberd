@@ -41,8 +41,8 @@ defmodule Ejabberd.Mixfile do
   defp deps do
     [{:lager, "~> 3.4.0"},
      {:p1_utils, "~> 1.0.9"},
-     # {:fast_xml, "~> 1.1.23"},
-     {:fast_xml, git: "https://github.com/processone/fast_xml", override: true},
+     {:fast_xml, "~> 1.1.23", override: true},
+     # {:fast_xml, git: "https://github.com/processone/fast_xml", override: true},
      # {:xmpp, "~> 1.1.13"},
      {:xmpp, git: "https://github.com/processone/xmpp", override: true},
      # {:cache_tab, "~> 1.0.9"},
