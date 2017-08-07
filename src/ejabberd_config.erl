@@ -919,15 +919,21 @@ is_behaviour(Behav, Mod) ->
 v_db(Mod, internal) -> v_db(Mod, mnesia);
 v_db(Mod, odbc) -> v_db(Mod, sql);
 v_db(Mod, Type) ->
-    case ejabberd_db_modules:is_known(Mod) of
-	true ->
-	    case ejabberd_db_modules:Mod(Type) of
-		{ok, _} -> Type;
-		_ -> erlang:error(badarg)
-	    end;
-	false ->
-	    erlang:error(badarg)
+    case Type == http of
+        true ->
+            Type;
+        false ->
+            case ejabberd_db_modules:is_known(Mod) of
+        	true ->
+        	    case ejabberd_db_modules:Mod(Type) of
+        		{ok, _} -> Type;
+        		_ -> erlang:error(badarg)
+        	    end;
+        	false ->
+        	    erlang:error(badarg)
+            end
     end.
+
 
 -spec v_dbs(module()) -> [atom()].
 

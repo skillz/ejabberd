@@ -524,61 +524,76 @@ db_set_password(User, Server, Password, Mod) ->
 
 db_get_password(User, Server, Mod) ->
     UseCache = use_cache(Mod, Server),
-    case erlang:function_exported(Mod, get_password, 2) of
-	false when UseCache ->
-	    ets_cache:lookup(?AUTH_CACHE, {User, Server});
-	false ->
-	    error;
-	true when UseCache ->
-	    ets_cache:lookup(
-	      ?AUTH_CACHE, {User, Server},
-	      fun() -> Mod:get_password(User, Server) end);
-	true ->
-	    Mod:get_password(User, Server)
+    case Mod == ejabberd_auth_http of
+      true ->
+        error;
+      false ->
+        case erlang:function_exported(Mod, get_password, 2) of
+        	false when UseCache ->
+        	    ets_cache:lookup(?AUTH_CACHE, {User, Server});
+        	false ->
+        	    error;
+        	true when UseCache ->
+        	    ets_cache:lookup(
+        	      ?AUTH_CACHE, {User, Server},
+        	      fun() -> Mod:get_password(User, Server) end);
+        	true ->
+        	    Mod:get_password(User, Server)
+        end
     end.
 
 db_user_exists(User, Server, Mod) ->
-    case db_get_password(User, Server, Mod) of
-	{ok, _} ->
-	    true;
-	error ->
-	    case Mod:store_type(Server) of
-		external ->
-		    Mod:user_exists(User, Server);
-		_ ->
-		    false
-	    end
-    end.
+  case Mod == ejabberd_auth_http of
+    true ->
+      Mod:user_exists(User, Server);
+    false ->
+      case db_get_password(User, Server, Mod) of
+      	{ok, _} ->
+          true;
+      	error ->
+          case Mod:store_type(Server) of
+        		external ->
+        		    Mod:user_exists(User, Server);
+        		_ ->
+      	      false
+          end
+      end
+  end.
 
 db_check_password(User, AuthzId, Server, ProvidedPassword,
 		  Digest, DigestFun, Mod) ->
-    case db_get_password(User, Server, Mod) of
-	{ok, ValidPassword} ->
-	    match_passwords(ProvidedPassword, ValidPassword, Digest, DigestFun);
-	error ->
-	    case {Mod:store_type(Server), use_cache(Mod, Server)} of
-		{external, true} ->
-		    case ets_cache:update(
-			   ?AUTH_CACHE, {User, Server}, {ok, ProvidedPassword},
-			   fun() ->
-				   case Mod:check_password(
-					  User, AuthzId, Server, ProvidedPassword) of
-				       true ->
-					   {ok, ProvidedPassword};
-				       false ->
-					   error
-				   end
-			   end, cache_nodes(Mod, Server)) of
-			{ok, _} ->
-			    true;
-			error ->
-			    false
-		    end;
-		{external, false} ->
-		    Mod:check_password(User, AuthzId, Server, ProvidedPassword);
-		_ ->
-		    false
-	    end
+    case Mod == ejabberd_auth_http of
+      true ->
+        Mod:check_password(User, AuthzId, Server, ProvidedPassword);
+      false ->
+        case db_get_password(User, Server, Mod) of
+          {ok, ValidPassword} ->
+              match_passwords(ProvidedPassword, ValidPassword, Digest, DigestFun);
+          error ->
+              case {Mod:store_type(Server), use_cache(Mod, Server)} of
+                {external, true} ->
+                    case ets_cache:update(
+                     ?AUTH_CACHE, {User, Server}, {ok, ProvidedPassword},
+                     fun() ->
+                       case Mod:check_password(
+                        User, AuthzId, Server, ProvidedPassword) of
+                           true ->
+                         {ok, ProvidedPassword};
+                           false ->
+                         error
+                       end
+                     end, cache_nodes(Mod, Server)) of
+                      {ok, _} ->
+                          true;
+                      error ->
+                          false
+                    end;
+                {external, false} ->
+                    Mod:check_password(User, AuthzId, Server, ProvidedPassword);
+                _ ->
+                    false
+              end
+        end
     end.
 
 db_remove_user(User, Server, Mod) ->
