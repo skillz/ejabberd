@@ -4075,7 +4075,7 @@ send_wrapped(From, To, Packet, Node, State) ->
                           true ->
                           	if
                           		IsInRoom ->
-                            		ejabberd_router:route(xmpp:set_from_to(Packet, From, To));
+                            		ejabberd_router:route(PacketToSend);
                             	true ->
                             		ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
                             end;
