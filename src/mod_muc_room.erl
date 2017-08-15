@@ -4056,7 +4056,13 @@ send_wrapped(From, To, Packet, Node, State) ->
 		    _ -> false
 		end,
 
-    if IsSubscriber; IsOffline ->
+		IsInRoom = case ?DICT:find(LTo, State#state.users) of
+		    {ok, _} -> true;
+		    error -> false
+		end,
+
+    if
+    	IsSubscriber; IsOffline ->
         case ?DICT:find(LBareTo, State#state.subscribers) of
             {ok, #subscriber{nodes = Nodes, jid = JID}} ->
                 case lists:member(Node, Nodes) of
@@ -4067,7 +4073,12 @@ send_wrapped(From, To, Packet, Node, State) ->
                       ?DEBUG("This packet will be used:~n~s", [xmpp:pp(PacketToSend)]),
                       case is_privacy_allow(PacketToSend) of
                           true ->
-                            ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, []);
+                          	if
+                          		IsInRoom ->
+                            		ejabberd_router:route(PacketToSend);
+                            	true ->
+                            		ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
+                            end;
                           false ->
                             ?DEBUG("Packet wasnt allowed due to privacy list: ~p", [Packet])
                       end;
