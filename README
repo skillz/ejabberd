@@ -52,7 +52,7 @@ git clone git@github.com:skillz/ejabberd.git
 cd ejabberd/
 ./autogen.sh
 ./configure --enable-elixir
-make && make install
+make && sudo make install
 ```
 
 - You can also make `$HOME/.ejabberd-modules`, if it doesn't exist, for later module development.
@@ -62,3 +62,4 @@ make && make install
 - The only major change is that in `/src/mod_muc_room.erl` the flow for an incoming muc subscription message is changed.
 - Now when a user is online with a muc subscription to a room and a message is sent in that room, the user with the subscription will not get the message directly and the offline message flow will occur (in the original, the user would get the message directly sent to them).
 - At line 4036 the `is_privacy_allow` method was added and from lines 4059 until the end of the `send_wrapped` method; the flow was modified.
+=======
