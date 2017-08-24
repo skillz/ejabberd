@@ -52,7 +52,7 @@ git clone git@github.com:skillz/ejabberd.git
 cd ejabberd/
 ./autogen.sh
 ./configure --enable-elixir
-make && make install
+make && sudo make install
 ```
 
 - You can also make `$HOME/.ejabberd-modules`, if it doesn't exist, for later module development.
