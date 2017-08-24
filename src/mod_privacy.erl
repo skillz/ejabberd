@@ -648,6 +648,7 @@ is_type_match(jid, Value, JID, _Subscription, _Groups) ->
 	{User, Server, <<"">>} ->
 	    case JID of
 		{User, Server, _} -> true;
+    {_, _, User} -> true;
 		_ -> false
 	    end;
 	{<<"">>, Server, Resource} ->
