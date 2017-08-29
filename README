@@ -55,6 +55,7 @@ cd ejabberd/
 make && sudo make install
 ```
 
+- copy https://github.com/skillz/docker-compose/blob/master/ts/ejabberd-conf/ejabberd.yml into `~/my-ejabberd/etc/ejabberd`
 - You can also make `$HOME/.ejabberd-modules`, if it doesn't exist, for later module development.
 - `make && make install` should be run to re-build any local changes then restart ejabberd with `./ejabberdctl restart` or `./ejabberdctl stop` then `./ejabberdctl start` (ejabberdctl is in the sbin directory of your installation on mac and in the bin directory on ubuntu).
 
