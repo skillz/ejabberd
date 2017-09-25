@@ -607,8 +607,10 @@ check_packet_aux([Item | List], PType, JID,
 		 Subscription, Groups) ->
     #listitem{type = Type, value = Value, action = Action} =
 	Item,
+    ?INFO_MSG("Hitting pre is_ptype_match Item: ~p  PType: ~p ~s", [Item, PType]),
     case is_ptype_match(Item, PType) of
       true ->
+        ?INFO_MSG("Hitting pre is_type_match 2: ~s", []),
 	    case is_type_match(Type, Value, JID, Subscription, Groups) of
 		true -> Action;
 		false ->
@@ -639,6 +641,7 @@ is_ptype_match(Item, PType) ->
 is_type_match(none, _Value, _JID, _Subscription, _Groups) ->
     true;
 is_type_match(jid, Value, JID, _Subscription, _Groups) ->
+    ?INFO_MSG("Hitting is_type_match jid: ~p  Jid: ~p ~s", [Value, JID]),
     case Value of
 	{<<"">>, Server, <<"">>} ->
 	    case JID of
@@ -659,8 +662,10 @@ is_type_match(jid, Value, JID, _Subscription, _Groups) ->
 	_ -> Value == JID
     end;
 is_type_match(subscription, Value, _JID, Subscription, _Groups) ->
+    ?INFO_MSG("Hitting subscription: ~p  Jid: ~p ~s", [Value, _JID]),
     Value == Subscription;
 is_type_match(group, Group, _JID, _Subscription, Groups) ->
+    ?INFO_MSG("Hitting group: ~p  Jid: ~p ~s", [Group, _JID]),
     lists:member(Group, Groups).
 
 -spec remove_user(binary(), binary()) -> ok.
