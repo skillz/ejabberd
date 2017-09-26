@@ -4070,7 +4070,7 @@ send_wrapped(From, To, Packet, Node, State) ->
                 case lists:member(Node, Nodes) of
                     true ->
                       NewPacket = wrap(From, JID, Packet, Node),
-                      PacketToSend = xmpp:set_from_to(NewPacket, From, To),
+                      PacketToSend = xmpp:set_from_to(NewPacket, From, JID),
                       LServer = To#jid.lserver,
                       ?DEBUG("This packet will be used:~n~s", [xmpp:pp(PacketToSend)]),
                       case is_privacy_allow(PacketToSend) of
