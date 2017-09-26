@@ -4069,11 +4069,12 @@ send_wrapped(From, To, Packet, Node, State) ->
             {ok, #subscriber{nodes = Nodes, jid = JID}} ->
                 case lists:member(Node, Nodes) of
                     true ->
-                      NewPacket = wrap(From, JID, Packet, Node),
-                      PacketToSend = xmpp:set_from_to(NewPacket, From, JID),
-                      LServer = To#jid.lserver,
+                      NewPacket 				 = wrap(From, JID, Packet, Node),
+                      PrivacyCheckPacket = xmpp:set_from_to(NewPacket, From, JID),
+                      PacketToSend 			 = xmpp:set_from_to(NewPacket, State#state.jid, JID),
+                      LServer 					 = To#jid.lserver,
                       ?DEBUG("This packet will be used:~n~s", [xmpp:pp(PacketToSend)]),
-                      case is_privacy_allow(PacketToSend) of
+                      case is_privacy_allow(PrivacyCheckPacket) of
                           true ->
                           	if
                           		IsInRoom ->
