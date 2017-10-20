@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tsung SYSTEM "/home/jenkins/tsung/tsung-1.0.dtd">
+<tsung loglevel="debug">
+   <clients>
+      <client host="localhost" use_controller_vm="true" maxusers="200000" />
+   </clients>
+   <servers>
+      <server host="speyside-ejabberd-test-1808990691.us-east-1.elb.amazonaws.com" port="5280" type="websocket" />
+   </servers>
+   <load duration="6" unit="minute">
+      <arrivalphase phase="1" duration="6" unit="minute">
+         <users arrivalrate="2" unit="second" />
+      </arrivalphase>
+   </load>
+   <options>
+      <option name="file_server" id="userdb" value="/home/jenkins/workspace/TS/Gatling/TsungStagingtests/users.csv" />
+      <option name="websocket_path" value="/websocket" />
+      <option name="max_retries" value="5" />
+      <option type="ts_jabber" name="global_number" value="1000000" />
+      <option type="ts_jabber" name="domain" value="chat.staging.skillz.com" />
+      <option type="ts_jabber" name="muc_service" value="conference.chat.staging.skillz.com" />
+   </options>
+   <sessions>
+      <session name="heavy-load" probability="10" type="ts_jabber">
+         <setdynvars sourcetype="file" fileid="userdb" delimiter=";" order="iter">
+            <var name="username" />
+            <var name="password" />
+         </setdynvars>
+         <request subst="true">
+            <jabber type="connect" ack="no_ack">
+               <xmpp_authenticate username="%%_username%%" passwd="%%_password%%" />
+            </jabber>
+         </request>
+         <thinktime value="2" />
+         <transaction name="authenticate">
+            <request>
+               <jabber type="auth_sasl" ack="local" />
+            </request>
+            <request>
+               <jabber type="connect" ack="local" />
+            </request>
+            <request>
+               <jabber type="auth_sasl_bind" ack="local" />
+            </request>
+            <request>
+               <jabber type="auth_sasl_session" ack="local" />
+            </request>
+         </transaction>
+         <thinktime value="2" />
+         <request>
+            <jabber type="presence:initial" ack="no_ack" />
+         </request>
+         <setdynvars sourcetype="random_string" length="10">
+            <var name="nick1" />
+         </setdynvars>
+         <setdynvars sourcetype="random_number" start="1" end="100">
+            <var name="room" />
+         </setdynvars>
+         <transaction name="add_friend">
+            <request subst="true">
+               <jabber type="raw" ack="no_ack" data="&lt;presence   xmlns=&quot;jabber:client&quot; type=&quot;subscribe&quot; to=&quot;5920820@chat.qa.skillz.com&quot; id=&quot;bb3c33a4-8765-42aa-ba71-bba50c151c76&quot;&gt;   &lt;player     xmlns=&quot;skillz:presence&quot;/&gt;   &lt;/presence&gt;" />
+            </request>
+         </transaction>
+         <transaction name="accept_friend">
+            <request subst="true">
+               <jabber type="raw" ack="no_ack" data="&lt;presence   xmlns=&quot;jabber:client&quot; type=&quot;subscribed&quot; to=&quot;5963802@chat.qa.skillz.com&quot; id=&quot;8a048b83-dc3c-4872-bcb6-cd02f2b5e321&quot;/&gt;" />
+            </request>
+         </transaction>
+         <transaction name="create_multi_user_dm">
+            <request subst="true">
+               <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; to=&quot;conference.chat.qa.skillz.com&quot; from=&quot;%%_username%%@chat.qa.skillz.com&quot; id=&quot;41fd4bd8-3329-4544-88a0-f0626d358339&quot;&gt;   &lt;subscriptions     xmlns=&quot;urn:xmpp:mucsub:0&quot;/&gt;   &lt;/iq&gt;" />
+            </request>
+         </transaction>
+         <transaction name="get_offline_messages">
+            <request subst="true">
+               <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;8494d366-45ee-413c-af4f-2ba069e7a41f&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#items&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
+            </request>
+         </transaction>
+         <!-- keep alive -->
+         <for from="1" to="12" incr="1" var="counter">
+            <request>
+               <jabber type="raw" ack="no_ack" data="&#xD;&#xA;" />
+            </request>
+            <thinktime value="60" random="false" />
+         </for>
+         <request>
+            <jabber type="close" ack="local" />
+         </request>
+      </session>
+      <session name="light-load" probability="90" type="ts_jabber">
+         <setdynvars sourcetype="file" fileid="userdb" delimiter=";" order="iter">
+            <var name="username" />
+            <var name="password" />
+         </setdynvars>
+         <request subst="true">
+            <jabber type="connect" ack="no_ack">
+               <xmpp_authenticate username="%%_username%%" passwd="%%_password%%" />
+            </jabber>
+         </request>
+         <thinktime value="2" />
+         <transaction name="authenticate">
+            <request>
+               <jabber type="auth_sasl" ack="local" />
+            </request>
+            <request>
+               <jabber type="connect" ack="local" />
+            </request>
+            <request>
+               <jabber type="auth_sasl_bind" ack="local" />
+            </request>
+            <request>
+               <jabber type="auth_sasl_session" ack="local" />
+            </request>
+         </transaction>
+         <thinktime value="2" />
+         <request>
+            <jabber type="presence:initial" ack="no_ack" />
+         </request>
+         <setdynvars sourcetype="random_string" length="10">
+            <var name="nick1" />
+         </setdynvars>
+         <setdynvars sourcetype="random_number" start="1" end="100">
+            <var name="room" />
+         </setdynvars>
+         <transaction name="join_room">
+            <request subst="true">
+               <jabber type="muc:join" ack="local" room="81" nick="%%_nick1%%" />
+            </request>
+         </transaction>
+         <transaction name="online_chat">
+            <for from="1" to="6" incr="1" var="i">
+               <request subst="true">
+                  <jabber type="muc:chat" ack="no_ack" size="16" room="81" />
+               </request>
+               <thinktime value="60" random="true" />
+            </for>
+         </transaction>
+         <!-- keep alive -->
+         <for from="1" to="12" incr="1" var="counter">
+            <request>
+               <jabber type="raw" ack="no_ack" data="&#xD;&#xA;" />
+            </request>
+            <thinktime value="60" random="false" />
+         </for>
+         <request>
+            <jabber type="close" ack="local" />
+         </request>
+      </session>
+   </sessions>
+</tsung>
