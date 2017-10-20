@@ -9,7 +9,7 @@
    </servers>
    <load duration="6" unit="minute">
       <arrivalphase phase="1" duration="6" unit="minute">
-         <users arrivalrate="3" unit="second" />
+         <users arrivalrate="2" unit="second" />
       </arrivalphase>
    </load>
    <options>
