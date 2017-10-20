@@ -93,6 +93,30 @@
         </request>
       </transaction>
 
+      <transaction name="create_multi_user_dm">
+        <request subst="true">
+          <jabber type="raw" ack="no_ack"
+            data="&lt;iq
+  xmlns=&quot;jabber:client&quot; type=&quot;get&quot; to=&quot;conference.chat.qa.skillz.com&quot; from=&quot;%%_username%%@chat.qa.skillz.com&quot; id=&quot;41fd4bd8-3329-4544-88a0-f0626d358339&quot;&gt;
+  &lt;subscriptions
+    xmlns=&quot;urn:xmpp:mucsub:0&quot;/&gt;
+  &lt;/iq&gt;">
+          </jabber>
+        </request>
+      </transaction>
+
+      <transaction name="get_offline_messages">
+        <request subst="true">
+          <jabber type="raw" ack="no_ack"
+            data="&lt;iq
+  xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;8494d366-45ee-413c-af4f-2ba069e7a41f&quot;&gt;
+  &lt;query
+    xmlns=&quot;http://jabber.org/protocol/disco#items&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;
+  &lt;/iq&gt;">
+          </jabber>
+        </request>
+      </transaction>
+
       <!-- keep alive -->
       <for from="1" to="12" incr="1" var="counter">
         <request>
