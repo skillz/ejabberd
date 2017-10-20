@@ -7,8 +7,8 @@
    <servers>
       <server host="speyside-ejabberd-test-1808990691.us-east-1.elb.amazonaws.com" port="5280" type="websocket" />
    </servers>
-   <load duration="5" unit="minute">
-      <arrivalphase phase="1" duration="5" unit="minute">
+   <load duration="6" unit="minute">
+      <arrivalphase phase="1" duration="6" unit="minute">
          <users arrivalrate="3" unit="second" />
       </arrivalphase>
    </load>
@@ -21,7 +21,7 @@
       <option type="ts_jabber" name="muc_service" value="conference.chat.staging.skillz.com" />
    </options>
    <sessions>
-      <session name="heavy-load" probability="20" type="ts_jabber">
+      <session name="heavy-load" probability="10" type="ts_jabber">
          <setdynvars sourcetype="file" fileid="userdb" delimiter=";" order="iter">
             <var name="username" />
             <var name="password" />
@@ -87,7 +87,7 @@
             <jabber type="close" ack="local" />
          </request>
       </session>
-      <session name="light-load" probability="80" type="ts_jabber">
+      <session name="light-load" probability="90" type="ts_jabber">
          <setdynvars sourcetype="file" fileid="userdb" delimiter=";" order="iter">
             <var name="username" />
             <var name="password" />
