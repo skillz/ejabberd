@@ -320,7 +320,7 @@ check_from_to(From, To) ->
 
 -spec mk_error(term()) -> stanza_error().
 mk_error(forbidden) ->
-    xmpp:err_forbidden(<<"Denied by ACL">>, ?MYLANG);
+    xmpp:err_forbidden(<<"Access denied by service policy">>, ?MYLANG);
 mk_error(host_unknown) ->
     xmpp:err_not_allowed(<<"Host unknown">>, ?MYLANG);
 mk_error({codec_error, Why}) ->
@@ -353,9 +353,9 @@ format_stanza_error(#stanza_error{reason = Reason, text = Txt}) ->
 		 #redirect{} -> <<"redirect">>;
 		 _ -> erlang:atom_to_binary(Reason, latin1)
 	     end,
-    case Txt of
-	undefined -> Slogan;
-	#text{data = <<"">>} -> Slogan;
-	#text{data = Data} ->
+    case xmpp:get_text(Txt) of
+	<<"">> ->
+	    Slogan;
+	Data ->
 	    <<Data/binary, " (", Slogan/binary, ")">>
     end.

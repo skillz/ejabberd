@@ -85,6 +85,9 @@ offline_message_hook({_Action, #message{to = #jid{lserver = LServer}}} = Acc) ->
 
 -spec sm_register_connection_hook(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> any().
 sm_register_connection_hook(_SID, #jid{lserver=LServer}, _Info) ->
+    OpenPorts = length([P || P <- erlang:ports(), erlang:port_info(P, name) == {name,"tcp_inet"}]),
+    push(LServer, {erlang_processes, length(erlang:processes())}),
+    push(LServer, {open_tcp_ports, OpenPorts}),
     push(LServer, sm_register_connection).
 
 -spec sm_remove_connection_hook(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> any().

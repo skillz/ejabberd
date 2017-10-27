@@ -671,7 +671,7 @@ process_stream_established(#{stream_state := StateName} = State)
   when StateName == disconnected; StateName == established ->
     State;
 process_stream_established(#{mod := Mod} = State) ->
-    State1 = State#{stream_authenticated := true,
+    State1 = State#{stream_authenticated => true,
 		    stream_state => established,
 		    stream_timeout => infinity},
     try Mod:handle_stream_established(State1)
@@ -1117,17 +1117,17 @@ format_inet_error(Reason) ->
 	Txt -> Txt
     end.
 
--spec format_stream_error(atom() | 'see-other-host'(), undefined | text()) -> string().
+-spec format_stream_error(atom() | 'see-other-host'(), [text()]) -> string().
 format_stream_error(Reason, Txt) ->
     Slogan = case Reason of
 		 undefined -> "no reason";
 		 #'see-other-host'{} -> "see-other-host";
 		 _ -> atom_to_list(Reason)
 	     end,
-    case Txt of
-	undefined -> Slogan;
-	#text{data = <<"">>} -> Slogan;
-	#text{data = Data} ->
+    case xmpp:get_text(Txt) of
+	<<"">> ->
+	    Slogan;
+	Data ->
 	    binary_to_list(Data) ++ " (" ++ Slogan ++ ")"
     end.
 
