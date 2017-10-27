@@ -999,6 +999,7 @@ might_expose_jid(Query,
     proplists:is_defined(with, Query);
 might_expose_jid(_Query, _MsgType) ->
     false.
+
 get_jids(undefined) ->
     [];
 get_jids(Js) ->
