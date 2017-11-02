@@ -662,12 +662,17 @@ process_presence_out(#{user := User, server := Server, lserver := LServer,
 		    Err = xmpp:err_forbidden(ErrText, Lang),
 		    send_error(State, Pres, Err);
 		allow ->
-		    ejabberd_hooks:run(roster_out_subscription,
-				       LServer,
-				       [User, Server, To, Type]),
-		    BareFrom = jid:remove_resource(From),
-		    ejabberd_router:route(xmpp:set_from_to(Pres, BareFrom, To)),
-		    State
+        case is_privacy_allow(xmpp:set_from_to(Pres, From, JID)) of
+          true ->
+            ejabberd_hooks:run(roster_out_subscription,
+                   LServer,
+                   [User, Server, To, Type]),
+            BareFrom = jid:remove_resource(From),
+            ejabberd_router:route(xmpp:set_from_to(Pres, BareFrom, To)),
+            State;
+          false ->
+            ?DEBUG("Packet wasnt allowed due to privacy list for roster out sub: ~p", [Pres])
+         end
 	    end;
 	allow when Type == error; Type == probe ->
 	    ejabberd_router:route(Pres),
@@ -820,6 +825,13 @@ check_privacy_then_route(#{lang := Lang} = State, Pkt) ->
 -spec privacy_check_packet(state(), stanza(), in | out) -> allow | deny.
 privacy_check_packet(#{lserver := LServer} = State, Pkt, Dir) ->
     ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [State, Pkt, Dir]).
+
+
+-spec is_privacy_allow(stanza()) -> boolean().
+is_privacy_allow(Packet) ->
+    To = xmpp:get_to(Packet),
+    LServer = To#jid.server,
+    allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
 
 -spec get_priority_from_presence(presence()) -> integer().
 get_priority_from_presence(#presence{priority = Prio}) ->
