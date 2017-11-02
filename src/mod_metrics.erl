@@ -87,6 +87,7 @@ offline_message_hook({_Action, #message{to = #jid{lserver = LServer}}} = Acc) ->
 sm_register_connection_hook(_SID, #jid{lserver=LServer}, _Info) ->
     OpenPorts = length([P || P <- erlang:ports(), erlang:port_info(P, name) == {name, "tcp_inet"}]),
     push(LServer, {erlang_processes, length(erlang:processes())}),
+    push(LServer, {connected_users, length(ejabberd_sm:dirty_get_sessions_list())}),
     push(LServer, {open_tcp_ports, OpenPorts}),
     push(LServer, sm_register_connection).
 
