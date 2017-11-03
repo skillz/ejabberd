@@ -662,8 +662,9 @@ process_presence_out(#{user := User, server := Server, lserver := LServer,
 		    Err = xmpp:err_forbidden(ErrText, Lang),
 		    send_error(State, Pres, Err);
 		allow ->
-        case is_privacy_allow(xmpp:set_from_to(Pres, From, JID)) of
+        case is_privacy_allow(Pres, To) of
           true ->
+            ?DEBUG("Packet was allowed due to privacy list for roster out sub: ~p and To ~p", [Pres, To]),
             ejabberd_hooks:run(roster_out_subscription,
                    LServer,
                    [User, Server, To, Type]),
@@ -827,10 +828,11 @@ privacy_check_packet(#{lserver := LServer} = State, Pkt, Dir) ->
     ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [State, Pkt, Dir]).
 
 
--spec is_privacy_allow(stanza()) -> boolean().
-is_privacy_allow(Packet) ->
-    To = xmpp:get_to(Packet),
+-spec is_privacy_allow(stanza(), jid()) -> boolean().
+is_privacy_allow(Packet, To) ->
+    ?DEBUG("Privacy check To ~p", [To]),
     LServer = To#jid.server,
+    ?DEBUG("Privacy check LServer ~p", [To#jid.server]),
     allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
 
 -spec get_priority_from_presence(presence()) -> integer().
