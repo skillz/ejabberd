@@ -44,7 +44,7 @@ defmodule Ejabberd.Mixfile do
      {:fast_xml, "~> 1.1.23", override: true},
      # {:fast_xml, git: "https://github.com/processone/fast_xml", override: true},
      # {:xmpp, "~> 1.1.13"},
-     {:xmpp, git: "https://github.com/processone/xmpp", override: true},
+     {:xmpp, git: "https://github.com/processone/xmpp", override: true, tag: "1.1.14"},
      # {:cache_tab, "~> 1.0.9"},
      {:cache_tab, git: "https://github.com/processone/cache_tab", override: true},
      {:fast_yaml, "~> 1.0.10"},
