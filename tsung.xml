@@ -83,9 +83,9 @@
                <request>
                   <jabber type="muc:chat" ack="no_ack" size="16" room="81" />
                </request>
-
-               <thinktime value="10" random="true" />
             </transaction>
+
+            <thinktime value="10" random="true" />
          </for>
          <transaction name="get_offline_messages">
             <request>
