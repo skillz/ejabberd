@@ -8,8 +8,11 @@
       <server host="speyside-ejabberd-test-1808990691.us-east-1.elb.amazonaws.com" port="5280" type="websocket" />
    </servers>
    <load duration="6" unit="minute">
-      <arrivalphase phase="1" duration="6" unit="minute">
-         <users arrivalrate="9" unit="second" />
+      <arrivalphase phase="1" duration="1" unit="minute">
+         <users arrivalrate="40" unit="second" />
+      </arrivalphase>
+      <arrivalphase phase="2" duration="5" unit="minute">
+         <users arrivalrate="10" unit="second" />
       </arrivalphase>
    </load>
    <options>
@@ -59,7 +62,7 @@
          </setdynvars>
          <transaction name="get_offline_message_count">
             <request>
-               <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;8494d366-45ee-413c-af4f-2ba069e7a41f&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot;    &lt;/iq&gt;" />
+               <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;8494d366-45ee-413c-af4f-2ba069e7a41f&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
             </request>
          </transaction>
          <transaction name="roster_add">
@@ -70,26 +73,38 @@
              <jabber type="presence:subscribe" ack="no_ack"/>
            </request>
          </transaction>
+
+         <thinktime value="20" random="false" />
+
+         <transaction name="join_room">
+            <request subst="true">
+               <jabber type="muc:join" ack="local" room="81" nick="%%_nick1%%" />
+            </request>
+         </transaction>
+         <for from="1" to="6" incr="1" var="i">
+            <transaction name="online_chat">
+               <request>
+                  <jabber type="muc:chat" ack="no_ack" size="16" room="81" />
+               </request>
+            </transaction>
+
+            <thinktime value="30" random="true" />
+         </for>
          <transaction name="get_offline_messages">
             <request>
                <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;8494d366-45ee-413c-af4f-2ba069e7a41f&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#items&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
             </request>
          </transaction>
+
+         <thinktime value="10" random="false" />
+
          <transaction name="presence_broadcast_all">
             <request>
                <jabber type="presence:broadcast" show="chat" status="Available to chat" ack="no_ack"/>
             </request>
          </transaction>
          <!-- keep alive -->
-         <for from="1" to="16" incr="1" var="counter">
-            <request>
-               <jabber type="raw" ack="no_ack" data="&#xD;&#xA;" />
-            </request>
-            <thinktime value="50" random="false" />
-         </for>
-         <request>
-            <jabber type="close" ack="local" />
-         </request>
+         <thinktime value="120" random="false" />
       </session>
       <session name="light-load" probability="90" type="ts_jabber">
          <setdynvars sourcetype="file" fileid="userdb" delimiter=";" order="iter">
@@ -123,35 +138,33 @@
          <setdynvars sourcetype="random_string" length="10">
             <var name="nick1" />
          </setdynvars>
+         <setdynvars sourcetype="random_number" start="1" end="100">
+            <var name="room1" />
+         </setdynvars>
          <transaction name="join_room">
             <request subst="true">
-               <jabber type="muc:join" ack="local" room="81" nick="%%_nick1%%" />
+               <jabber type="muc:join" ack="local" room="%%room1%%" nick="%%_nick1%%" />
             </request>
          </transaction>
-            <for from="1" to="6" incr="1" var="i">
+            <for from="1" to="10" incr="1" var="i">
                <transaction name="online_chat">
-                  <request>
+                  <request subst="true">
                      <jabber type="muc:chat" ack="no_ack" size="16" room="81" />
                   </request>
                </transaction>
 
+               <thinktime value="40" />
+
                <transaction name="get_offline_message_count">
                   <request>
-                     <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;8494d366-45ee-413c-af4f-2ba069e7a41f&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot;    &lt;/iq&gt;" />
+                    <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;8494d366-45ee-413c-af4f-2ba069e7a41f&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
                   </request>
                </transaction>
-               <thinktime value="60" random="true" />
+
+               <thinktime value="30" random="true" />
             </for>
          <!-- keep alive -->
-         <for from="1" to="16" incr="1" var="counter">
-            <request>
-               <jabber type="raw" ack="no_ack" data="&#xD;&#xA;" />
-            </request>
-            <thinktime value="50" random="false" />
-         </for>
-         <request>
-            <jabber type="close" ack="local" />
-         </request>
+         <thinktime value="120" random="false" />
       </session>
    </sessions>
 </tsung>
