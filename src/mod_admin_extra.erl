@@ -41,7 +41,7 @@
 
 	 % Sessions
 	 num_active_users/2, num_resources/2, resource_num/3,
-	 kick_session/4, status_num/2, status_num/1,
+	 kick_session/3, status_num/2, status_num/1,
 	 status_list/2, status_list/1, connected_users_info/0,
 	 connected_users_vhost/1, set_presence/7,
 	 get_presence/2, user_sessions_info/2, get_last/2,
@@ -271,11 +271,10 @@ get_commands_spec() ->
      #ejabberd_commands{name = kick_session, tags = [session],
 			desc = "Kick a user session",
 			module = ?MODULE, function = kick_session,
-			args = [{user, binary}, {host, binary}, {resource, binary}, {reason, binary}],
-			args_example = [<<"peter">>, <<"myserver.com">>, <<"Psi">>,
+			args = [{user, binary}, {host, binary}, {reason, binary}],
+			args_example = [<<"peter">>, <<"myserver.com">>,
 					<<"Stuck connection">>],
-			args_desc = ["User name", "Server name", "User's resource",
-				     "Reason for closing session"],
+			args_desc = ["User name", "Server name", "Reason for closing session"],
 			result = {res, rescode},
 			result_example = ok,
 			result_desc = "Status code: 0 on success, 1 otherwise"},
@@ -994,8 +993,10 @@ resource_num(User, Host, Num) ->
                    lists:flatten(io_lib:format("Wrong resource number: ~p", [Num]))})
     end.
 
-kick_session(User, Server, Resource, ReasonText) ->
-    kick_this_session(User, Server, Resource, prepare_reason(ReasonText)),
+kick_session(User, Server, ReasonText) ->
+		Resources = ejabberd_sm:get_user_resources(User, Server),
+
+		[ejabberd_sm:route(jid:make(User, Server, Resource), {exit, prepare_reason(ReasonText)}) || Resource <- Resources],
     ok.
 
 kick_this_session(User, Server, Resource, Reason) ->
