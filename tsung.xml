@@ -27,11 +27,15 @@
       <option type="ts_jabber" name="muc_service" value="conference.chat.staging.skillz.com" />
       <option name="file_server" id="userdb" value="/home/jenkins/workspace/TS/Gatling/TsungStagingtests/users.csv" />
    </options>
+
    <sessions>
       <session name="heavy-load" probability="10" type="ts_jabber">
          <setdynvars sourcetype="file" fileid="userdb" delimiter=";" order="iter">
             <var name="username" />
             <var name="password" />
+         </setdynvars>
+         <setdynvars sourcetype="random_string" length="20">
+             <var name="resource_id" />
          </setdynvars>
          <request subst="true">
             <jabber type="connect" ack="no_ack">
@@ -50,7 +54,7 @@
                <jabber type="auth_sasl_bind" ack="local" />
             </request>
             <request>
-               <jabber type="auth_sasl_session" ack="local" />
+               <jabber type="auth_sasl_session" ack="local" resource="%%_resource_id%%" />
             </request>
          </transaction>
          <thinktime value="2" />
@@ -111,6 +115,9 @@
             <var name="username" />
             <var name="password" />
          </setdynvars>
+         <setdynvars sourcetype="random_string" length="20">
+             <var name="resource_id" />
+         </setdynvars>
          <request subst="true">
             <jabber type="connect" ack="no_ack">
                <xmpp_authenticate username="%%_username%%" passwd="%%_password%%" />
@@ -128,7 +135,7 @@
                <jabber type="auth_sasl_bind" ack="local" />
             </request>
             <request>
-               <jabber type="auth_sasl_session" ack="local" />
+               <jabber type="auth_sasl_session" ack="local" resource="%%_resource_id%%" />
             </request>
          </transaction>
          <thinktime value="2" />
