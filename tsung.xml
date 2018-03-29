@@ -30,7 +30,6 @@
    </options>
 
    <sessions>
-       <!-- TODO: switch back to 90 -->
       <session name="heavy-load" probability="10" type="ts_jabber">
          <setdynvars sourcetype="file" fileid="userdb" delimiter=";" order="iter">
             <var name="username" />
@@ -95,7 +94,6 @@
             <request subst="true">
                 <jabber type="raw" ack="local" data="&lt;presence   xmlns=&quot;jabber:client&quot; to=&quot;81@conference.chat.staging.skillz.com/%%_nick1%%&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt; &lt;x xmlns=&quot;http://jabber.org/protocol/muc&quot;&gt; &lt;history maxstanzas=&quot;50&quot; /&gt;   &lt;/x&gt;   &lt;c   xmlns=&quot;http://jabber.org/protocol/caps&quot; node=&quot;https://stanza.io&quot; hash=&quot;sha-1&quot; ver=&quot;4ArXvj+KpyleAhwHHCoKUPRQRto=Rto=&quot; /&gt;   &lt;/presence&gt;" />
             </request>
-               <!-- <jabber type="muc:join" ack="local" room="81" nick="%%_nick1%%" /> -->
          </transaction>
 
          <!-- Send messages. -->
@@ -110,7 +108,6 @@
                <request subst="true">
                    <!-- Skillz message format with randomized message and id. -->
                    <jabber type="raw" ack="no_ack" data="&lt;message xmlns=&quot;jabber:client&quot; to=&quot;81@conference.chat.staging.skillz.com&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot; type=&quot;groupchat&quot;&gt; &lt;body&gt;%%_random_message%%&lt;/body&gt; &lt;skillz_sdk xmlns=&quot;xmpp:skillz&quot;&gt; &lt;avatar_url&gt;https://cdn.staging.skillz.com/profile-pics/thumbnail/c11828ac-38b9-4b60-a701-8cd4d6d57c49&lt;/avatar_url&gt; &lt;flag_url&gt;https://cdn.staging.skillz.com/flags/US.png&lt;/flag_url&gt; &lt;user_id&gt;%%_username%%&lt;/user_id&gt; &lt;username&gt;%%_username%%&lt;/username&gt; &lt;user_role&gt;0&lt;/user_role&gt; &lt;user_mentions&gt;[]&lt;/user_mentions&gt; &lt;message_type&gt;0&lt;/message_type&gt; &lt;/skillz_sdk&gt; &lt;/message&gt;" />
-                   <!-- <jabber type="muc:chat" ack="no_ack" size="16" room="81" /> -->
                </request>
             </transaction>
 
