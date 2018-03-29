@@ -1,0 +1,111 @@
+2018-03-29 15:26:17 =SUPERVISOR REPORT====
+     Supervisor: {local,'Elixir.Logger.Supervisor'}
+     Context:    child_terminated
+     Reason:     normal
+     Offender:   [{pid,<0.7834.0>},{id,'Elixir.Logger.ErrorHandler'},{mfargs,{'Elixir.Logger.Watcher',start_link,[{error_logger,'Elixir.Logger.ErrorHandler',{true,false,500}}]}},{restart_type,permanent},{shutdown,5000},{child_type,worker}]
+
+2018-03-29 15:26:17 =CRASH REPORT====
+  crasher:
+    initial call: application_master:init/4
+    pid: <0.8032.0>
+    registered_name: []
+    exception exit: {{unable_to_load_nif,{stringprep_app,start,[normal,[]]}},[{application_master,init,4,[{file,"application_master.erl"},{line,134}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,247}]}]}
+    ancestors: [<0.8031.0>]
+    message_queue_len: 1
+    messages: [{'EXIT',<0.8033.0>,normal}]
+    links: [<0.8031.0>,<0.33.0>]
+    dictionary: []
+    trap_exit: true
+    status: running
+    heap_size: 376
+    stack_size: 27
+    reductions: 171
+  neighbours:
+2018-03-29 15:26:17 =CRASH REPORT====
+  crasher:
+    initial call: application_master:init/4
+    pid: <0.8039.0>
+    registered_name: []
+    exception exit: {{unable_to_load_nif,{stringprep_app,start,[normal,[]]}},[{application_master,init,4,[{file,"application_master.erl"},{line,134}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,247}]}]}
+    ancestors: [<0.8038.0>]
+    message_queue_len: 1
+    messages: [{'EXIT',<0.8040.0>,normal}]
+    links: [<0.8038.0>,<0.33.0>]
+    dictionary: []
+    trap_exit: true
+    status: running
+    heap_size: 376
+    stack_size: 27
+    reductions: 171
+  neighbours:
+2018-03-29 15:26:17 =CRASH REPORT====
+  crasher:
+    initial call: application_master:init/4
+    pid: <0.8054.0>
+    registered_name: []
+    exception exit: {{unable_to_load_nif,{stringprep_app,start,[normal,[]]}},[{application_master,init,4,[{file,"application_master.erl"},{line,134}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,247}]}]}
+    ancestors: [<0.8053.0>]
+    message_queue_len: 1
+    messages: [{'EXIT',<0.8055.0>,normal}]
+    links: [<0.8053.0>,<0.33.0>]
+    dictionary: []
+    trap_exit: true
+    status: running
+    heap_size: 376
+    stack_size: 27
+    reductions: 171
+  neighbours:
+2018-03-29 15:26:17 =CRASH REPORT====
+  crasher:
+    initial call: acl:init/1
+    pid: <0.8058.0>
+    registered_name: []
+    exception error: {function_clause,[{lists,foreach,[#Fun<acl.3.117023575>,undefined],[{file,"lists.erl"},{line,1337}]},{acl,init,1,[{file,"src/acl.erl"},{line,96}]},{gen_server,init_it,2,[{file,"gen_server.erl"},{line,365}]},{gen_server,init_it,6,[{file,"gen_server.erl"},{line,333}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,247}]}]}
+    ancestors: [<0.8048.0>]
+    message_queue_len: 0
+    messages: []
+    links: [<0.8048.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 610
+    stack_size: 27
+    reductions: 298
+  neighbours:
+    neighbour: [{pid,<0.8056.0>},{registered_name,ejabberd_mnesia},{initial_call,{ejabberd_mnesia,init,['Argument__1']}},{current_function,{gen_server,loop,7}},{ancestors,[<0.8048.0>]},{message_queue_len,0},{links,[<0.8048.0>]},{trap_exit,false},{status,waiting},{heap_size,2586},{stack_size,10},{reductions,1302},{current_stacktrace,[{gen_server,loop,7,[{file,"gen_server.erl"},{line,381}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,247}]}]}]
+    neighbour: [{pid,<0.8057.0>},{registered_name,ejabberd_hooks},{initial_call,{ejabberd_hooks,init,['Argument__1']}},{current_function,{gen_server,loop,7}},{ancestors,[<0.8048.0>]},{message_queue_len,0},{links,[<0.8048.0>]},{trap_exit,false},{status,waiting},{heap_size,233},{stack_size,10},{reductions,45},{current_stacktrace,[{gen_server,loop,7,[{file,"gen_server.erl"},{line,381}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,247}]}]}]
+    neighbour: [{pid,<0.8048.0>},{registered_name,[]},{initial_call,{erlang,apply,2}},{current_function,{proc_lib,sync_wait,2}},{ancestors,[]},{message_queue_len,1},{links,[<0.8057.0>,<0.8058.0>,<0.8056.0>]},{trap_exit,false},{status,runnable},{heap_size,6772},{stack_size,16},{reductions,43002},{current_stacktrace,[{proc_lib,sync_wait,2,[{file,"proc_lib.erl"},{line,348}]},{'Elixir.EjabberdModAdminExtraTest','__ex_unit_setup_all_0',1,[{file,"test/mod_admin_extra_test.exs"},{line,50}]},{'Elixir.EjabberdModAdminExtraTest','__ex_unit__',2,[{file,"test/mod_admin_extra_test.exs"},{line,21}]},{'Elixir.ExUnit.Runner',exec_case_setup,1,[{file,"lib/ex_unit/runner.ex"},{line,183}]},{'Elixir.ExUnit.Runner','-spawn_case/3-fun-2-',4,[{file,"lib/ex_unit/runner.ex"},{line,153}]}]}]
+2018-03-29 15:26:17 =CRASH REPORT====
+  crasher:
+    initial call: application_master:init/4
+    pid: <0.8070.0>
+    registered_name: []
+    exception exit: {{unable_to_load_nif,{stringprep_app,start,[normal,[]]}},[{application_master,init,4,[{file,"application_master.erl"},{line,134}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,247}]}]}
+    ancestors: [<0.8069.0>]
+    message_queue_len: 1
+    messages: [{'EXIT',<0.8071.0>,normal}]
+    links: [<0.8069.0>,<0.33.0>]
+    dictionary: []
+    trap_exit: true
+    status: running
+    heap_size: 376
+    stack_size: 27
+    reductions: 171
+  neighbours:
+2018-03-29 15:26:17 =CRASH REPORT====
+  crasher:
+    initial call: application_master:init/4
+    pid: <0.8082.0>
+    registered_name: []
+    exception exit: {{unable_to_load_nif,{stringprep_app,start,[normal,[]]}},[{application_master,init,4,[{file,"application_master.erl"},{line,134}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,247}]}]}
+    ancestors: [<0.8081.0>]
+    message_queue_len: 1
+    messages: [{'EXIT',<0.8083.0>,normal}]
+    links: [<0.8081.0>,<0.33.0>]
+    dictionary: []
+    trap_exit: true
+    status: running
+    heap_size: 376
+    stack_size: 27
+    reductions: 171
+  neighbours:

@@ -1,0 +1,8 @@
+2018-03-29 15:26:17.507 [error] <0.7829.0> Supervisor 'Elixir.Logger.Supervisor' had child 'Elixir.Logger.ErrorHandler' started with 'Elixir.Logger.Watcher':start_link({error_logger,'Elixir.Logger.ErrorHandler',{true,false,500}}) at <0.7834.0> exit with reason normal in context child_terminated
+2018-03-29 15:26:17.577 [error] <0.8032.0> CRASH REPORT Process <0.8032.0> with 0 neighbours exited with reason: {unable_to_load_nif,{stringprep_app,start,[normal,[]]}} in application_master:init/4 line 134
+2018-03-29 15:26:17.580 [error] <0.8039.0> CRASH REPORT Process <0.8039.0> with 0 neighbours exited with reason: {unable_to_load_nif,{stringprep_app,start,[normal,[]]}} in application_master:init/4 line 134
+2018-03-29 15:26:17.733 [error] <0.8054.0> CRASH REPORT Process <0.8054.0> with 0 neighbours exited with reason: {unable_to_load_nif,{stringprep_app,start,[normal,[]]}} in application_master:init/4 line 134
+2018-03-29 15:26:17.756 [error] <0.8058.0>@lists:foreach:1337 CRASH REPORT Process <0.8058.0> with 3 neighbours crashed with reason: no function clause matching lists:foreach(#Fun<acl.3.117023575>, undefined) line 1337
+2018-03-29 15:26:17.770 [error] <0.8070.0> CRASH REPORT Process <0.8070.0> with 0 neighbours exited with reason: {unable_to_load_nif,{stringprep_app,start,[normal,[]]}} in application_master:init/4 line 134
+2018-03-29 15:26:17.782 [error] <0.8082.0> CRASH REPORT Process <0.8082.0> with 0 neighbours exited with reason: {unable_to_load_nif,{stringprep_app,start,[normal,[]]}} in application_master:init/4 line 134
+2018-03-29 15:26:17.831 [error] <0.8107.0>@lists:foreach:1337 CRASH REPORT Process <0.8107.0> with 3 neighbours crashed with reason: no function clause matching lists:foreach(#Fun<acl.3.117023575>, undefined) line 1337

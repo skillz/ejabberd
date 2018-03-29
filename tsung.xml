@@ -64,7 +64,7 @@
             <var name="nick1" />
          </setdynvars>
          <transaction name="get_offline_message_count">
-            <for from="0" to="4" incr="1" var="counter">
+            <for from="0" to="4" incr="1" var="i">
                <request subst="true">
                    <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
                </request>
@@ -103,10 +103,10 @@
             </transaction>
             <thinktime value="10" random="true" />
          </for>
-         <for from="0" to="7" incr="1" var="counter">
+         <for from="0" to="7" incr="1" var="i">
             <transaction name="get_offline_messages">
                <request subst="true">
-                   <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
+                  <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
                </request>
                <request subst="true">
                   <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#items&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
@@ -117,7 +117,7 @@
 
          <thinktime value="3" random="false" />
 
-         <for from="0" to="600" incr="1" var="counter">
+         <for from="0" to="600" incr="1" var="i">
             <transaction name="keep_alive_while_disco">
               <request subst="true">
                  <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
@@ -203,7 +203,7 @@
                <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;8494d366-45ee-413c-af4f-2ba069e7a41f&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
             </request>
          </transaction>
-         <for from="0" to="600" incr="1" var="counter">
+         <for from="0" to="600" incr="1" var="i">
             <transaction name="keep_alive_while_disco">
                <request subst="true">
                    <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
