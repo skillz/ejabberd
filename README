@@ -29,6 +29,24 @@ make && make install
 cd $HOME/my-ejabberd/
 ```
 
+If you want to use MySQL for testing, you need this
+```
+./configure --prefix=$HOME/my-ejabberd --enable-elixir --enable-odbc --enable-mysql
+./rebar get-deps
+```
+
+And make an ejabberd user and database in our local mysql docker.
+0) 
+```
+docker ps | grep my
+docker exec -it <hash_from_above> bash
+mysql
+```
+1) Create the ejabberd user and use '%' for the host.
+2) Create the ejabberd table
+2.5) Exit the container
+3) See [https://docs.ejabberd.im/admin/databases/mysql/#load-database-schema-into-your-new-database](here) for the schema
+
 ### Ubuntu install
 
 ```shell

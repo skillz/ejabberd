@@ -3295,12 +3295,12 @@ change_config(Config, StateData) ->
     case {(StateData#state.config)#config.persistent,
 	  Config#config.persistent}
 	of
-      {_, true} ->
+      {_, _} ->
+    mod_muc:forget_room(NSD#state.server_host,
+					NSD#state.host, NSD#state.room),
+
 	  mod_muc:store_room(NSD#state.server_host,
 			     NSD#state.host, NSD#state.room, make_opts(NSD));
-      {true, false} ->
-	  mod_muc:forget_room(NSD#state.server_host,
-			      NSD#state.host, NSD#state.room);
       {false, false} -> ok
     end,
     case {(StateData#state.config)#config.members_only,
@@ -3561,12 +3561,6 @@ destroy_room(DEl, StateData) ->
 			   ?NS_MUCSUB_NODES_CONFIG, StateData)
       end,
 		  (?DICT):to_list(get_users_and_subscribers(StateData))),
-    case (StateData#state.config)#config.persistent of
-      true ->
-	  mod_muc:forget_room(StateData#state.server_host,
-			      StateData#state.host, StateData#state.room);
-      false -> ok
-    end,
     {result, undefined, stop}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -4027,12 +4021,11 @@ element_size(El) ->
 
 -spec store_room(state()) -> ok.
 store_room(StateData) ->
-    if (StateData#state.config)#config.persistent ->
-	    mod_muc:store_room(StateData#state.server_host,
+    case mod_muc:store_room(StateData#state.server_host,
 			       StateData#state.host, StateData#state.room,
-			       make_opts(StateData));
-      true ->
-        ok
+			       make_opts(StateData)) of
+       {true} ->
+				 ok
     end.
 
 -spec is_privacy_allow(stanza()) -> boolean().
