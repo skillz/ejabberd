@@ -49,7 +49,6 @@ XmppAddr.hrl
 /.rebar
 
 .idea/
-mix.lock
 ejabberd.iml
 *log/
 mix.lock
