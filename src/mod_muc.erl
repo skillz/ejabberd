@@ -169,6 +169,7 @@ restore_room(ServerHost, Host, Name) ->
 forget_room(ServerHost, Host, Name) ->
     LServer = jid:nameprep(ServerHost),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
+    %% Removed a hook that would delete mod mam for the room.
     Mod:forget_room(LServer, Host, Name).
 
 can_use_nick(_ServerHost, _Host, _JID, <<"">>) -> false;
