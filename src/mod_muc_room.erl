@@ -4024,7 +4024,7 @@ store_room(StateData) ->
 			       StateData#state.host, StateData#state.room,
 			       make_opts(StateData)) of
        {true} ->
-				 ok
+          ok
     end.
 
 -spec is_privacy_allow(stanza()) -> boolean().
