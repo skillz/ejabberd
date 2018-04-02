@@ -3296,10 +3296,9 @@ change_config(Config, StateData) ->
 	  Config#config.persistent}
 	of
       {_, _} ->
-    mod_muc:forget_room(NSD#state.server_host,
+				mod_muc:forget_room(NSD#state.server_host,
 					NSD#state.host, NSD#state.room),
-
-	  mod_muc:store_room(NSD#state.server_host,
+				mod_muc:store_room(NSD#state.server_host,
 			     NSD#state.host, NSD#state.room, make_opts(NSD));
       {false, false} -> ok
     end,
