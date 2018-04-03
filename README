@@ -36,16 +36,16 @@ If you want to use MySQL for testing, you need this
 ```
 
 And make an ejabberd user and database in our local mysql docker.
-0) 
+1) 
 ```
 docker ps | grep my
 docker exec -it <hash_from_above> bash
 mysql
 ```
-1) Create the ejabberd user and use '%' for the host.
-2) Create the ejabberd table
-2.5) Exit the container
-3) See [https://docs.ejabberd.im/admin/databases/mysql/#load-database-schema-into-your-new-database](here) for the schema
+2) Create the ejabberd user and use '%' for the host.
+3) Create the ejabberd table
+4) Exit the container
+5) See [https://docs.ejabberd.im/admin/databases/mysql/#load-database-schema-into-your-new-database](here) for the schema
 
 ### Ubuntu install
 
