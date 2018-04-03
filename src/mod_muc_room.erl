@@ -2691,7 +2691,7 @@ find_changed_items(UJID, UAffiliation, URole,
 		   [#muc_item{jid = J, nick = Nick, reason = Reason,
 			      role = Role, affiliation = Affiliation}|Items],
 		   Lang, StateData, Res) ->
-    [JID | _] = JIDs = 
+    [JID | _] = JIDs =
 	if J /= undefined ->
 		[J];
 	   Nick /= <<"">> ->
@@ -3298,7 +3298,7 @@ change_config(Config, StateData) ->
       {_, _} ->
         mod_muc:forget_room(NSD#state.server_host,
           NSD#state.host, NSD#state.room),
-        mod_muc:store_room(NSD#state.server_host,
+	      mod_muc:store_room(NSD#state.server_host,
           NSD#state.host, NSD#state.room, make_opts(NSD));
         {false, false} -> ok
     end,
