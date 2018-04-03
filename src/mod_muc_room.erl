@@ -3295,12 +3295,12 @@ change_config(Config, StateData) ->
     case {(StateData#state.config)#config.persistent,
 	  Config#config.persistent}
 	of
+      {false, false} -> ok;
       {_, _} ->
         mod_muc:forget_room(NSD#state.server_host,
           NSD#state.host, NSD#state.room),
 	      mod_muc:store_room(NSD#state.server_host,
-          NSD#state.host, NSD#state.room, make_opts(NSD));
-        {false, false} -> ok
+          NSD#state.host, NSD#state.room, make_opts(NSD))
     end,
     case {(StateData#state.config)#config.members_only,
 	  Config#config.members_only}
