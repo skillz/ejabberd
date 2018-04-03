@@ -237,9 +237,8 @@ init([Host, Opts]) ->
     lists:foreach(
       fun(MyHost) ->
 	      register_iq_handlers(MyHost, IQDisc),
-	      ejabberd_router:register_route(MyHost, Host),
-	      load_all_rooms(MyHost, Host, Access, HistorySize,
-				   RoomShaper, QueueType)
+	      ejabberd_router:register_route(MyHost, Host)
+        %% Removed loading all rooms into memory.
       end, MyHosts),
     {ok, State}.
 
