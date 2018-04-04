@@ -3,6 +3,7 @@
 import subprocess
 import os
 
+# JID is userId1-userId2@conference.chat.skillz.com  Global rooms have no '-', so they're unaffected.
 # Load all rooms with a - (dms and group messages) 
 from_ctl = subprocess.Popen(['./sbin/ejabberdctl', 'muc_online_rooms', 'global'], stdout=subprocess.PIPE)
 all_rooms = subprocess.Popen(['grep', '-'], stdin = from_ctl.stdout, stdout = subprocess.PIPE)
