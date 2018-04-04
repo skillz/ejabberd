@@ -2,7 +2,6 @@
 
 import subprocess
 import os
-import io
 
 # Load all rooms with a - (dms and group messages) 
 from_ctl = subprocess.Popen(['./sbin/ejabberdctl', 'muc_online_rooms', 'global'], stdout=subprocess.PIPE)
