@@ -168,7 +168,7 @@ restore_room(ServerHost, Host, Name) ->
 
 forget_room(ServerHost, Host, Name) ->
     LServer = jid:nameprep(ServerHost),
-    ejabberd_hooks:run(remove_room, LServer, [LServer, Name, Host]),
+    %% Removed hook that erases MAM.
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:forget_room(LServer, Host, Name).
 
@@ -237,9 +237,8 @@ init([Host, Opts]) ->
     lists:foreach(
       fun(MyHost) ->
 	      register_iq_handlers(MyHost, IQDisc),
-	      ejabberd_router:register_route(MyHost, Host),
-	      load_permanent_rooms(MyHost, Host, Access, HistorySize,
-				   RoomShaper, QueueType)
+	      ejabberd_router:register_route(MyHost, Host)
+        %% Permenent rooms are not loaded into memory.
       end, MyHosts),
     {ok, State}.
 
