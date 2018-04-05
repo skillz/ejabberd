@@ -1767,8 +1767,9 @@ add_new_user(From, Nick, Packet, StateData) ->
 		       StateData#state.users),
     Affiliation = get_affiliation(From, StateData),
     %% Added this because we set admin in the SDK instead of owner.
-    case Affiliation of
-      admin -> Affiliation = owner
+    Affiliation = case Affiliation of
+      admin -> owner;
+      _ -> Affiliation
     end,
     ServiceAffiliation = get_service_affiliation(From,
 						 StateData),
