@@ -2691,7 +2691,7 @@ find_changed_items(UJID, UAffiliation, URole,
 		   [#muc_item{jid = J, nick = Nick, reason = Reason,
 			      role = Role, affiliation = Affiliation}|Items],
 		   Lang, StateData, Res) ->
-    [JID | _] = JIDs =
+    [JID | _] = JIDs = 
 	if J /= undefined ->
 		[J];
 	   Nick /= <<"">> ->
@@ -3295,12 +3295,13 @@ change_config(Config, StateData) ->
     case {(StateData#state.config)#config.persistent,
 	  Config#config.persistent}
 	of
-      {false, false} -> ok;
-      {_, _} ->
-        mod_muc:forget_room(NSD#state.server_host,
-          NSD#state.host, NSD#state.room),
-	      mod_muc:store_room(NSD#state.server_host,
-          NSD#state.host, NSD#state.room, make_opts(NSD))
+      {_, true} ->
+	  mod_muc:store_room(NSD#state.server_host,
+			     NSD#state.host, NSD#state.room, make_opts(NSD));
+      {true, false} ->
+	  mod_muc:forget_room(NSD#state.server_host,
+			      NSD#state.host, NSD#state.room);
+      {false, false} -> ok
     end,
     case {(StateData#state.config)#config.members_only,
 	  Config#config.members_only}
@@ -3560,6 +3561,12 @@ destroy_room(DEl, StateData) ->
 			   ?NS_MUCSUB_NODES_CONFIG, StateData)
       end,
 		  (?DICT):to_list(get_users_and_subscribers(StateData))),
+    case (StateData#state.config)#config.persistent of
+      true ->
+	  mod_muc:forget_room(StateData#state.server_host,
+			      StateData#state.host, StateData#state.room);
+      false -> ok
+    end,
     {result, undefined, stop}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -4020,11 +4027,12 @@ element_size(El) ->
 
 -spec store_room(state()) -> ok.
 store_room(StateData) ->
-    case mod_muc:store_room(StateData#state.server_host,
+    if (StateData#state.config)#config.persistent ->
+	    mod_muc:store_room(StateData#state.server_host,
 			       StateData#state.host, StateData#state.room,
-			       make_opts(StateData)) of
-       {true} ->
-          ok
+			       make_opts(StateData));
+      true ->
+        ok
     end.
 
 -spec is_privacy_allow(stanza()) -> boolean().

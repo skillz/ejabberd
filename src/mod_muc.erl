@@ -168,8 +168,8 @@ restore_room(ServerHost, Host, Name) ->
 
 forget_room(ServerHost, Host, Name) ->
     LServer = jid:nameprep(ServerHost),
+    ejabberd_hooks:run(remove_room, LServer, [LServer, Name, Host]),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
-    %% Removed a hook that would delete mod mam for the room.
     Mod:forget_room(LServer, Host, Name).
 
 can_use_nick(_ServerHost, _Host, _JID, <<"">>) -> false;
@@ -237,8 +237,9 @@ init([Host, Opts]) ->
     lists:foreach(
       fun(MyHost) ->
 	      register_iq_handlers(MyHost, IQDisc),
-	      ejabberd_router:register_route(MyHost, Host)
-        %% Removed loading all rooms into memory.
+	      ejabberd_router:register_route(MyHost, Host),
+	      load_permanent_rooms(MyHost, Host, Access, HistorySize,
+				   RoomShaper, QueueType)
       end, MyHosts),
     {ok, State}.
 
@@ -606,7 +607,7 @@ get_rooms(ServerHost, Host) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:get_rooms(LServer, Host).
 
-load_all_rooms(Host, ServerHost, Access,
+load_permanent_rooms(Host, ServerHost, Access,
 		     HistorySize, RoomShaper, QueueType) ->
     RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
     lists:foreach(
