@@ -549,6 +549,7 @@ handle_sync_event({muc_subscribe, From, Nick, Nodes}, _From,
     TmpConfig = Config#config{captcha_protected = false,
 			       password_protected = false},
     TmpState = StateData#state{config = TmpConfig},
+    set_affiliation(From, owner, TmpState),
     case process_iq_mucsub(From, IQ, TmpState) of
 	{result, #muc_subscribe{events = NewNodes}, NewState} ->
 	    NewConfig = (NewState#state.config)#config{
@@ -1765,7 +1766,7 @@ add_new_user(From, Nick, Packet, StateData) ->
 		      get_max_users_admin_threshold(StateData),
     NUsers = dict:fold(fun (_, _, Acc) -> Acc + 1 end, 0,
 		       StateData#state.users),
-    StateData = set_affiliation(From, owner, StateData),
+    set_affiliation(From, owner, StateData),
     Affiliation = get_affiliation(From, StateData),
     ServiceAffiliation = get_service_affiliation(From,
 						 StateData),
