@@ -1765,8 +1765,7 @@ add_new_user(From, Nick, Packet, StateData) ->
 		      get_max_users_admin_threshold(StateData),
     NUsers = dict:fold(fun (_, _, Acc) -> Acc + 1 end, 0,
 		       StateData#state.users),
-    %% Make all users owners of all rooms by default.
-    StateData#state{affiliations = owner},
+    set_affiliation(From, owner, StateData),
     Affiliation = get_affiliation(From, StateData),
     ServiceAffiliation = get_service_affiliation(From,
 						 StateData),
