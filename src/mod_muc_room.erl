@@ -3291,24 +3291,23 @@ set_config(Opts, Config, ServerHost, Lang) ->
 -spec change_config(#config{}, state()) -> {result, undefined, state()}.
 change_config(Config, StateData) ->
     send_config_change_info(Config, StateData),
-    NSD = remove_subscriptions(StateData#state{config = Config}),
     case {(StateData#state.config)#config.persistent,
 	  Config#config.persistent}
 	of
       {_, true} ->
-	  mod_muc:store_room(NSD#state.server_host,
-			     NSD#state.host, NSD#state.room, make_opts(NSD));
+	  mod_muc:store_room(StateData#state.server_host,
+			     StateData#state.host, StateData#state.room, make_opts(StateData));
       {true, false} ->
-	  mod_muc:forget_room(NSD#state.server_host,
-			      NSD#state.host, NSD#state.room);
+	  mod_muc:forget_room(StateData#state.server_host,
+			      StateData#state.host, StateData#state.room);
       {false, false} -> ok
     end,
     case {(StateData#state.config)#config.members_only,
 	  Config#config.members_only}
 	of
       {false, true} ->
-	  NSD1 = remove_nonmembers(NSD), {result, undefined, NSD1};
-      _ -> {result, undefined, NSD}
+	  NSD1 = remove_nonmembers(StateData), {result, undefined, NSD1};
+      _ -> {result, undefined, StateData}
     end.
 
 -spec send_config_change_info(#config{}, state()) -> ok.
