@@ -3563,12 +3563,6 @@ destroy_room(DEl, StateData) ->
 			   ?NS_MUCSUB_NODES_CONFIG, StateData)
       end,
 		  (?DICT):to_list(get_users_and_subscribers(StateData))),
-    case (StateData#state.config)#config.persistent of
-      true ->
-	  mod_muc:forget_room(StateData#state.server_host,
-			      StateData#state.host, StateData#state.room);
-      false -> ok
-    end,
     {result, undefined, stop}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
