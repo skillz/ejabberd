@@ -548,8 +548,8 @@ handle_sync_event({muc_subscribe, From, Nick, Nodes}, _From,
     PasswordProtected = Config#config.password_protected,
     TmpConfig = Config#config{captcha_protected = false,
 			       password_protected = false},
-    TmpState = StateData#state{config = TmpConfig},
-    set_affiliation(From, owner, TmpState),
+    TmpStateNoAff = StateData#state{config = TmpConfig},
+    TmpState = set_affiliation(From, owner, TmpStateNoAff),
     case process_iq_mucsub(From, IQ, TmpState) of
 	{result, #muc_subscribe{events = NewNodes}, NewState} ->
 	    NewConfig = (NewState#state.config)#config{
@@ -1759,14 +1759,14 @@ nick_collision(User, Nick, StateData) ->
 		  (jid(), binary(), iq(), state()) -> {error, stanza_error()} |
 						      {ignore, state()} |
 						      {result, muc_subscribe(), state()}.
-add_new_user(From, Nick, Packet, StateData) ->
+add_new_user(From, Nick, Packet, InStateData) ->
     Lang = xmpp:get_lang(Packet),
-    MaxUsers = get_max_users(StateData),
+    MaxUsers = get_max_users(InStateData),
     MaxAdminUsers = MaxUsers +
-		      get_max_users_admin_threshold(StateData),
+		      get_max_users_admin_threshold(InStateData),
     NUsers = dict:fold(fun (_, _, Acc) -> Acc + 1 end, 0,
-		       StateData#state.users),
-    set_affiliation(From, owner, StateData),
+		       InStateData#state.users),
+    StateData = set_affiliation(From, owner, InStateData),
     Affiliation = get_affiliation(From, StateData),
     ServiceAffiliation = get_service_affiliation(From,
 						 StateData),
