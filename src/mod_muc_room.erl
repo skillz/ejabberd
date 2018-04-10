@@ -3699,7 +3699,8 @@ process_iq_mucsub(From,
 		  #iq{type = set, lang = Lang,
 		      sub_els = [#muc_subscribe{jid = #jid{} = SubJid} = Mucsub]},
 		  StateData) ->
-    FAffiliation = get_affiliation(From, StateData),
+    NewStateData = set_affiliation(From, StateData),
+    FAffiliation = get_affiliation(From, NewStateData),
     FRole = get_role(From, StateData),
     if FRole == moderator; FAffiliation == owner; FAffiliation == admin ->
 	    process_iq_mucsub(SubJid,
