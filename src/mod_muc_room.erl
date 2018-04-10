@@ -3006,7 +3006,7 @@ process_iq_owner(From, #iq{type = set, lang = Lang,
 						 items = Items}]},
 		 StateData) ->
     FAffiliation = get_affiliation(From, StateData),
-    if FAffiliation == owner orelse FAffiliation == admin  ->
+    if FAffiliation /= owner orelse FAffiliation /= admin  ->
 	    ErrText = <<"Owner privileges required">>,
 	    {error, xmpp:err_forbidden(ErrText, Lang)};
        Destroy /= undefined, Config == undefined, Items == [] ->
@@ -3050,7 +3050,7 @@ process_iq_owner(From, #iq{type = get, lang = Lang,
 						 items = Items}]},
 		 StateData) ->
     FAffiliation = get_affiliation(From, StateData),
-    if FAffiliation == owner orelse FAffiliation == admin ->
+    if FAffiliation /= owner orelse FAffiliation /= admin ->
 	    ErrText = <<"Owner privileges required">>,
 	    {error, xmpp:err_forbidden(ErrText, Lang)};
        Destroy == undefined, Config == undefined ->
