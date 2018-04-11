@@ -1852,10 +1852,10 @@ add_new_user(From, Nick, Packet, StateData) ->
 		Nodes = get_subscription_nodes(Packet),
 		NewStateData =
 		      if not IsSubscribeRequest ->
+			      ServerHost = StateData#state.server_host,
+			      Room = StateData#state.room,
 			      case mod_muc:check_create_roomid(ServerHost, Room) of
 			       true ->
-			      	 ServerHost = StateData#state.server_host,
-			      	 Room = StateData#state.room,
 			      	 Host = StateData#state.host,
 			      	 DefRoomOpts = gen_mod:get_module_opt(ServerHost, mod_muc, default_room_options, []),
 			      	 Access = gen_mod:get_module_opt(ServerHost, mod_muc, access, all),
