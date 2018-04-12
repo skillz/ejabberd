@@ -1863,10 +1863,9 @@ add_new_user(From, Nick, Packet, StateData) ->
 			      	 RoomShaper = gen_mod:get_module_opt(ServerHost, mod_muc, room_shaper, none),
 			      	 QueueType = gen_mod:get_module_opt(ServerHost, mod_muc, queue_type,
 			      		 ejabberd_config:default_queue_type(ServerHost)),
-			      	 RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
 			      	 {ok, Pid} = mod_muc:start_new_room(
 			      		 Host, ServerHost, Access, Room, HistorySize, RoomShaper, From, Nick, DefRoomOpts, QueueType),
-			      	 RMod:register_online_room(ServerHost, Room, Host, Pid)
+			      	 mod_muc:register_online_room(Room, Host, Pid)
 			      end,
 			      NewState = add_user_presence(
 					   From, Packet,
