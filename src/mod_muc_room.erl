@@ -1852,6 +1852,22 @@ add_new_user(From, Nick, Packet, StateData) ->
 		Nodes = get_subscription_nodes(Packet),
 		NewStateData =
 		      if not IsSubscribeRequest ->
+			      ServerHost = StateData#state.server_host,
+			      Room = StateData#state.room,
+			      case mod_muc:check_create_roomid(ServerHost, Room) of
+			       true ->
+			      	 Host = StateData#state.host,
+			      	 DefRoomOpts = gen_mod:get_module_opt(ServerHost, mod_muc, default_room_options, []),
+			      	 Access = gen_mod:get_module_opt(ServerHost, mod_muc, access, all),
+			      	 HistorySize = gen_mod:get_module_opt(ServerHost, mod_muc, history_size, 20),
+			      	 RoomShaper = gen_mod:get_module_opt(ServerHost, mod_muc, room_shaper, none),
+			      	 QueueType = gen_mod:get_module_opt(ServerHost, mod_muc, queue_type,
+			      		 ejabberd_config:default_queue_type(ServerHost)),
+			      	 RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
+			      	 {ok, Pid} = mod_muc:start_new_room(
+			      		 Host, ServerHost, Access, Room, HistorySize, RoomShaper, From, Nick, DefRoomOpts, QueueType),
+			      	 RMod:register_online_room(ServerHost, Room, Host, Pid)
+			      end,
 			      NewState = add_user_presence(
 					   From, Packet,
 					   add_online_user(From, Nick, Role,
