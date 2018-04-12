@@ -1854,7 +1854,7 @@ add_new_user(From, Nick, Packet, StateData) ->
 		      if not IsSubscribeRequest ->
 			      ServerHost = StateData#state.server_host,
 			      Room = StateData#state.room,
-						Host = StateData#state.host,
+			      Host = StateData#state.host,
 			      case {mod_muc:find_online_room(Room, Host), mod_muc:check_create_roomid(ServerHost, Room)} of
 			       {error, true} ->
 			      	 DefRoomOpts = gen_mod:get_module_opt(ServerHost, mod_muc, default_room_options, []),
