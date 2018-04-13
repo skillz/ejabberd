@@ -1855,7 +1855,6 @@ add_new_user(From, Nick, Packet, StateData) ->
 			      ServerHost = StateData#state.server_host,
 			      Room = StateData#state.room,
 			      Host = StateData#state.host,
-			      ?DEBUG("Logging for joining room = ~s on host = ~s and found online room = ~p and valid room id = ~p", [Room, Host, mod_muc:find_online_room(Room, Host), mod_muc:check_create_roomid(ServerHost, Room)]),
 			      case {mod_muc:find_online_room(Room, Host), mod_muc:check_create_roomid(ServerHost, Room)} of
 			       {error, true} ->
 			      	 DefRoomOpts = gen_mod:get_module_opt(ServerHost, mod_muc, default_room_options, []),
@@ -1864,7 +1863,6 @@ add_new_user(From, Nick, Packet, StateData) ->
 			      	 RoomShaper = gen_mod:get_module_opt(ServerHost, mod_muc, room_shaper, none),
 			      	 QueueType = gen_mod:get_module_opt(ServerHost, mod_muc, queue_type,
 			      		 ejabberd_config:default_queue_type(ServerHost)),
-			      	 ?DEBUG("Logging for creating new room on serverhost = ~s from = ~s", [ServerHost, From]),
 			      	 {ok, Pid} = mod_muc:start_new_room(
 			      		 Host, ServerHost, Access, Room, HistorySize, RoomShaper, From, Nick, DefRoomOpts, QueueType),
 			      	 mod_muc:register_online_room(Room, Host, Pid),
