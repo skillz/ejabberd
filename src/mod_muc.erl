@@ -435,32 +435,22 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
     RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
     case RMod:find_online_room(ServerHost, Room, Host) of
 	error ->
-	    case is_create_request(Packet) of
+		  case check_create_roomid(ServerHost, Room) of
 		true ->
-		    case check_user_can_create_room(
-			   ServerHost, AccessCreate, From, Room) and
-			check_create_roomid(ServerHost, Room) of
-			true ->
-			    {ok, Pid} = start_new_room(
-					  Host, ServerHost, Access,
-					  Room, HistorySize,
-					  RoomShaper, From, Nick, DefRoomOpts,
-					  QueueType),
-			    RMod:register_online_room(ServerHost, Room, Host, Pid),
-			    mod_muc_room:route(Pid, Packet),
-			    ok;
-			false ->
-			    Lang = xmpp:get_lang(Packet),
-			    ErrText = <<"Room creation is denied by service policy">>,
-			    Err = xmpp:err_forbidden(ErrText, Lang),
-			    ejabberd_router:route_error(Packet, Err)
-		    end;
+		    {ok, Pid} = start_new_room(
+				  Host, ServerHost, Access,
+				  Room, HistorySize,
+				  RoomShaper, From, Nick, DefRoomOpts,
+				  QueueType),
+		    RMod:register_online_room(ServerHost, Room, Host, Pid),
+		    mod_muc_room:route(Pid, Packet),
+		    ok;
 		false ->
 		    Lang = xmpp:get_lang(Packet),
-		    ErrText = <<"Conference room does not exist">>,
-		    Err = xmpp:err_item_not_found(ErrText, Lang),
+		    ErrText = <<"Room creation is denied by service policy">>,
+		    Err = xmpp:err_forbidden(ErrText, Lang),
 		    ejabberd_router:route_error(Packet, Err)
-	    end;
+		  end;
 	{ok, Pid} ->
 	    ?DEBUG("MUC: send to process ~p~n", [Pid]),
 	    mod_muc_room:route(Pid, Packet),
