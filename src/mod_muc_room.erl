@@ -1865,7 +1865,8 @@ add_new_user(From, Nick, Packet, StateData) ->
 			      		 ejabberd_config:default_queue_type(ServerHost)),
 			      	 {ok, Pid} = mod_muc:start_new_room(
 			      		 Host, ServerHost, Access, Room, HistorySize, RoomShaper, From, Nick, DefRoomOpts, QueueType),
-			      	 mod_muc:register_online_room(Room, Host, Pid)
+			      	 mod_muc:register_online_room(Room, Host, Pid);
+			       {_, _} -> ok
 			      end,
 			      NewState = add_user_presence(
 					   From, Packet,
