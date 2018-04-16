@@ -146,6 +146,7 @@ select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
 	       {groupchat, _Role, _MUCState} -> jid:encode(JidArchive)
 	   end,
     {Query, CountQuery} = make_sql_query(User, LServer, MAMQuery, RSM),
+    ?DEBUG("Logging for retriving with mam with query = ~p and user = ~p", [Query, User]),
     % TODO from XEP-0313 v0.2: "To conserve resources, a server MAY place a
     % reasonable limit on how many stanzas may be pushed to a client in one
     % request. If a query returns a number of stanzas greater than this limit
