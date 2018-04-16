@@ -37,7 +37,7 @@
 	 remove_user/2, remove_room/3, mod_opt_type/1, muc_process_iq/2,
 	 muc_filter_message/3, message_is_archived/3, delete_old_messages/2,
 	 get_commands_spec/0, msg_to_el/4, get_room_config/4, set_room_option/3,
-	 offline_message/1, export/1, select_and_send/5, limit_max/2]).
+	 offline_message/1, export/1, select_and_send/5]).
 
 -include("xmpp.hrl").
 -include("logger.hrl").

@@ -1869,9 +1869,8 @@ add_new_user(From, Nick, Packet, StateData) ->
 			      ?DEBUG("Logging for joining room = ~p with history = ~p", [To, History]),
 			      case History == [] of
 			      	true ->
-			      		NewRSM = mod_mam:limit_max(RSM, NewState),
-			      		?DEBUG("Logging for restoring messages on host = ~s, IQ = ~p, RSM = ~p, newRSM = ~p ", [ServerHost, IQ, RSM, NewRSM]),
-			      		mod_mam:select_and_send(ServerHost, Query, NewRSM, IQ, Type);
+			      		?DEBUG("Logging for restoring messages on host = ~s, IQ = ~p, RSM = ~p", [ServerHost, IQ, RSM]),
+			      		mod_mam:select_and_send(ServerHost, Query, RSM, IQ, Type);
 			      	false -> send_history(From, History, NewState)
 			      end,
 			      send_subject(From, StateData),
