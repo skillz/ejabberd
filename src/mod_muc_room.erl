@@ -1845,8 +1845,6 @@ add_new_user(From, Nick, Packet, StateData) ->
 		  {error, Err}
 	  end;
       {_, _, _, Role} ->
-	  RoomJID = StateData#state.jid,
-	  To = jid:replace_resource(RoomJID, Nick),
 	  case check_password(ServiceAffiliation, Affiliation,
 			      Packet, From, StateData)
 	      of
@@ -1860,19 +1858,8 @@ add_new_user(From, Nick, Packet, StateData) ->
 							   StateData)),
 			      send_existing_presences(From, NewState),
 			      send_initial_presence(From, NewState, StateData),
-			      ServerHost = NewState#state.server_host,
 			      History = get_history(Nick, Packet, NewState),
-			      RSM = #{max => 20, direction => 'after', id => 0},
-			      IQ = #{from => From, to => To},
-			      Type = {groupchat, ok, ok},
-			      Query  = [{start, 0}, {'end', 0}, {with, none}, {withtext, none}],
-			      ?DEBUG("Logging for joining room = ~p with history = ~p", [To, History]),
-			      case History == [] of
-			      	true ->
-			      		?DEBUG("Logging for restoring messages on host = ~s, IQ = ~p, RSM = ~p", [ServerHost, IQ, RSM]),
-			      		mod_mam:select_and_send(ServerHost, Query, RSM, IQ, Type);
-			      	false -> send_history(From, History, NewState)
-			      end,
+			      send_history(From, History, NewState),
 			      send_subject(From, StateData),
 			      NewState;
 			 true ->
@@ -1900,6 +1887,8 @@ add_new_user(From, Nick, Packet, StateData) ->
 		end;
 	    captcha_required ->
 		SID = xmpp:get_id(Packet),
+		RoomJID = StateData#state.jid,
+		To = jid:replace_resource(RoomJID, Nick),
 		Limiter = {From#jid.luser, From#jid.lserver},
 		case ejabberd_captcha:create_captcha(SID, RoomJID, To,
 						     Lang, Limiter, From)
