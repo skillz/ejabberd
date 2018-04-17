@@ -1,5 +1,7 @@
 -- This file creates a new table, subscriptions, in the ejabberd DB.
 
+USE ejabberd;
+
 CREATE TABLE subscriptions (
     name text NOT NULL,
     subscriber_list mediumtext NOT NULL,
