@@ -22,12 +22,12 @@ brew install elixir
 git clone git@github.com:skillz/ejabberd.git
 cd ejabberd/
 chmod +x autogen.sh
-./autogen.sh
-./configure --prefix=$HOME/my-ejabberd --enable-elixir
-make && make install
+./build.sh
 
 cd $HOME/my-ejabberd/
 ```
+
+See [here](https://github.com/skillz/chat-administration-service/wiki/Local-Ejabberd-Development) For instructions on local development!
 
 ### Ubuntu install
 
