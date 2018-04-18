@@ -60,10 +60,12 @@ init(Host, Opts) ->
 %% Select the JID from the DB.  If it does not exist, create the row.  Otherwise,
 %% concat the current list of subscriptions with the new one.  Lets hope this doesn't
 %% get too long, it is a medium text after all.
-db_subscribe(LServer, JID, Room) ->
+db_subscribe(LServer, LBareJID, Room) ->
+    SJID = jid:encode(LBareJID),
     F = fun () ->
         ejabberd_sql:sql_query_t(
-                  ?SQL("insert into subscriptions (name, subscriber_list) values(%(JID)s, %(Room)s)"))
+                  ?SQL("insert into subscriptions (name, subscription) values( "
+                       "%(SJID)s, %(Room)s);"))
     end,
     ejabberd_sql:sql_transaction(LServer, F).
 
