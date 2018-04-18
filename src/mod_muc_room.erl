@@ -1597,6 +1597,7 @@ set_subscriber(JID, Nick, Nodes, StateData) ->
     Nicks = ?DICT:store(Nick, [LBareJID], StateData#state.subscriber_nicks),
     NewStateData = StateData#state{subscribers = Subscribers,
 				   subscriber_nicks = Nicks},
+    ejabberd_hooks:run(db_subscribe, LBareJID, StateData#state.room),
     store_room(NewStateData),
     NewStateData.
 
