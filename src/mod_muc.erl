@@ -65,7 +65,7 @@
 	 count_online_rooms_by_user/3,
 	 get_online_rooms_by_user/3,
 	 can_use_nick/4,
-   db_subscribe/2]).
+	 db_subscribe/3]).
 
 -export([init/1, handle_call/3, handle_cast/2,
 	 handle_info/2, terminate/2, code_change/3,
@@ -115,7 +115,7 @@ start(Host, Opts) ->
 
 stop(Host) ->
     Rooms = shutdown_rooms(Host),
-    ejabberd_hooks:delete(trigger_db_subscription, Host, ?MODULE, db_subscribe, 10),
+    ejabberd_hooks:delete(db_subscribe, ?MODULE, db_subscribe, 10),
     gen_mod:stop_child(?MODULE, Host),
     {wait, Rooms}.
 
@@ -243,7 +243,7 @@ init([Host, Opts]) ->
         %% Permenent rooms are not loaded into memory.
       end, MyHosts),
     %% Hook added to save subscription to DB.
-    ejabberd_hooks:add(trigger_db_subscription, Host, ?MODULE, db_subscribe, 10),
+    ejabberd_hooks:add(db_subscribe, ?MODULE, db_subscribe, 10),
     {ok, State}.
 
 handle_call(stop, _From, State) ->
@@ -832,11 +832,13 @@ opts_to_binary(Opts) ->
               Opt
       end, Opts).
 
--spec db_subscribe(jid(), jid()) -> ok.
-db_subscribe(JID, Room)  ->
-  LServer = maps:get(lserver, JID),
+%%-spec db_subscribe(jid(), jid()) -> ok.
+db_subscribe(LServer, LBareJID, Room)  ->
+  ?DEBUG("!!!!!!!", []),
+  PrepJID = jid:nameprep(LBareJID),
+  PrepRoom = jid:nameprep(Room),
   Mod = gen_mod:db_mod(LServer, ?MODULE),
-  Mod:db_subscribe(LServer, JID, Room),
+  Mod:db_subscribe(LServer, PrepJID, PrepRoom),
   ok.
 
 export(LServer) ->
