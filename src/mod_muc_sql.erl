@@ -57,9 +57,6 @@ init(Host, Opts) ->
 	    ok
     end.
 
-%% Select the JID from the DB.  If it does not exist, create the row.  Otherwise,
-%% concat the current list of subscriptions with the new one.  Lets hope this doesn't
-%% get too long, it is a medium text after all.
 db_subscribe(LServer, LBareJID, LBareRoomJID) ->
     SJID = jid:encode(LBareJID),
     SRoomJID = jid:encode(LBareRoomJID),
