@@ -448,6 +448,12 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
           QueueType),
         RMod:register_online_room(ServerHost, Room, Host, Pid),
         mod_muc_room:route(Pid, Packet),
+        RSM = #{max => 20, 'after' => 'after', id => <<0>>},
+        IQ = #{from => From, to => To},
+        MsgType = {groupchat, ok, ok},
+        Query = [{start, 0}, {'end', 0}, {with, none}, {withtext, none}],
+        ?DEBUG("Logging for restoring messages on host = ~s, IQ = ~p, RSM = ~p, Query = ~p", [ServerHost, IQ, RSM, Query]),
+        mod_mam:select_and_send(ServerHost, Query, RSM, IQ, MsgType),
         ok;
     false ->
         Lang = xmpp:get_lang(Packet),
