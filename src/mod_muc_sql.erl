@@ -64,8 +64,13 @@ db_subscribe(LServer, LBareJID, Room) ->
     SJID = jid:encode(LBareJID),
     F = fun () ->
         ejabberd_sql:sql_query_t(
-                  ?SQL("insert into subscriptions (name, subscription) values( "
-                       "%(SJID)s, %(Room)s);"))
+                  %%?SQL("insert into subscriptions (name, subscription) values( "
+                  %%     "%(SJID)s, %(Room)s);"))
+                  ?SQL("insert into subscriptions (name, subscription) "
+                       "select %(SJID)s, %(Room)s from DUAL "
+                       "where not exists ("
+                       "   select 1 from subscriptions "
+                       "   where name=%(SJID)s AND subscription=%(Room)s);"))
     end,
     ejabberd_sql:sql_transaction(LServer, F).
 
