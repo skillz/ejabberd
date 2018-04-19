@@ -832,7 +832,6 @@ opts_to_binary(Opts) ->
               Opt
       end, Opts).
 
-%%-spec db_subscribe(jid(), jid()) -> ok.
 db_subscribe(ServerHost, LBareJID, RoomJID)  ->
   LBareRoomJID = jid:tolower(jid:remove_resource(RoomJID)),
   LServer = jid:nameprep(ServerHost),
