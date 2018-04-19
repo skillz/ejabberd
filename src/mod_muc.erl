@@ -833,11 +833,11 @@ opts_to_binary(Opts) ->
       end, Opts).
 
 %%-spec db_subscribe(jid(), jid()) -> ok.
-db_subscribe(ServerHost, LBareJID, Room)  ->
-  ?DEBUG("!!!!!!!", []),
+db_subscribe(ServerHost, LBareJID, RoomJID)  ->
+  LBareRoomJID = jid:tolower(jid:remove_resource(RoomJID)),
   LServer = jid:nameprep(ServerHost),
   Mod = gen_mod:db_mod(LServer, ?MODULE),
-  Mod:db_subscribe(LServer, LBareJID, Room),
+  Mod:db_subscribe(LServer, LBareJID, LBareRoomJID),
   ok.
 
 export(LServer) ->
