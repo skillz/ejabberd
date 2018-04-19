@@ -39,6 +39,7 @@
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
 	 get_affiliations/3, search_affiliation/4]).
+-export([db_subscribe/3]).
 
 -include("jid.hrl").
 -include("mod_muc.hrl").
@@ -55,6 +56,19 @@ init(Host, Opts) ->
 	_ ->
 	    ok
     end.
+
+db_subscribe(LServer, LBareJID, LBareRoomJID) ->
+    SJID = jid:encode(LBareJID),
+    SRoomJID = jid:encode(LBareRoomJID),
+    F = fun () ->
+        ejabberd_sql:sql_query_t(
+                  ?SQL("insert into subscription (jid, room) "
+                       "select %(SJID)s, %(SRoomJID)s from DUAL "
+                       "where not exists ("
+                       "   select 1 from subscription "
+                       "   where jid=%(SJID)s AND room=%(SRoomJID)s);"))
+    end,
+    ejabberd_sql:sql_transaction(LServer, F).
 
 store_room(LServer, Host, Name, Opts) ->
     SOpts = misc:term_to_expr(Opts),

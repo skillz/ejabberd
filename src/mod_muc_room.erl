@@ -1589,6 +1589,7 @@ update_online_user(JID, #user{nick = Nick} = User, StateData) ->
 set_subscriber(JID, Nick, Nodes, StateData) ->
     BareJID = jid:remove_resource(JID),
     LBareJID = jid:tolower(BareJID),
+    ejabberd_hooks:run(db_subscribe, [StateData#state.server_host, LBareJID, StateData#state.jid]),
     Subscribers = ?DICT:store(LBareJID,
 			      #subscriber{jid = BareJID,
 					  nick = Nick,
