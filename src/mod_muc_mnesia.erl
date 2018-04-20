@@ -40,7 +40,7 @@
 -export([start_link/2, init/1, handle_cast/2, handle_call/3, handle_info/2,
 	 terminate/2, code_change/3]).
 -export([need_transform/1, transform/1]).
--export([db_subscribe/2]).
+-export([db_subscribe/2, get_db_subscribers/2]).
 
 -include("mod_muc.hrl").
 -include("logger.hrl").
@@ -66,6 +66,9 @@ start_link(Host, Opts) ->
 
 db_subscribe(_JID, _Room) ->
   {error, not_implemented}.
+
+get_db_subscribers(_LServer, _LBareJID) ->
+	{error, not_implemented}.
 
 store_room(_LServer, Host, Name, Opts) ->
     F = fun () ->

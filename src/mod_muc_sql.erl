@@ -39,7 +39,7 @@
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
 	 get_affiliations/3, search_affiliation/4]).
--export([db_subscribe/3]).
+-export([db_subscribe/3, get_db_subscribers/2]).
 
 -include("jid.hrl").
 -include("mod_muc.hrl").
@@ -69,6 +69,22 @@ db_subscribe(LServer, LBareJID, LBareRoomJID) ->
                        "   where jid=%(SJID)s AND room=%(SRoomJID)s);"))
     end,
     ejabberd_sql:sql_transaction(LServer, F).
+
+get_db_subscribers(LServer, LBareJID) ->
+    SJID = jid:encode(LBareJID),
+    case catch ejabberd_sql:sql_query(
+	              LServer,
+	              ?SQL("select @(room)s from subscription "
+                     "where jid=%(SJID)s")) of
+  {selected, Subscriptions} ->
+    lists:map(
+      fun({Subscription}) ->
+        jid:tolower(jid:decode(Subscription))
+      end, Subscriptions);
+  Err ->
+    ?ERROR_MSG("failed to get subscriptions: ~p", [Err]),
+    []
+    end.
 
 store_room(LServer, Host, Name, Opts) ->
     SOpts = misc:term_to_expr(Opts),

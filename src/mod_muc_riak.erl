@@ -36,7 +36,7 @@
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
 	 get_affiliations/3, search_affiliation/4]).
--export([db_subscribe/2]).
+-export([db_subscribe/2, get_db_subscribers/2]).
 
 -include("jid.hrl").
 -include("mod_muc.hrl").
@@ -53,6 +53,9 @@ store_room(_LServer, Host, Name, Opts) ->
 			       muc_room_schema())}.
 
 db_subscribe(_JID, _Host) ->
+  {error, not_implemented}.
+
+get_db_subscribers(_LServer, _LBareJID) ->
   {error, not_implemented}.
 
 restore_room(_LServer, Host, Name) ->

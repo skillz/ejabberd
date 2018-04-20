@@ -689,17 +689,10 @@ get_room_disco_item({Name, Host, Pid}, Query) ->
     end.
 
 get_subscribed_rooms(ServerHost, Host, From) ->
-    Rooms = get_online_rooms(ServerHost, Host),
-    BareFrom = jid:remove_resource(From),
-    lists:flatmap(
-      fun({Name, _, Pid}) ->
-	      case p1_fsm:sync_send_all_state_event(Pid, {is_subscribed, BareFrom}) of
-		  true -> [jid:make(Name, Host)];
-		  false -> []
-	      end;
-	 (_) ->
-	      []
-      end, Rooms).
+    LServer = jid:nameprep(ServerHost),
+    LBareJID = jid:tolower(jid:remove_resource(From)),
+    Mod = gen_mod:db_mod(LServer, ?MODULE),
+    Mod:get_db_subscribers(LServer, LBareJID).
 
 get_nick(ServerHost, Host, From) ->
     LServer = jid:nameprep(ServerHost),
