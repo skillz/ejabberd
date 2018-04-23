@@ -1051,6 +1051,17 @@ maybe_strip_status_from_presence(From, Packet, StateData) ->
 	_Allowed -> Packet
     end.
 
+-spec close_room_without_occupants(state()) -> fsm_transition().
+close_room_without_occupants(StateData1) ->
+    case (?DICT):size(StateData1#state.users) == 0 of
+      true ->
+        ?INFO_MSG("Destoryed MUC room ~s becuase it lacks occupants",
+          [jid:encode(StateData1#state.jid)]),
+        add_to_log(room_existence, destroyed, StateData1),
+        {stop, normal, StateData1};
+      _ -> {next_state, normal_state, StateData1}
+    end.
+
 -spec close_room_if_temporary_and_empty(state()) -> fsm_transition().
 close_room_if_temporary_and_empty(StateData1) ->
     case not (StateData1#state.config)#config.persistent
@@ -3774,7 +3785,11 @@ process_iq_mucsub(From, #iq{type = get, lang = Lang,
 		     fun(_, #subscriber{jid = J}, Acc) ->
 			     [J|Acc]
 		     end, [], StateData#state.subscribers),
-	    {result, #muc_subscriptions{list = JIDs}, StateData};
+      NewStateData = case close_room_without_occupants(StateData) of
+    {stop, normal, _} -> stop;
+    {next_state, normal_state, SD} -> SD
+       end,
+	    {result, #muc_subscriptions{list = JIDs}, NewStateData};
        true ->
 	    Txt = <<"Moderator privileges required">>,
 	    {error, xmpp:err_forbidden(Txt, Lang)}
