@@ -32,6 +32,8 @@
 -export([init/2, remove_user/2, remove_room/3, delete_old_messages/3,
 	 extended_fields/0, store/7, write_prefs/4, get_prefs/2, select/6, export/1]).
 
+-export([get_room_history/3]).
+
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("xmpp.hrl").
 -include("mod_mam.hrl").
@@ -389,3 +391,22 @@ make_archive_el(TS, XML, Peer, Kind, Nick, MsgType, JidRequestor, JidArchive) ->
 		       [XML, jid:encode(JidArchive), Reason]),
 	    {error, invalid_xml}
     end.
+
+get_room_history(LServer, Host, Room) ->
+    RoomJID = jid:make(Room, Host),
+    SJID = jid:encode(jid:tolower(jid:remove_resource(RoomJID))),
+    case catch ejabberd_sql:sql_query(
+	              LServer,
+	              ?SQL("select @(xml)s, @(peer)s, @(nick)s from archive "
+	                   "where username=$(SJID)s "
+	                   "order by timestamp ASC limit 20")) of
+  {selected, Rows} ->
+    lists:flatmap(
+	    fun({Xml, FromJID, FromNick}) ->
+        [{Xml, jid:decode(FromJID), FromNick}]
+      end, Rows);
+  Err ->
+		?INFO_MSG("Could not retrieve messages from archive: ~p", [Err]),
+		[]
+		end.
+

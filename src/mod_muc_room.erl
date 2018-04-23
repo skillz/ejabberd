@@ -131,6 +131,17 @@ init([Host, ServerHost, Access, Room, HistorySize,
 		   just_created = true,
 		   room_queue = RoomQueue,
 		   room_shaper = Shaper}),
+  ?DEBUG("!!!!!!", []),
+    case gen_mod:is_loaded(Host, mod_mam) andalso p1_queue:is_empty(State#state.history) of
+      true ->
+        Archive = mod_mam:get_room_history(ServerHost, Room, Host),
+        lists:map(
+          fun({Xml, FromJID, FromNick}) ->
+            add_message_to_history(FromNick, FromJID, Xml, State)
+          end, Archive);
+      _ ->
+        ?DEBUG("mod_mam not loaded.  Not adding message history.", [])
+    end,
     State1 = set_opts(DefRoomOpts, State),
     store_room(State1),
     ?INFO_MSG("Created MUC room ~s@~s by ~s",
