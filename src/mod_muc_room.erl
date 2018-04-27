@@ -2446,7 +2446,6 @@ lqueue_cut(Q, N) ->
 -spec add_message_to_history(binary(), jid(), message(), state()) -> state().
 add_message_to_history(FromNick, FromJID, Packet, StateData) ->
     add_to_log(text, {FromNick, Packet}, StateData),
-	  ?DEBUG("OutAddMessage ", [Packet]),
     case check_subject(Packet) of
 	false ->
 	    TimeStamp = p1_time_compat:timestamp(),
@@ -2465,7 +2464,6 @@ add_message_to_history(FromNick, FromJID, Packet, StateData) ->
 			jid:replace_resource(StateData#state.jid, FromNick),
 			StateData#state.jid),
 	    Size = element_size(SPacket),
-      ?DEBUG("InAddMessage ", [TSPacket]),
 	    Q1 = lqueue_in({FromNick, TSPacket, false,
 			    TimeStamp, Size},
 			   StateData#state.history),
@@ -3802,12 +3800,12 @@ process_iq_mucsub(From, #iq{type = get, lang = Lang,
 		     fun(_, #subscriber{jid = J}, Acc) ->
 			     [J|Acc]
 		     end, [], StateData#state.subscribers),
-      {result, #muc_subscriptions{list = JIDs}, StateData};
-    %%  NewStateData = case close_room_without_occupants(StateData) of
-    %%{stop, normal, _} -> stop;
-    %%{next_state, normal_state, SD} -> SD
-    %%   end,
-	  %%  {result, #muc_subscriptions{list = JIDs}, NewStateData};
+      {result, #muc_subscriptions{list = JIDs}, StateData},
+      NewStateData = case close_room_without_occupants(StateData) of
+    {stop, normal, _} -> stop;
+    {next_state, normal_state, SD} -> SD
+       end,
+	    {result, #muc_subscriptions{list = JIDs}, NewStateData};
        true ->
 	    Txt = <<"Moderator privileges required">>,
 	    {error, xmpp:err_forbidden(Txt, Lang)}
