@@ -417,12 +417,12 @@ get_room_history(LServer, Room, Host, JidRequestor, MsgType) ->
 xml_to_unarchived_msg(XML) ->
 	  case fxml_stream:parse_element(XML) of
 	#xmlel{} = El ->
-      el_to_unarchived_msg(El);
+	   el_to_unarchived_msg(El);
   Err ->
-      ?ERROR_MSG("got ~p when parsing XML packet ~s",
-	        [Err, XML]),
-	    Err
-	  end.
+	   ?ERROR_MSG("got ~p when parsing XML packet ~s",
+	      [Err, XML]),
+	      Err
+	   end.
 
 el_to_unarchived_msg(El) ->
 	  ID_s = fxml:get_tag_attr_s(<<"id">>, El),
