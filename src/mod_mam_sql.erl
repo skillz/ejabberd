@@ -393,23 +393,23 @@ make_archive_el(TS, XML, Peer, Kind, Nick, MsgType, JidRequestor, JidArchive) ->
     end.
 
 get_room_history(LServer, Room, Host, JidRequestor, MsgType) ->
-    JidArchive = jid:make(Room, Host),
-		RoomJid = jid:encode(JidArchive),
-    case catch ejabberd_sql:sql_query(
-	              LServer,
-	              ?SQL("select @(bare_peer)s, @(nick)s, @(xml)s from archive "
-	                   "where username=%(RoomJid)s "
-	                   "order by timestamp ASC limit 50;")) of
-  {selected, Rows} ->
-    lists:map(
-	    fun({FromJID, FromNick, XML}) ->
-		    Message = xml_to_unarchived_msg(XML),
-		    [{jid:decode(FromJID), FromNick, Message}]
-      end, Rows);
-  Err ->
-		?INFO_MSG("Could not retrieve messages from archive: ~p", [Err]),
-		[]
-		end.
+	   JidArchive = jid:make(Room, Host),
+	   RoomJid = jid:encode(JidArchive),
+	   case catch ejabberd_sql:sql_query(
+	      LServer,
+	      ?SQL("select @(bare_peer)s, @(nick)s, @(xml)s from archive "
+	           "where username=%(RoomJid)s "
+	           "order by timestamp ASC limit 50;")) of
+	{selected, Rows} ->
+	   lists:map(
+	      fun({FromJID, FromNick, XML}) ->
+	         Message = xml_to_unarchived_msg(XML),
+	         [{jid:decode(FromJID), FromNick, Message}]
+	      end, Rows);
+	Err ->
+	   ?INFO_MSG("Could not retrieve messages from archive: ~p", [Err]),
+	   []
+	   end.
 
 %%%===================================================================
 %%% Internal functions
@@ -421,7 +421,7 @@ xml_to_unarchived_msg(XML) ->
   Err ->
 	   ?ERROR_MSG("got ~p when parsing XML packet ~s",
 	      [Err, XML]),
-	      Err
+	   Err
 	   end.
 
 el_to_unarchived_msg(El) ->
