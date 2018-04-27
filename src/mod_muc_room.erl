@@ -3800,7 +3800,6 @@ process_iq_mucsub(From, #iq{type = get, lang = Lang,
 		     fun(_, #subscriber{jid = J}, Acc) ->
 			     [J|Acc]
 		     end, [], StateData#state.subscribers),
-      {result, #muc_subscriptions{list = JIDs}, StateData},
       NewStateData = case close_room_without_occupants(StateData) of
     {stop, normal, _} -> stop;
     {next_state, normal_state, SD} -> SD
