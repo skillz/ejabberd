@@ -131,17 +131,6 @@ init([Host, ServerHost, Access, Room, HistorySize,
 		   just_created = true,
 		   room_queue = RoomQueue,
 		   room_shaper = Shaper}),
-  ?DEBUG("!!!!!!", []),
-    case gen_mod:is_loaded(Host, mod_mam) andalso p1_queue:is_empty(State#state.history) of
-      true ->
-        Archive = mod_mam:get_room_history(ServerHost, Room, Host),
-        lists:map(
-          fun({Xml, FromJID, FromNick}) ->
-            add_message_to_history(FromNick, FromJID, Xml, State)
-          end, Archive);
-      _ ->
-        ?DEBUG("mod_mam not loaded.  Not adding message history.", [])
-    end,
     State1 = set_opts(DefRoomOpts, State),
     store_room(State1),
     ?INFO_MSG("Created MUC room ~s@~s by ~s",
@@ -161,8 +150,9 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
 				  jid = jid:make(Room, Host),
 				  room_queue = RoomQueue,
 				  room_shaper = Shaper}),
-    add_to_log(room_existence, started, State),
-    {ok, normal_state, State}.
+    NewState = get_history_upon_init(State, jid:make(Room, Host)),
+    add_to_log(room_existence, started, NewState),
+    {ok, normal_state, NewState}.
 
 normal_state({route, <<"">>,
 	      #message{from = From, type = Type, lang = Lang} = Packet},
@@ -2030,6 +2020,20 @@ extract_password(#iq{} = IQ) ->
 	    false
     end.
 
+get_history_upon_init(StateData, From) ->
+	MsgType = {groupchat, moderator, StateData},
+	ServerHost = StateData#state.server_host,
+	Room = StateData#state.room,
+	Host = StateData#state.host,
+  MessageHistory = mod_mam:get_room_history(
+    ServerHost, Room, Host,
+    jid:remove_resource(From), MsgType),
+  NewStateData = lists:foldl(
+    fun([{FromJID, FromNick, {_, UnarchivedMessage}}], SD) ->
+      add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD)
+    end, StateData, MessageHistory),
+  NewStateData.
+
 -spec get_history(binary(), stanza(), state()) -> lqueue().
 get_history(Nick, Packet, #state{history = History}) ->
     case xmpp:get_subtag(Packet, #muc{}) of
@@ -2442,6 +2446,7 @@ lqueue_cut(Q, N) ->
 -spec add_message_to_history(binary(), jid(), message(), state()) -> state().
 add_message_to_history(FromNick, FromJID, Packet, StateData) ->
     add_to_log(text, {FromNick, Packet}, StateData),
+	  ?DEBUG("OutAddMessage ", [Packet]),
     case check_subject(Packet) of
 	false ->
 	    TimeStamp = p1_time_compat:timestamp(),
@@ -2460,6 +2465,7 @@ add_message_to_history(FromNick, FromJID, Packet, StateData) ->
 			jid:replace_resource(StateData#state.jid, FromNick),
 			StateData#state.jid),
 	    Size = element_size(SPacket),
+      ?DEBUG("InAddMessage ", [TSPacket]),
 	    Q1 = lqueue_in({FromNick, TSPacket, false,
 			    TimeStamp, Size},
 			   StateData#state.history),
@@ -3796,11 +3802,12 @@ process_iq_mucsub(From, #iq{type = get, lang = Lang,
 		     fun(_, #subscriber{jid = J}, Acc) ->
 			     [J|Acc]
 		     end, [], StateData#state.subscribers),
-      NewStateData = case close_room_without_occupants(StateData) of
-    {stop, normal, _} -> stop;
-    {next_state, normal_state, SD} -> SD
-       end,
-	    {result, #muc_subscriptions{list = JIDs}, NewStateData};
+      {result, #muc_subscriptions{list = JIDs}, StateData};
+    %%  NewStateData = case close_room_without_occupants(StateData) of
+    %%{stop, normal, _} -> stop;
+    %%{next_state, normal_state, SD} -> SD
+    %%   end,
+	  %%  {result, #muc_subscriptions{list = JIDs}, NewStateData};
        true ->
 	    Txt = <<"Moderator privileges required">>,
 	    {error, xmpp:err_forbidden(Txt, Lang)}

@@ -37,9 +37,9 @@
 	 remove_user/2, remove_room/3, mod_opt_type/1, muc_process_iq/2,
 	 muc_filter_message/3, message_is_archived/3, delete_old_messages/2,
 	 get_commands_spec/0, msg_to_el/4, get_room_config/4, set_room_option/3,
-	 offline_message/1, export/1]).
+	 offline_message/1, send/4, export/1]).
 
--export([get_room_history/3]).
+-export([get_room_history/5]).
 
 -include("xmpp.hrl").
 -include("logger.hrl").
@@ -950,10 +950,10 @@ send(Msgs, Count, IsComplete,
 	    ignore
     end.
 
-get_room_history(ServerHost, Room, Host) ->
+get_room_history(ServerHost, Room, Host, JidRequestor, MsgType) ->
 	LServer = jid:nameprep(ServerHost),
 	Mod = gen_mod:db_mod(LServer, ?MODULE),
-  Mod:get_room_history(LServer, Room, Host).
+  Mod:get_room_history(LServer, Room, Host, JidRequestor, MsgType).
 
 -spec make_rsm_out([{binary(), integer(), xmlel()}], non_neg_integer()) -> rsm_set().
 make_rsm_out([], Count) ->
