@@ -150,8 +150,9 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
 				  jid = jid:make(Room, Host),
 				  room_queue = RoomQueue,
 				  room_shaper = Shaper}),
-    add_to_log(room_existence, started, State),
-    {ok, normal_state, State}.
+    NewState = get_history_upon_init(State),
+    add_to_log(room_existence, started, NewState),
+    {ok, normal_state, NewState}.
 
 normal_state({route, <<"">>,
 	      #message{from = From, type = Type, lang = Lang} = Packet},
@@ -2018,6 +2019,17 @@ extract_password(#iq{} = IQ) ->
 	_ ->
 	    false
     end.
+
+get_history_upon_init(StateData) ->
+    ServerHost = StateData#state.server_host,
+    Room = StateData#state.room,
+    Host = StateData#state.host,
+    MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host),
+    NewStateData = lists:foldl(
+      fun([{FromJID, FromNick, {_, UnarchivedMessage}}], SD) ->
+        add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD)
+      end, StateData, MessageHistory),
+    NewStateData.
 
 -spec get_history(binary(), stanza(), state()) -> lqueue().
 get_history(Nick, Packet, #state{history = History}) ->
