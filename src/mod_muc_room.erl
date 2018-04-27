@@ -2021,18 +2021,18 @@ extract_password(#iq{} = IQ) ->
     end.
 
 get_history_upon_init(StateData, From) ->
-	MsgType = {groupchat, moderator, StateData},
-	ServerHost = StateData#state.server_host,
-	Room = StateData#state.room,
-	Host = StateData#state.host,
-  MessageHistory = mod_mam:get_room_history(
+    MsgType = {groupchat, moderator, StateData},
+    ServerHost = StateData#state.server_host,
+    Room = StateData#state.room,
+    Host = StateData#state.host,
+    MessageHistory = mod_mam:get_room_history(
     ServerHost, Room, Host,
     jid:remove_resource(From), MsgType),
-  NewStateData = lists:foldl(
-    fun([{FromJID, FromNick, {_, UnarchivedMessage}}], SD) ->
-      add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD)
-    end, StateData, MessageHistory),
-  NewStateData.
+    NewStateData = lists:foldl(
+      fun([{FromJID, FromNick, {_, UnarchivedMessage}}], SD) ->
+        add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD)
+      end, StateData, MessageHistory),
+    NewStateData.
 
 -spec get_history(binary(), stanza(), state()) -> lqueue().
 get_history(Nick, Packet, #state{history = History}) ->
