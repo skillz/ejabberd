@@ -399,7 +399,7 @@ get_room_history(LServer, Room, Host, JidRequestor, MsgType) ->
 	              LServer,
 	              ?SQL("select @(bare_peer)s, @(nick)s, @(xml)s from archive "
 	                   "where username=%(RoomJid)s "
-	                   "order by timestamp ASC limit 20;")) of
+	                   "order by timestamp ASC limit 50;")) of
   {selected, Rows} ->
     lists:map(
 	    fun({FromJID, FromNick, XML}) ->
