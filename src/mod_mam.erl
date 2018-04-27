@@ -951,9 +951,9 @@ send(Msgs, Count, IsComplete,
     end.
 
 get_room_history(ServerHost, Room, Host, JidRequestor, MsgType) ->
-	   LServer = jid:nameprep(ServerHost),
-	   Mod = gen_mod:db_mod(LServer, ?MODULE),
-	   Mod:get_room_history(LServer, Room, Host, JidRequestor, MsgType).
+		LServer = jid:nameprep(ServerHost),
+		Mod = gen_mod:db_mod(LServer, ?MODULE),
+		Mod:get_room_history(LServer, Room, Host, JidRequestor, MsgType).
 
 -spec make_rsm_out([{binary(), integer(), xmlel()}], non_neg_integer()) -> rsm_set().
 make_rsm_out([], Count) ->
