@@ -425,33 +425,33 @@ xml_to_unarchived_msg(XML) ->
 	  end.
 
 el_to_unarchived_msg(El) ->
-    ID_s = fxml:get_tag_attr_s(<<"id">>, El),
-    Type_s = fxml:get_tag_attr_s(<<"type">>, El),
-    Lang_s = fxml:get_tag_attr_s(<<"lang">>, El),
-    From_s = fxml:get_tag_attr_s(<<"from">>, El),
-    To_s = fxml:get_tag_attr_s(<<"to">>, El),
-		{_, _, _, [{_, Body_cdata}]} = fxml:get_subtag(El, <<"body">>),
-		Body = xmpp:mk_text(Body_cdata),
-		SubEls = xmpp:get_els(El),
-    try
-  Type = misc:binary_to_atom(Type_s),
+	  ID_s = fxml:get_tag_attr_s(<<"id">>, El),
+	  Type_s = fxml:get_tag_attr_s(<<"type">>, El),
+	  Lang_s = fxml:get_tag_attr_s(<<"lang">>, El),
+	  From_s = fxml:get_tag_attr_s(<<"from">>, El),
+	  To_s = fxml:get_tag_attr_s(<<"to">>, El),
+	  {_, _, _, [{_, Body_cdata}]} = fxml:get_subtag(El, <<"body">>),
+	  Body = xmpp:mk_text(Body_cdata),
+	  SubEls = xmpp:get_els(El),
+	  try
+	Type = misc:binary_to_atom(Type_s),
 	F = jid:decode(From_s),
-  From = #jid{user = F#jid.user, server = F#jid.server, resource = F#jid.user,
-	  luser = F#jid.luser, lserver = F#jid.lserver, lresource = F#jid.luser},
-  To = jid:decode(To_s),
+	From = #jid{user = F#jid.user, server = F#jid.server, resource = F#jid.user,
+	   luser = F#jid.luser, lserver = F#jid.lserver, lresource = F#jid.luser},
+	To = jid:decode(To_s),
 	{ok, #message{
-		id   = ID_s,
-		type = Type,
-		lang = Lang_s,
-		from = From,
-		to   = To,
-    body = Body,
-		sub_els = SubEls
+	  id   = ID_s,
+	  type = Type,
+	  lang = Lang_s,
+	  from = From,
+	  to   = To,
+	  body = Body,
+	  sub_els = SubEls
 	}}
-    catch _:{bad_jid, To_s} ->
+	  catch _:{bad_jid, To_s} ->
 	    ?ERROR_MSG("failed to get 'to' JID from archived XML ~p", [El]),
 	    {error, bad_jid_to};
-		_:{bad_jid, From_s} ->
-			?ERROR_MSG("failed to 'from' JID from archived XML ~p", [El]),
-			{error, bad_jid_from}
-    end.
+	  _:{bad_jid, From_s} ->
+	    ?ERROR_MSG("failed to 'from' JID from archived XML ~p", [El]),
+	    {error, bad_jid_from}
+	  end.
