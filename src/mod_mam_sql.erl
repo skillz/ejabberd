@@ -32,7 +32,7 @@
 -export([init/2, remove_user/2, remove_room/3, delete_old_messages/3,
 	 extended_fields/0, store/7, write_prefs/4, get_prefs/2, select/6, export/1]).
 
--export([get_room_history/5]).
+-export([get_room_history/3]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("xmpp.hrl").
@@ -392,7 +392,7 @@ make_archive_el(TS, XML, Peer, Kind, Nick, MsgType, JidRequestor, JidArchive) ->
 	    {error, invalid_xml}
     end.
 
-get_room_history(LServer, Room, Host, JidRequestor, MsgType) ->
+get_room_history(LServer, Room, Host) ->
 	   JidArchive = jid:make(Room, Host),
 	   RoomJid = jid:encode(JidArchive),
 	   case catch ejabberd_sql:sql_query(

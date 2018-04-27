@@ -39,7 +39,7 @@
 	 get_commands_spec/0, msg_to_el/4, get_room_config/4, set_room_option/3,
 	 offline_message/1, export/1]).
 
--export([get_room_history/5]).
+-export([get_room_history/3]).
 
 -include("xmpp.hrl").
 -include("logger.hrl").
@@ -950,10 +950,10 @@ send(Msgs, Count, IsComplete,
 	    ignore
     end.
 
-get_room_history(ServerHost, Room, Host, JidRequestor, MsgType) ->
+get_room_history(ServerHost, Room, Host) ->
     LServer = jid:nameprep(ServerHost),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
-    Mod:get_room_history(LServer, Room, Host, JidRequestor, MsgType).
+    Mod:get_room_history(LServer, Room, Host).
 
 -spec make_rsm_out([{binary(), integer(), xmlel()}], non_neg_integer()) -> rsm_set().
 make_rsm_out([], Count) ->

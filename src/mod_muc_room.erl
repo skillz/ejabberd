@@ -150,7 +150,7 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
 				  jid = jid:make(Room, Host),
 				  room_queue = RoomQueue,
 				  room_shaper = Shaper}),
-    NewState = get_history_upon_init(State, jid:make(Room, Host)),
+    NewState = get_history_upon_init(State),
     add_to_log(room_existence, started, NewState),
     {ok, normal_state, NewState}.
 
@@ -2020,14 +2020,11 @@ extract_password(#iq{} = IQ) ->
 	    false
     end.
 
-get_history_upon_init(StateData, From) ->
-    MsgType = {groupchat, moderator, StateData},
+get_history_upon_init(StateData) ->
     ServerHost = StateData#state.server_host,
     Room = StateData#state.room,
     Host = StateData#state.host,
-    MessageHistory = mod_mam:get_room_history(
-    ServerHost, Room, Host,
-    jid:remove_resource(From), MsgType),
+    MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host),
     NewStateData = lists:foldl(
       fun([{FromJID, FromNick, {_, UnarchivedMessage}}], SD) ->
         add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD)
