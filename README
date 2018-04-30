@@ -2,6 +2,9 @@
 
 - See [ejabberd original](https://github.com/processone/ejabberd) for information about the original.
 
+## Staging/Produciton troubleshooting guide
+
+[Here is a link to the troubleshooting guide!](https://github.com/skillz/chat-administration-service/wiki/Ejabberd-Troubleshooting-Guide)
 
 ## Build
 
@@ -63,7 +66,9 @@ make && sudo make install
 - In `/src/mod_muc_room.erl` the flow for an incoming muc subscription message is changed.
   -  Now when a user is online with a muc subscription to a room and a message is sent in that room, the user with the subscription will not get the message directly and the offline message flow will occur (in the original, the user would get the message directly sent to them).
 - At line 4036 the `is_privacy_allow` method was added and from lines 4059 until the end of the `send_wrapped` method; the flow was modified.
-- We removed muc rooms from being loaded into memory upon startup
-- When a room does not exist during a join room attempt, it is created.
-- When a room is created the archive table is queried for the latest 20 messages from that room.
-- A new SQL table is created for subscriptions.  Subscriptions used to only reside in the muc objects, and when they were removed we lost subscriptions.
+- We removed muc rooms from being loaded into memory upon startup.  See [this](https://github.com/skillz/ejabberd/pull/25) PR.
+- When a room does not exist during a join room attempt, it is created.  See [this](https://github.com/skillz/ejabberd/pull/50/files) PR.
+- When a room is created the archive table is queried for the latest 20 messages from that room.  See [this](https://github.com/skillz/ejabberd/pull/58) PR.
+- Admins can now re-create rooms.  See [this](https://github.com/skillz/ejabberd/pull/33) PR.
+- A new SQL table is created for subscriptions.  Subscriptions used to only reside in the muc objects, and when they were removed we lost subscriptions.  See [this](https://github.com/skillz/ejabberd/pull/56) PR.
+- When all occupants leave a muc room, it is now removed from memory.  See [this](https://github.com/skillz/ejabberd/pull/57) PR.
