@@ -60,6 +60,10 @@ make && sudo make install
 - `make && make install` should be run to re-build any local changes then restart ejabberd with `./ejabberdctl restart` or `./ejabberdctl stop` then `./ejabberdctl start` (ejabberdctl is in the sbin directory of your installation on mac and in the bin directory on ubuntu).
 
 ### Differences between Fork and Original
-- The only major change is that in `/src/mod_muc_room.erl` the flow for an incoming muc subscription message is changed.
-- Now when a user is online with a muc subscription to a room and a message is sent in that room, the user with the subscription will not get the message directly and the offline message flow will occur (in the original, the user would get the message directly sent to them).
+- In `/src/mod_muc_room.erl` the flow for an incoming muc subscription message is changed.
+  -  Now when a user is online with a muc subscription to a room and a message is sent in that room, the user with the subscription will not get the message directly and the offline message flow will occur (in the original, the user would get the message directly sent to them).
 - At line 4036 the `is_privacy_allow` method was added and from lines 4059 until the end of the `send_wrapped` method; the flow was modified.
+- We removed muc rooms from being loaded into memory upon startup
+- When a room does not exist during a join room attempt, it is created.
+- When a room is created the archive table is queried for the latest 20 messages from that room.
+- A new SQL table is created for subscriptions.  Subscriptions used to only reside in the muc objects, and when they were removed we lost subscriptions.
