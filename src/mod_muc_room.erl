@@ -2028,7 +2028,6 @@ get_history_upon_init(StateData) ->
     MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host),
     NewStateData = lists:foldl(
       fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
-	      TSInt = erlang:list_to_int(TS),
         TimeStamp = {TSInt div 1000000, TSInt, TSInt rem 1000000},
         add_message_to_history(FromNick, FromJID,
 	        UnarchivedMessage, SD, TimeStamp)

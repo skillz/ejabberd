@@ -397,7 +397,7 @@ get_room_history(LServer, Room, Host) ->
 	   RoomJid = jid:encode(JidArchive),
 	   case catch ejabberd_sql:sql_query(
 	      LServer,
-	      ?SQL("select @(bare_peer)s, @(nick)s, @(xml)s, @(timestamp)s from archive "
+	      ?SQL("select @(bare_peer)s, @(nick)s, @(xml)s, @(timestamp)d from archive "
 	           "where username=%(RoomJid)s "
 	           "order by timestamp desc limit 50;")) of
 	{selected, Rows} ->
