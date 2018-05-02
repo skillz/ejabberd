@@ -399,13 +399,13 @@ get_room_history(LServer, Room, Host) ->
 	      LServer,
 	      ?SQL("select @(bare_peer)s, @(nick)s, @(xml)s from archive "
 	           "where username=%(RoomJid)s "
-	           "order by timestamp ASC limit 50;")) of
+	           "order by timestamp desc limit 50;")) of
 	{selected, Rows} ->
 	   lists:map(
 	      fun({FromJID, FromNick, XML}) ->
 	         Message = xml_to_unarchived_msg(XML),
 	         [{jid:decode(FromJID), FromNick, Message}]
-	      end, Rows);
+	      end, lists:reverse(Rows));
 	Err ->
 	   ?INFO_MSG("Could not retrieve messages from archive: ~p", [Err]),
 	   []
