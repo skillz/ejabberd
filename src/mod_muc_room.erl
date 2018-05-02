@@ -2028,9 +2028,7 @@ get_history_upon_init(StateData) ->
     MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host),
     NewStateData = lists:foldl(
       fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
-	      EpochStart = {{1970, 1, 1}, {0, 0, 0}},
-	      Epoch = calendar:datetime_to_gregorian_seconds(EpochStart),
-	      TimeStamp = calendar:gregorian_seconds_to_datetime(TS + Epoch),
+	      TimeStamp = {TS div 1000000, TS, TS rem 1000000},
         add_message_to_history(FromNick, FromJID,
 	        UnarchivedMessage, SD, TimeStamp)
       end, StateData, MessageHistory),
