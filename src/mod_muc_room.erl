@@ -2026,8 +2026,10 @@ get_history_upon_init(StateData) ->
     Host = StateData#state.host,
     MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host),
     NewStateData = lists:foldl(
-      fun([{FromJID, FromNick, {_, UnarchivedMessage}}], SD) ->
-        add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD)
+      fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
+        TimeStamp = {TS div 1000000, TS, TS rem 1000000},
+        add_message_to_history(FromNick, FromJID,
+          UnarchivedMessage, SD, TimeStamp)
       end, StateData, MessageHistory),
     NewStateData.
 
@@ -2442,10 +2444,12 @@ lqueue_cut(Q, N) ->
 
 -spec add_message_to_history(binary(), jid(), message(), state()) -> state().
 add_message_to_history(FromNick, FromJID, Packet, StateData) ->
+  TimeStamp = p1_time_compat:timestamp(),
+  add_message_to_history(FromNick, FromJID, Packet, StateData, TimeStamp).
+add_message_to_history(FromNick, FromJID, Packet, StateData, TimeStamp) ->
     add_to_log(text, {FromNick, Packet}, StateData),
     case check_subject(Packet) of
 	false ->
-	    TimeStamp = p1_time_compat:timestamp(),
 	    AddrPacket = case (StateData#state.config)#config.anonymous of
 			     true -> Packet;
 			     false ->
@@ -2454,6 +2458,7 @@ add_message_to_history(FromNick, FromJID, Packet, StateData) ->
 								 jid = FromJID}]},
 				 xmpp:set_subtag(Packet, Addresses)
 			 end,
+
 	    TSPacket = xmpp_util:add_delay_info(
 			 AddrPacket, StateData#state.jid, TimeStamp),
 	    SPacket = xmpp:set_from_to(
