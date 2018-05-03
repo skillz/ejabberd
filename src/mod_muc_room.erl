@@ -478,9 +478,8 @@ handle_event({service_message, Msg}, _StateName,
       MessagePkt,
       ?NS_MUCSUB_NODES_MESSAGES,
       StateData),
-    TimeStamp = p1_time_compat:timestamp(),
     NSD = add_message_to_history(<<"">>,
-				 StateData#state.jid, MessagePkt, StateData, TimeStamp),
+				 StateData#state.jid, MessagePkt, StateData),
     {next_state, normal_state, NSD};
 handle_event({destroy, Reason}, _StateName,
 	     StateData) ->
@@ -760,9 +759,9 @@ process_groupchat_message(#message{from = From, lang = Lang} = Packet, StateData
 			       NewPacket, Node, NewStateData1),
 			     NewStateData2 = case has_body_or_subject(NewPacket) of
 					       true ->
-						   TimeStamp = p1_time_compat:timestamp(),
 						   add_message_to_history(FromNick, From,
-									  NewPacket, NewStateData1, TimeStamp);
+									  NewPacket,
+									  NewStateData1);
 					       false ->
 						   NewStateData1
 					     end,
@@ -2030,7 +2029,7 @@ get_history_upon_init(StateData) ->
       fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
         TimeStamp = {TS div 1000000, TS, TS rem 1000000},
         add_message_to_history(FromNick, FromJID,
-	        UnarchivedMessage, SD, TimeStamp)
+          UnarchivedMessage, SD, TimeStamp)
       end, StateData, MessageHistory),
     NewStateData.
 
@@ -2443,7 +2442,10 @@ lqueue_cut(Q, N) ->
     {_, Q1} = p1_queue:out(Q),
     lqueue_cut(Q1, N - 1).
 
--spec add_message_to_history(binary(), jid(), message(), state(), any()) -> state().
+-spec add_message_to_history(binary(), jid(), message(), state()) -> state().
+add_message_to_history(FromNick, FromJID, Packet, StateData) ->
+  TimeStamp = p1_time_compat:timestamp(),
+  add_message_to_history(FromNick, FromJID, Packet, StateData, TimeStamp).
 add_message_to_history(FromNick, FromJID, Packet, StateData, TimeStamp) ->
     add_to_log(text, {FromNick, Packet}, StateData),
     case check_subject(Packet) of
@@ -2456,6 +2458,7 @@ add_message_to_history(FromNick, FromJID, Packet, StateData, TimeStamp) ->
 								 jid = FromJID}]},
 				 xmpp:set_subtag(Packet, Addresses)
 			 end,
+
 	    TSPacket = xmpp_util:add_delay_info(
 			 AddrPacket, StateData#state.jid, TimeStamp),
 	    SPacket = xmpp:set_from_to(
