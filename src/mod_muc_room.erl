@@ -2027,7 +2027,11 @@ get_history_upon_init(StateData) ->
     MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host),
     NewStateData = lists:foldl(
       fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
-        TimeStamp = {TS div 1000000, TS, TS rem 1000000},
+        Conv = 1000000,
+        TimeStamp = {
+          TS div Conv div Conv,
+          TS div Conv rem Conv,
+          TS rem Conv},
         add_message_to_history(FromNick, FromJID,
           UnarchivedMessage, SD, TimeStamp)
       end, StateData, MessageHistory),
