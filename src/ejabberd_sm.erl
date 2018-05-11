@@ -739,12 +739,14 @@ route_message(#message{to = To, type = Type} = Packet) ->
 			end,
 			PrioRes);
       _ ->
+	    ?DEBUG("This packet will be used:~n~s", [xmpp:pp(Packet)]),
 	    case ejabberd_auth:user_exists(LUser, LServer) andalso
 		is_privacy_allow(Packet) of
 		true ->
 		    ejabberd_hooks:run_fold(offline_message_hook,
 					    LServer, {bounce, Packet}, []);
 		false ->
+		    ?DEBUG("Packet wasnt allowed due to privacy list: ~p", [Packet]),
 		    Err = xmpp:err_service_unavailable(),
 		    ejabberd_router:route_error(Packet, Err)
 	    end
