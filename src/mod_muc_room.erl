@@ -4093,7 +4093,7 @@ send_wrapped(From, To, Packet, Node, State) ->
 		    error -> false
 		end,
 
-    ?DEBUG("User is offline: ~p  and is in room: ~p ", [IsOffline, IsInRoom]),
+    ?DEBUG("User is offline: ~p and is in room: ~p ", [IsOffline, IsInRoom]),
     if
     	IsSubscriber; IsOffline ->
         case ?DICT:find(LBareTo, State#state.subscribers) of
