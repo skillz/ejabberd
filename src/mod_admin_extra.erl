@@ -1535,12 +1535,13 @@ build_packet(Type, Subject, Body) ->
 
 %% Modified to use the offline message flow.  We don't have state here, so 
 %% an offline message will happen regardless of a user being online or not...
-send_stanza(_, ToString, Stanza) ->
+send_stanza(FromString, ToString, Stanza) ->
 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
+    From = jid:decode(FromString),
 	To = jid:decode(ToString),
     LServer = To#jid.lserver,
 	Pkt = xmpp:decode(El, ?NS_CLIENT, [ignore_els]),
-    ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Pkt}),
+    ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, xmpp:set_from_to(Pkt, From, To)}),
     ok.
 
 send_stanza_c2s(Username, Host, Resource, Stanza) ->
