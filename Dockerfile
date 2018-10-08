@@ -1,4 +1,4 @@
-FROM debian:jessie-slim
+FROM phusion/baseimage:0.9.22
 MAINTAINER Rafael Römhild <rafael@roemhild.de>
 
 ENV EJABBERD_BRANCH=17.08 \
@@ -57,7 +57,7 @@ RUN set -x \
     && apt-get update \
     && apt-get install -y $buildDeps $requiredAptPackages --no-install-recommends \
     && dpkg-reconfigure locales && \
-        locale-gen C.UTF-8 \
+        locale-gen en_US.UTF-8 \
     && /usr/sbin/update-locale LANG=C.UTF-8 \
     && echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen \
     && locale-gen \
