@@ -1,5 +1,4 @@
 FROM phusion/baseimage:0.9.22
-MAINTAINER Rafael Römhild <rafael@roemhild.de>
 
 ENV EJABBERD_BRANCH=17.08 \
     EJABBERD_USER=ejabberd \
