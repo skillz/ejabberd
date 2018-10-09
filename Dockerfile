@@ -1,6 +1,6 @@
 FROM phusion/baseimage:0.9.22
 
-ENV EJABBERD_BRANCH=17.08 \
+ENV EJABBERD_BRANCH=master \
     EJABBERD_USER=ejabberd \
     EJABBERD_HTTPS=true \
     EJABBERD_STARTTLS=true \
