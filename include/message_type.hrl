@@ -15,3 +15,5 @@
          ?VsFriendsMessageType, 
          ?NudgeMessageType
         ]).
+
+-define(SdkElementsPosition, 3).

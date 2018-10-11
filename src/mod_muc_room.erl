@@ -4086,7 +4086,7 @@ inspect_sdk_xmlels(_, _, Acc) -> Acc.
 
 -spec should_send_message(stanza(), jid()) -> boolean().
 should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
-    SdkEl = lists:nth(3, SubEls),
+    SdkEl = lists:nth(?SdkElementsPosition, SubEls),
     #xmlel{children = SdkChildren} = SdkEl,
     ShouldIgnore = lists:foldl(fun(Child, Acc) ->
         inspect_sdk_xmlels(User, Child, Acc)
