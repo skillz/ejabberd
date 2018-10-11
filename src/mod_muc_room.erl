@@ -4078,8 +4078,8 @@ inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
     [Children|_] = ChildrenList,
     {_, CData} = Children,
     case Name of
-      <<"message_type">> -> [User == CData|Acc];
-      <<"user_id">> -> [lists:member(binary_to_integer(CData), ?NoOfflineToSenderTypes)|Acc];
+      <<"user_id">> -> [User == CData|Acc];
+      <<"message_type">> -> [lists:member(binary_to_integer(CData), ?NoOfflineToSenderTypes)|Acc];
       _ -> Acc
     end;
 inspect_sdk_xmlels(_, _, Acc) -> Acc.
