@@ -4073,25 +4073,14 @@ is_privacy_allow(Packet) ->
     LServer = To#jid.server,
     allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
 
--spec check_if_message_type(binary(), binary()) -> boolean().
-check_if_message_type(<<"message_type">>, CData) ->
-    lists:member(binary_to_integer(CData), ?NoOfflineToSenderTypes);
-check_if_message_type(_, _) -> false.
-
--spec check_if_user_id(binary(), binary(), binary()) -> boolean().
-check_if_user_id(<<"user_id">>, CData, User) when CData == User -> true;
-check_if_user_id(_, _, _) -> false.
-
 -spec inspect_sdk_xmlels(binary(), map(), list()) -> list().
 inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
     [Children|_] = ChildrenList,
     {_, CData} = Children,
-    MessageTypeCheck = check_if_message_type(Name, CData),
-    UserIdCheck = check_if_user_id(Name, CData, User),
-    if
-         MessageTypeCheck -> [true|Acc];
-         UserIdCheck -> [true|Acc];
-         true -> Acc
+    case Name of
+      <<"message_type">> -> [User == CData|Acc];
+      <<"user_id">> -> [lists:member(binary_to_integer(CData), ?NoOfflineToSenderTypes)|Acc];
+      _ -> Acc
     end;
 inspect_sdk_xmlels(_, _, Acc) -> Acc.
 
