@@ -4075,28 +4075,33 @@ is_privacy_allow(Packet) ->
 
 -spec check_if_message_type(binary(), binary()) -> boolean().
 check_if_message_type(<<"message_type">>, CData) ->
-    lists:member(binary_to_integer(CData), [?NoOfflineToSenderTypes]);
+    lists:member(binary_to_integer(CData), ?NoOfflineToSenderTypes);
 check_if_message_type(_, _) -> false.
 
 -spec check_if_user_id(binary(), binary(), binary()) -> boolean().
 check_if_user_id(<<"user_id">>, CData, User) when CData == User -> true;
 check_if_user_id(_, _, _) -> false.
 
+-spec inspect_sdk_xmlels(binary(), map(), list()) -> list().
+inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
+    [Children|_] = ChildrenList,
+    {_, CData} = Children,
+    MessageTypeCheck = check_if_message_type(Name, CData),
+    UserIdCheck = check_if_user_id(Name, CData, User),
+    if
+         MessageTypeCheck -> [true|Acc];
+         UserIdCheck -> [true|Acc];
+         true -> Acc
+    end;
+inspect_sdk_xmlels(_, _, Acc) -> Acc.
+
 -spec should_send_message(stanza(), jid()) -> boolean().
 should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
-%% Probs need a step to get the right subels here.
+    SdkEl = lists:nth(3, SubEls),
+    #xmlel{children = SdkChildren} = SdkEl,
     ShouldIgnore = lists:foldl(fun(X, Acc) ->
-        #xmlel{name = Name, children = Children} = X,
-        {_, CData} = Children,
-        MessageTypeCheck = check_if_message_type(Name, CData),
-        UserIdCheck = check_if_user_id(Name, CData, User),
-        {_, CData} = Children,
-        if
-             MessageTypeCheck -> [true|Acc];
-             UserIdCheck -> [true|Acc];
-            true -> Acc
-        end
-    end, [], SubEls),
+        inspect_sdk_xmlels(User, X, Acc)
+    end, [], SdkChildren),
     ShouldIgnore /= [true, true].
 
 %% If they are not in the room, and the message_type isn't in the list of

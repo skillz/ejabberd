@@ -12,6 +12,6 @@
 
 -define(NoOfflineToSenderTypes, 
         [
-         [?VsFriendsMessageType], 
-         [?NudgeMessageType]
+         ?VsFriendsMessageType, 
+         ?NudgeMessageType
         ]).
