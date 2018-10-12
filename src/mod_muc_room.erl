@@ -55,6 +55,8 @@
 
 -include("mod_muc_room.hrl").
 
+-include("message_type.hrl").
+
 -define(MAX_USERS_DEFAULT_LIST,
 	[5, 10, 20, 30, 50, 100, 200, 500, 1000, 2000, 5000]).
 
@@ -4071,6 +4073,35 @@ is_privacy_allow(Packet) ->
     LServer = To#jid.server,
     allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
 
+-spec inspect_sdk_xmlels(binary(), map(), list()) -> list().
+inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
+    [Children|_] = ChildrenList,
+    {_, CData} = Children,
+    case Name of
+      <<"user_id">> -> [User == CData|Acc];
+      <<"message_type">> -> [lists:member(binary_to_integer(CData), ?NoOfflineToSenderTypes)|Acc];
+      _ -> Acc
+    end;
+inspect_sdk_xmlels(_, _, Acc) -> Acc.
+
+-spec should_send_message(stanza(), jid()) -> boolean().
+should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
+    SdkEl = lists:nth(?SdkElementsPosition, SubEls),
+    #xmlel{children = SdkChildren} = SdkEl,
+    ShouldIgnore = lists:foldl(fun(Child, Acc) ->
+        inspect_sdk_xmlels(User, Child, Acc)
+    end, [], SdkChildren),
+    ShouldIgnore /= [true, true].
+
+%% If they are not in the room, and the message_type isn't in the list of
+%% specified message_types, and the to user doesn't match the user_id then
+%% send to the offline message hook, otherwise just send to the room.
+%% (Won't update offline message count).
+-spec send_to_room_or_offline(boolean(), boolean(), stanza(), binary()) -> any().
+send_to_room_or_offline(false, true, Packet, LServer) ->
+    ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet});
+send_to_room_or_offline(_, _, Packet, _) -> ejabberd_router:route(Packet).
+
 -spec send_wrapped(jid(), jid(), stanza(), binary(), state()) -> ok.
 send_wrapped(From, To, Packet, Node, State) ->
     LTo = jid:tolower(To),
@@ -4107,12 +4138,7 @@ send_wrapped(From, To, Packet, Node, State) ->
                       ?DEBUG("This packet will be used:~n~s", [xmpp:pp(PacketToSend)]),
                       case is_privacy_allow(PrivacyCheckPacket) of
                           true ->
-                          	if
-                          		IsInRoom ->
-                            		ejabberd_router:route(PacketToSend);
-                            	true ->
-                            		ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
-                            end;
+                            send_to_room_or_offline(IsInRoom, should_send_message(Packet, To), PacketToSend, LServer);
                           false ->
                             ?DEBUG("Packet wasnt allowed due to privacy list: ~p", [Packet])
                       end;
