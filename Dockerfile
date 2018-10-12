@@ -23,7 +23,7 @@ RUN apt-get update \
     g++
 
 # install ejabberd
-ARG EJABBERD_HOME=/root/ejabberd
+ARG EJABBERD_HOME=/opt/ejabberd
 ARG MY_EJABBERD_HOME=/root/my-ejabberd
 
 RUN mkdir $EJABBERD_HOME

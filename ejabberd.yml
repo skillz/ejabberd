@@ -96,7 +96,7 @@ log_rate_limit: 100
 hosts:
   - "dev-ejabberd"
   - "localhost"
-  - "192.168.22.37"
+  - "chat.dev.skillz.com"
 
 ##
 ## route_subdomains: Delegate subdomains to other XMPP servers.
@@ -154,7 +154,7 @@ listen:
 
 auth_method: http
 auth_opts:
-  host: "http://localhost:9100"
+  host: "http://dev-ts:9100"
   connection_pool_size: 8
   connection_opts: []
   basic_auth: "chat:zA3B7HGP83x99MoKvRXR967fk8"
@@ -168,7 +168,7 @@ disable_sasl_mechanisms:
 default_db: sql
 
 sql_type: mysql
-sql_server: "127.0.0.1"
+sql_server: "dev-mysql-ts"
 
 sql_port: 3306
 sql_database: "ejabberd"
@@ -202,6 +202,8 @@ acl:
       - "admin": "chat.dev.skillz.com"
       - "admin": "localhost"
       - "admin": "192.168.22.37"
+      - "admin": "dev-ejabberd"
+      - "skillz-cas": "dev-ejabberd"
       - "skillz-cas": "chat.dev.skillz.com"
       - "skillz-cas": "localhost"
       - "skillz-cas": "192.168.22.37"
