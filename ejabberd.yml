@@ -154,7 +154,7 @@ listen:
 
 auth_method: http
 auth_opts:
-  host: "http://dev-ts:9100"
+  host: "http://host.docker.internal:9100"
   connection_pool_size: 8
   connection_opts: []
   basic_auth: "chat:zA3B7HGP83x99MoKvRXR967fk8"
@@ -347,6 +347,7 @@ api_permissions:
     what:
       - "send_stanza"
       - "kick_session"
+      - "status"
   "public commands":
     who:
       - ip: "127.0.0.1/8"
