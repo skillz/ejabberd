@@ -30,7 +30,7 @@ RUN mkdir $EJABBERD_HOME
 RUN git clone https://github.com/skillz/ejabberd.git --branch development $EJABBERD_HOME
 COPY ejabberd.yml $EJABBERD_HOME/config/ejabberd.yml
 RUN cd $EJABBERD_HOME && ./autogen.sh
-RUN cd $EJABBERD_HOME && ./configure --prefix=$MY_EJABBERD_HOME --enable-elixir
+RUN cd $EJABBERD_HOME && ./configure --prefix=$MY_EJABBERD_HOME --enable-elixir --enable-odbc --enable-mysql
 RUN cd $EJABBERD_HOME && make && make install
 COPY ejabberd.yml $MY_EJABBERD_HOME/etc/ejabberd/ejabberd.yml
 

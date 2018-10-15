@@ -152,7 +152,9 @@ listen:
 # comment this line and enable the correct ones.
 #
 
-auth_method: http
+auth_method:
+  - internal
+  - http
 auth_opts:
   host: "http://host.docker.internal:9100"
   connection_pool_size: 8
@@ -348,6 +350,8 @@ api_permissions:
       - "send_stanza"
       - "kick_session"
       - "status"
+      - "get_room_options"
+      - "register"
   "public commands":
     who:
       - ip: "127.0.0.1/8"
