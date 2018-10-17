@@ -4099,7 +4099,7 @@ should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
 %% (Won't update offline message count).
 -spec send_to_room_or_offline(boolean(), boolean(), stanza(), binary()) -> any().
 send_to_room_or_offline(false, true, Packet, LServer) ->
-    ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet});
+    ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet}, []);
 send_to_room_or_offline(_, _, Packet, _) -> ejabberd_router:route(Packet).
 
 -spec send_wrapped(jid(), jid(), stanza(), binary(), state()) -> ok.
