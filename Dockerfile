@@ -9,6 +9,7 @@ RUN apt-get update \
     make \
     gcc \
     expat \
+    wget \
     libyaml-dev \
     erlang \
     erlang-p1-mysql \
@@ -23,8 +24,8 @@ RUN apt-get update \
     g++
 
 # install ejabberd
-ARG EJABBERD_HOME=/opt/ejabberd
-ARG MY_EJABBERD_HOME=/root/my-ejabberd
+ARG EJABBERD_HOME=/root/ejabberd
+ARG MY_EJABBERD_HOME=/opt/ejabberd
 
 RUN mkdir $EJABBERD_HOME
 RUN git clone https://github.com/skillz/ejabberd.git --branch development $EJABBERD_HOME
