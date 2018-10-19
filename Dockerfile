@@ -39,7 +39,7 @@ ADD ./run.sh /sbin/run
 COPY 100_create_default_users.sh $EJABBERD_HOME
 ENTRYPOINT ["run"]
 # registering skillz-cas user
-$MY_EJABBERD_HOME/sbin/ejabberdctl register skillz-cas chat.dev.skillz.com password
+RUN $MY_EJABBERD_HOME/sbin/ejabberdctl register skillz-cas chat.dev.skillz.com password
 
 # Clean up APT.
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
