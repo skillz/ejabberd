@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CTL="./root/my-ejabberd/sbin/ejabberdctl"
+CTL="/opt/ejabberd/sbin/ejabberdctl"
 
 printf "Registering default users\n"
 $CTL register admin chat.dev.skillz.com password
