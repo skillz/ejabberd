@@ -85,6 +85,8 @@
 -include("mod_privacy.hrl").
 -include("ejabberd_sm.hrl").
 -include("xmpp.hrl").
+-include("mod_muc_room.hrl").
+-include("mod_mam.hrl").
 
 %%%
 %%% gen_mod
@@ -1545,6 +1547,15 @@ wrap(From, To, Packet, Node) ->
 					    id = randoms:get_string(),
 					    xml_els = [El]}]}}]}.
 
+%% Kind of a bad hack.  We might want to add a funciton in mod_mam in the future
+%% to handle this case.
+spoof_muc_state(LServer, RoomJID) ->
+	#state{ 
+	   server_host = LServer, 
+	   jid = RoomJID, 
+	   config = #config{
+			mam = true}}.
+
 %% Note this doesn't filter what we are sending to it.  Don't pass along user generated
 %% messages :) (if you need to , fun the filter_packet hook!)
 send_stanza(FromString, ToString, Stanza) ->
@@ -1553,8 +1564,10 @@ send_stanza(FromString, ToString, Stanza) ->
 	From          = jid:decode(FromString),
 	To            = jid:decode(ToString),
 	LServer       = From#jid.lserver,
-	Packet        = xmpp:decode(El, ?NS_CLIENT, [ignore_els]),
-	Wrapped       = wrap(To, From, Packet, ?NS_MUCSUB_NODES_MESSAGES),
+	Packet        = xmpp:decode(El, ?NS_CLIENT, [ignore_els]), 
+	ArchivePacket = ejabberd_hooks:run_fold(muc_filter_message, LServer, Packet, 
+											[spoof_muc_state(LServer, To), From#jid.user]),
+	Wrapped       = wrap(To, From, ArchivePacket, ?NS_MUCSUB_NODES_MESSAGES),
 	PacketToSend  = xmpp:set_from_to(Wrapped, To, From),
 	ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
     catch _:{xmpp_codec, Why} ->
