@@ -1536,14 +1536,14 @@ build_packet(Type, Subject, Body) ->
 %% Taken from mod_muc_room 
 -spec wrap(jid(), jid(), stanza(), binary()) -> message().
 wrap(From, To, Packet, Node) ->
-	El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
-	#message{ 
-	   sub_els = [#ps_event{ 
-					 items = #ps_items{ 
-								node = Node, 
-								items = [#ps_item{ 
-											id = randoms:get_string(), 
-											xml_els = [El]}]}}]}.
+    El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
+    #message{
+       sub_els = [#ps_event{
+		     items = #ps_items{
+				node = Node,
+				items = [#ps_item{
+					    id = randoms:get_string(),
+					    xml_els = [El]}]}}]}.
 
 %% Note this doesn't filter what we are sending to it.  Don't pass along user generated
 %% messages :) (if you need to , fun the filter_packet hook!)
