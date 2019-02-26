@@ -1533,13 +1533,30 @@ build_packet(Type, Subject, Body) ->
 	     body = xmpp:mk_text(Body),
 	     subject = xmpp:mk_text(Subject)}.
 
+%% Taken from mod_muc_room 
+-spec wrap(jid(), jid(), stanza(), binary()) -> message().
+wrap(From, To, Packet, Node) ->
+    El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
+    #message{
+       sub_els = [#ps_event{
+		     items = #ps_items{
+				node = Node,
+				items = [#ps_item{
+					    id = randoms:get_string(),
+					    xml_els = [El]}]}}]}.
+
+%% Note this doesn't filter what we are sending to it.  Don't pass along user generated
+%% messages :) (if you need to , fun the filter_packet hook!)
 send_stanza(FromString, ToString, Stanza) ->
     try
 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
-	From = jid:decode(FromString),
-	To = jid:decode(ToString),
-	Pkt = xmpp:decode(El, ?NS_CLIENT, [ignore_els]),
-	ejabberd_router:route(xmpp:set_from_to(Pkt, From, To))
+	From          = jid:decode(FromString),
+	To            = jid:decode(ToString),
+	LServer       = From#jid.lserver,
+	Packet        = xmpp:decode(El, ?NS_CLIENT, [ignore_els]),
+	Wrapped       = wrap(To, From, Packet, ?NS_MUCSUB_NODES_MESSAGES),
+	PacketToSend  = xmpp:set_from_to(Wrapped, To, From),
+	ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
     catch _:{xmpp_codec, Why} ->
 	    io:format("incorrect stanza: ~s~n", [xmpp:format_error(Why)]),
 	    {error, Why};
