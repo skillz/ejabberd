@@ -1566,7 +1566,7 @@ send_stanza(FromString, ToString, Stanza) ->
 	LServer       = From#jid.lserver,
 	Packet        = xmpp:decode(El, ?NS_CLIENT, [ignore_els]), 
 	ArchivePacket = ejabberd_hooks:run_fold(muc_filter_message, LServer, Packet, 
-											[spoof_muc_state(LServer, To), From#jid.user]),
+	                                        [spoof_muc_state(LServer, To), From#jid.user]),
 	Wrapped       = wrap(To, From, ArchivePacket, ?NS_MUCSUB_NODES_MESSAGES),
 	PacketToSend  = xmpp:set_from_to(Wrapped, To, From),
 	ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
