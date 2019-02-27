@@ -969,7 +969,7 @@ process_presence(Nick, #presence{from = From, type = Type0} = Packet0, StateData
 	     drop ->
 		 {next_state, normal_state, StateData};
 	     #presence{} = Packet ->
-		 close_room_if_temporary_and_empty(
+		 close_room_without_occupants(
 		   do_process_presence(Nick, Packet, StateData))
 	   end;
        true ->
@@ -3808,11 +3808,7 @@ process_iq_mucsub(From, #iq{type = get, lang = Lang,
 		     fun(_, #subscriber{jid = J}, Acc) ->
 			     [J|Acc]
 		     end, [], StateData#state.subscribers),
-      NewStateData = case close_room_without_occupants(StateData) of
-    {stop, normal, _} -> stop;
-    {next_state, normal_state, SD} -> SD
-       end,
-	    {result, #muc_subscriptions{list = JIDs}, NewStateData};
+	    {result, #muc_subscriptions{list = JIDs}, StateData};
        true ->
 	    Txt = <<"Moderator privileges required">>,
 	    {error, xmpp:err_forbidden(Txt, Lang)}
