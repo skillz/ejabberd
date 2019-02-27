@@ -1557,13 +1557,13 @@ spoof_muc_state(LServer, RoomJID) ->
 			mam = true}}.
 
 get_offline_user(To, From) ->
-	FromUser = From#jid.user,
-	Room = To#jid.user,
-	Users = string:lexemes(Room, "-" ++ [[$\r,$\n]]),
+	FromUser      = From#jid.user,
+	Room          = To#jid.user,
+	Users         = string:lexemes(Room, "-" ++ [[$\r,$\n]]),
 	[User1|User2] = Users,
-	NewUser = case User1 of
+	NewUser       = case User1 of
 		FromUser -> hd(User2);
-		_ -> User1
+		_        -> User1
 	end,
 	From#jid{user = NewUser, luser = NewUser}.
 
