@@ -1562,10 +1562,8 @@ get_offline_user(To, From) ->
 	Users = string:lexemes(Room, "-" ++ [[$\r,$\n]]),
 	[User1|User2] = Users,
 	NewUser = case User1 of
-		FromUser ->
-			hd(User2);
-		_ ->
-			User1
+		FromUser -> hd(User2);
+		_ -> User1
 	end,
 	From#jid{user = NewUser, luser = NewUser}.
 
