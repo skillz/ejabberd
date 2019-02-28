@@ -156,8 +156,12 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
     add_to_log(room_existence, started, NewState),
     {ok, normal_state, NewState}.
 
+%% This is a top level call to normal_state to kill the muc room during any event.
+normal_state(Event, StateData) ->
+	{_, _, NewStateData} = normal_state(Event, StateData),
+	close_room_without_occupants(NewStateData);
 normal_state({route, <<"">>,
-	      #message{from = From, type = Type, lang = Lang} = Packet},
+              #message{from = From, type = Type, lang = Lang} = Packet},
 	     StateData) ->
     case is_user_online(From, StateData) orelse
 	is_subscriber(From, StateData) orelse
@@ -471,6 +475,9 @@ normal_state({route, ToNick,
 normal_state(_Event, StateData) ->
     {next_state, normal_state, StateData}.
 
+handle_event(Event, StateName, StateData) ->
+	{_, _, NewState} = handle_event(Event, StateName, StateData),
+	close_room_without_occupants(NewState);
 handle_event({service_message, Msg}, _StateName,
 	     StateData) ->
     MessagePkt = #message{type = groupchat, body = xmpp:mk_text(Msg)},
