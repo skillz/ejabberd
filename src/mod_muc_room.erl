@@ -162,7 +162,7 @@ normal_state(Event, StateData) ->
 	{_, _, NewStateData} = normal_state(Event, StateData, true),
 	close_room_without_occupants(NewStateData).
 normal_state({route, <<"">>,
-              #message{from = From, type = Type, lang = Lang} = Packet},
+	          #message{from = From, type = Type, lang = Lang} = Packet},
 	     StateData, _) ->
     case is_user_online(From, StateData) orelse
 	is_subscriber(From, StateData) orelse
@@ -476,9 +476,6 @@ normal_state({route, ToNick,
 normal_state(_Event, StateData, _) ->
     {next_state, normal_state, StateData}.
 
-handle_event(Event, StateName, StateData) ->
-	{_, _, NewState} = handle_event(Event, StateName, StateData),
-	close_room_without_occupants(NewState);
 handle_event({service_message, Msg}, _StateName,
 	     StateData) ->
     MessagePkt = #message{type = groupchat, body = xmpp:mk_text(Msg)},
