@@ -3330,13 +3330,14 @@ set_config(Opts, Config, ServerHost, Lang) ->
 
 -spec change_config(#config{}, state()) -> {result, undefined, state()}.
 change_config(Config, StateData) ->
-    send_config_change_info(Config, StateData),
+    NewStateData = StateData#state{config = Config},
+    send_config_change_info(Config, NewStateData),
     case {(StateData#state.config)#config.persistent,
 	  Config#config.persistent}
 	of
       {_, true} ->
 	  mod_muc:store_room(StateData#state.server_host,
-			     StateData#state.host, StateData#state.room, make_opts(StateData));
+			     StateData#state.host, StateData#state.room, make_opts(NewStateData));
       {true, false} ->
 	  mod_muc:forget_room(StateData#state.server_host,
 			      StateData#state.host, StateData#state.room);
@@ -3346,8 +3347,8 @@ change_config(Config, StateData) ->
 	  Config#config.members_only}
 	of
       {false, true} ->
-	  NSD1 = remove_nonmembers(StateData), {result, undefined, NSD1};
-      _ -> {result, undefined, StateData}
+	  NSD1 = remove_nonmembers(NewStateData), {result, undefined, NSD1};
+      _ -> {result, undefined, NewStateData}
     end.
 
 -spec send_config_change_info(#config{}, state()) -> ok.
