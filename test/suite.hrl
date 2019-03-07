@@ -1,7 +1,6 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("fast_xml/include/fxml.hrl").
 -include("ns.hrl").
--include("ejabberd.hrl").
 -include("mod_proxy65.hrl").
 -include("xmpp_codec.hrl").
 
@@ -67,12 +66,14 @@
          end)()).
 
 -define(match(Pattern, Result),
+    (fun() ->
 	case Result of
 	    Pattern ->
-		Pattern;
+		ok;
 	    Mismatch ->
 		suite:match_failure([Mismatch], [??Pattern])
-	end).
+	end
+    end)()).
 
 -define(COMMON_VHOST, <<"localhost">>).
 -define(MNESIA_VHOST, <<"mnesia.localhost">>).
@@ -84,6 +85,7 @@
 -define(EXTAUTH_VHOST, <<"extauth.localhost">>).
 -define(RIAK_VHOST, <<"riak.localhost">>).
 -define(S2S_VHOST, <<"s2s.localhost">>).
+-define(UPLOAD_VHOST, <<"upload.localhost">>).
 
 insert(Val, N, Tuple) ->
     L = tuple_to_list(Tuple),

@@ -5,7 +5,7 @@
 %%% Created : 31 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,6 @@
 
 -export([start/2, prep_stop/1, stop/1]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 
 %%%
@@ -42,33 +41,56 @@ start(normal, _Args) ->
     {T1, _} = statistics(wall_clock),
     ejabberd_logger:start(),
     write_pid_file(),
-    start_apps(),
+    start_included_apps(),
     start_elixir_application(),
     ejabberd:check_app(ejabberd),
     setup_if_elixir_conf_used(),
-    ejabberd_config:start(),
-    ejabberd_mnesia:start(),
-    file_queue_init(),
-    maybe_add_nameservers(),
-    case ejabberd_sup:start_link() of
-	{ok, SupPid} ->
-	    register_elixir_config_hooks(),
-	    ejabberd_cluster:wait_for_sync(infinity),
-	    {T2, _} = statistics(wall_clock),
-	    ?INFO_MSG("ejabberd ~s is started in the node ~p in ~.2fs",
-		      [?VERSION, node(), (T2-T1)/1000]),
-	    lists:foreach(fun erlang:garbage_collect/1, processes()),
-	    {ok, SupPid};
-	Err ->
-	    Err
+    case ejabberd_config:start() of
+	ok ->
+	    ejabberd_mnesia:start(),
+	    file_queue_init(),
+	    maybe_add_nameservers(),
+	    case ejabberd_sup:start_link() of
+		{ok, SupPid} ->
+		    ejabberd_system_monitor:start(),
+		    register_elixir_config_hooks(),
+		    ejabberd_cluster:wait_for_sync(infinity),
+		    ejabberd_hooks:run(ejabberd_started, []),
+		    {T2, _} = statistics(wall_clock),
+		    ?INFO_MSG("ejabberd ~s is started in the node ~p in ~.2fs",
+			      [ejabberd_config:get_version(),
+			       node(), (T2-T1)/1000]),
+		    lists:foreach(fun erlang:garbage_collect/1, processes()),
+		    {ok, SupPid};
+		Err ->
+		    ?CRITICAL_MSG("Failed to start ejabberd application: ~p", [Err]),
+		    ejabberd:halt()
+	    end;
+	{error, Reason} ->
+	    ?CRITICAL_MSG("Failed to start ejabberd application: ~p", [Reason]),
+	    ejabberd:halt()
     end;
 start(_, _) ->
     {error, badarg}.
+
+start_included_apps() ->
+    {ok, Apps} = application:get_key(ejabberd, included_applications),
+    lists:foreach(
+	fun(mnesia) ->
+	       ok;
+	   (lager)->
+	       ok;
+	   (os_mon)->
+	       ok;
+	   (App) ->
+	       application:ensure_all_started(App)
+	end, Apps).
 
 %% Prepare the application for termination.
 %% This function is called when an application is about to be stopped,
 %% before shutting down the processes of the application.
 prep_stop(State) ->
+    ejabberd_hooks:run(ejabberd_stopping, []),
     ejabberd_listener:stop_listeners(),
     ejabberd_sm:stop(),
     gen_mod:stop_modules(),
@@ -76,7 +98,8 @@ prep_stop(State) ->
 
 %% All the processes were killed when this function is called
 stop(_State) ->
-    ?INFO_MSG("ejabberd ~s is stopped in the node ~p", [?VERSION, node()]),
+    ?INFO_MSG("ejabberd ~s is stopped in the node ~p",
+	      [ejabberd_config:get_version(), node()]),
     delete_pid_file(),
     %%ejabberd_debug:stop(),
     ok.
@@ -137,16 +160,6 @@ file_queue_init() ->
 		       Path
 	       end,
     p1_queue:start(QueueDir).
-
-start_apps() ->
-    crypto:start(),
-    ejabberd:start_app(sasl),
-    ejabberd:start_app(ssl),
-    ejabberd:start_app(p1_utils),
-    ejabberd:start_app(fast_yaml),
-    ejabberd:start_app(fast_tls),
-    ejabberd:start_app(xmpp),
-    ejabberd:start_app(cache_tab).
 
 setup_if_elixir_conf_used() ->
   case ejabberd_config:is_using_elixir_config() of

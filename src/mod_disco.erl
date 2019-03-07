@@ -5,7 +5,7 @@
 %%% Created :  1 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -37,11 +37,11 @@
 	 get_local_features/5, get_local_services/5,
 	 process_sm_iq_items/1, process_sm_iq_info/1,
 	 get_sm_identity/5, get_sm_features/5, get_sm_items/5,
-	 get_info/5, transform_module_options/1, mod_opt_type/1, depends/2]).
+	 get_info/5, transform_module_options/1, mod_opt_type/1,
+	 mod_options/1, depends/2]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
-
+-include("translate.hrl").
 -include("xmpp.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("mod_roster.hrl").
@@ -50,23 +50,20 @@
 -type items_acc() :: {error, stanza_error()} | {result, [disco_item()]} | empty.
 
 start(Host, Opts) ->
-    IQDisc = gen_mod:get_opt(iqdisc, Opts, gen_iq_handler:iqdisc(Host)),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host,
 				  ?NS_DISCO_ITEMS, ?MODULE,
-				  process_local_iq_items, IQDisc),
+				  process_local_iq_items),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host,
 				  ?NS_DISCO_INFO, ?MODULE,
-				  process_local_iq_info, IQDisc),
+				  process_local_iq_info),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host,
-				  ?NS_DISCO_ITEMS, ?MODULE, process_sm_iq_items,
-				  IQDisc),
+				  ?NS_DISCO_ITEMS, ?MODULE, process_sm_iq_items),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host,
-				  ?NS_DISCO_INFO, ?MODULE, process_sm_iq_info,
-				  IQDisc),
+				  ?NS_DISCO_INFO, ?MODULE, process_sm_iq_info),
     catch ets:new(disco_extra_domains,
 		  [named_table, ordered_set, public,
 		   {heir, erlang:group_leader(), none}]),
-    ExtraDomains = gen_mod:get_opt(extra_domains, Opts, []),
+    ExtraDomains = gen_mod:get_opt(extra_domains, Opts),
     lists:foreach(fun (Domain) ->
 			  register_extra_domain(Host, Domain)
 		  end,
@@ -115,7 +112,7 @@ stop(Host) ->
     ok.
 
 reload(Host, NewOpts, OldOpts) ->
-    case gen_mod:is_equal_opt(extra_domains, NewOpts, OldOpts, []) of
+    case gen_mod:is_equal_opt(extra_domains, NewOpts, OldOpts) of
 	{false, NewDomains, OldDomains} ->
 	    lists:foreach(
 	      fun(Domain) ->
@@ -125,23 +122,6 @@ reload(Host, NewOpts, OldOpts) ->
 	      fun(Domain) ->
 		      unregister_extra_domain(Host, Domain)
 	      end, OldDomains -- NewDomains);
-	true ->
-	    ok
-    end,
-    case gen_mod:is_equal_opt(iqdisc, NewOpts, OldOpts, gen_iq_handler:iqdisc(Host)) of
-	{false, IQDisc, _} ->
-	    gen_iq_handler:add_iq_handler(ejabberd_local, Host,
-					  ?NS_DISCO_ITEMS, ?MODULE,
-					  process_local_iq_items, IQDisc),
-	    gen_iq_handler:add_iq_handler(ejabberd_local, Host,
-					  ?NS_DISCO_INFO, ?MODULE,
-					  process_local_iq_info, IQDisc),
-	    gen_iq_handler:add_iq_handler(ejabberd_sm, Host,
-					  ?NS_DISCO_ITEMS, ?MODULE, process_sm_iq_items,
-					  IQDisc),
-	    gen_iq_handler:add_iq_handler(ejabberd_sm, Host,
-					  ?NS_DISCO_INFO, ?MODULE, process_sm_iq_info,
-					  IQDisc);
 	true ->
 	    ok
     end.
@@ -195,10 +175,12 @@ process_local_iq_info(#iq{type = get, lang = Lang,
 
 -spec get_local_identity([identity()], jid(), jid(),
 			 binary(), binary()) ->	[identity()].
-get_local_identity(Acc, _From, _To, <<"">>, _Lang) ->
+get_local_identity(Acc, _From, To, <<"">>, _Lang) ->
+    Host = To#jid.lserver,
+    Name = gen_mod:get_module_opt(Host, ?MODULE, name),
     Acc ++ [#identity{category = <<"server">>,
 		      type = <<"im">>,
-		      name = <<"ejabberd">>}];
+		      name = Name}];
 get_local_identity(Acc, _From, _To, _Node, _Lang) ->
     Acc.
 
@@ -214,7 +196,7 @@ get_local_features(Acc, _From, To, <<"">>, _Lang) ->
 	    end,
     {result, lists:usort(
 	       lists:flatten(
-		 [<<"iq">>, <<"presence">>,
+		 [?NS_FEATURE_IQ, ?NS_FEATURE_PRESENCE,
 		  ?NS_DISCO_INFO, ?NS_DISCO_ITEMS, Feats,
 		  ejabberd_local:get_features(To#jid.lserver)]))};
 get_local_features(Acc, _From, _To, _Node, Lang) ->
@@ -256,7 +238,7 @@ get_vh_services(Host) ->
     Hosts = lists:sort(fun (H1, H2) ->
 			       byte_size(H1) >= byte_size(H2)
 		       end,
-		       ?MYHOSTS),
+		       ejabberd_config:get_myhosts()),
     lists:filter(fun (H) ->
 			 case lists:dropwhile(fun (VH) ->
 						      not
@@ -281,7 +263,7 @@ process_sm_iq_items(#iq{type = set, lang = Lang} = IQ) ->
 process_sm_iq_items(#iq{type = get, lang = Lang,
 			from = From, to = To,
 			sub_els = [#disco_items{node = Node}]} = IQ) ->
-    case is_presence_subscribed(From, To) of
+    case mod_roster:is_subscribed(From, To) of
 	true ->
 	    Host = To#jid.lserver,
 	    case ejabberd_hooks:run_fold(disco_sm_items, Host,
@@ -308,7 +290,7 @@ get_sm_items(Acc, From,
 	      {result, Its} -> Its;
 	      empty -> []
 	    end,
-    Items1 = case is_presence_subscribed(From, To) of
+    Items1 = case mod_roster:is_subscribed(From, To) of
 	       true -> get_user_resources(User, Server);
 	       _ -> []
 	     end,
@@ -326,21 +308,6 @@ get_sm_items(empty, From, To, _Node, Lang) ->
 	    {error, xmpp:err_not_allowed(Txt, Lang)}
     end.
 
--spec is_presence_subscribed(jid(), jid()) -> boolean().
-is_presence_subscribed(#jid{luser = User, lserver = Server},
-		       #jid{luser = User, lserver = Server}) -> true;
-is_presence_subscribed(#jid{luser = FromUser, lserver = FromServer},
-		       #jid{luser = ToUser, lserver = ToServer}) ->
-    lists:any(fun (#roster{jid = {SubUser, SubServer, _}, subscription = Sub})
-		      when FromUser == SubUser, FromServer == SubServer,
-			   Sub /= none ->
-		      true;
-		  (_RosterEntry) ->
-		      false
-	      end,
-	      ejabberd_hooks:run_fold(roster_get, ToServer, [],
-				      [{ToUser, ToServer}])).
-
 -spec process_sm_iq_info(iq()) -> iq().
 process_sm_iq_info(#iq{type = set, lang = Lang} = IQ) ->
     Txt = <<"Value 'set' of 'type' attribute is not allowed">>,
@@ -348,7 +315,7 @@ process_sm_iq_info(#iq{type = set, lang = Lang} = IQ) ->
 process_sm_iq_info(#iq{type = get, lang = Lang,
 		       from = From, to = To,
 		       sub_els = [#disco_info{node = Node}]} = IQ) ->
-    case is_presence_subscribed(From, To) of
+    case mod_roster:is_subscribed(From, To) of
 	true ->
 	    Host = To#jid.lserver,
 	    Identity = ejabberd_hooks:run_fold(disco_sm_identity,
@@ -384,15 +351,21 @@ get_sm_identity(Acc, _From,
 
 -spec get_sm_features(features_acc(), jid(), jid(), binary(), binary()) ->
 			     {error, stanza_error()} | {result, [binary()]}.
-get_sm_features(empty, From, To, _Node, Lang) ->
+get_sm_features(empty, From, To, Node, Lang) ->
     #jid{luser = LFrom, lserver = LSFrom} = From,
     #jid{luser = LTo, lserver = LSTo} = To,
     case {LFrom, LSFrom} of
-      {LTo, LSTo} -> {error, xmpp:err_item_not_found()};
-      _ ->
+	{LTo, LSTo} ->
+	    case Node of
+		<<"">> -> {result, [?NS_DISCO_INFO, ?NS_DISCO_ITEMS]};
+		_ -> {error, xmpp:err_item_not_found()}
+	    end;
+	_ ->
 	    Txt = <<"Query to another users is forbidden">>,
 	    {error, xmpp:err_not_allowed(Txt, Lang)}
     end;
+get_sm_features({result, Features}, _From, _To, <<"">>, _Lang) ->
+    {result, [?NS_DISCO_INFO, ?NS_DISCO_ITEMS|Features]};
 get_sm_features(Acc, _From, _To, _Node, _Lang) -> Acc.
 
 -spec get_user_resources(binary(), binary()) -> [disco_item()].
@@ -438,7 +411,7 @@ get_info(Acc, _, _, _Node, _) -> Acc.
 
 -spec get_fields(binary(), module()) -> [xdata_field()].
 get_fields(Host, Module) ->
-    Fields = gen_mod:get_module_opt(Host, ?MODULE, server_info, []),
+    Fields = gen_mod:get_module_opt(Host, ?MODULE, server_info),
     Fields1 = lists:filter(fun ({Modules, _, _}) ->
 				   case Modules of
 				       all -> true;
@@ -447,7 +420,9 @@ get_fields(Host, Module) ->
 				   end
 			   end,
 			   Fields),
-    [#xdata_field{var = Var, values = Values} || {_, Var, Values} <- Fields1].
+    [#xdata_field{var = Var,
+		  type = 'list-multi',
+		  values = Values} || {_, Var, Values} <- Fields1].
 
 -spec depends(binary(), gen_mod:opts()) -> [].
 depends(_Host, _Opts) ->
@@ -455,7 +430,7 @@ depends(_Host, _Opts) ->
 
 mod_opt_type(extra_domains) ->
     fun (Hs) -> [iolist_to_binary(H) || H <- Hs] end;
-mod_opt_type(iqdisc) -> fun gen_iq_handler:check_type/1;
+mod_opt_type(name) -> fun iolist_to_binary/1;
 mod_opt_type(server_info) ->
     fun (L) ->
 	    lists:map(fun (Opts) ->
@@ -465,5 +440,9 @@ mod_opt_type(server_info) ->
 			      {Mods, Name, URLs}
 		      end,
 		      L)
-    end;
-mod_opt_type(_) -> [extra_domains, iqdisc, server_info].
+    end.
+
+mod_options(_Host) ->
+    [{extra_domains, []},
+     {server_info, []},
+     {name, ?T("ejabberd")}].

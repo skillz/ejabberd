@@ -5,7 +5,7 @@
 %%% Created : 31 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -33,7 +33,6 @@
 -export([start_link/0, init/1, opt_type/1,
 	 config_reloaded/0, start_host/1, stop_host/1]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 
 start_link() ->
@@ -56,7 +55,7 @@ get_specs() ->
 		  {ok, Spec} -> [Spec];
 		  undefined -> []
 	      end
-      end, ?MYHOSTS).
+      end, ejabberd_config:get_myhosts()).
 
 -spec get_spec(binary()) -> {ok, supervisor:child_spec()} | undefined.
 get_spec(Host) ->
@@ -72,7 +71,7 @@ get_spec(Host) ->
 
 -spec config_reloaded() -> ok.
 config_reloaded() ->
-    lists:foreach(fun start_host/1, ?MYHOSTS).
+    lists:foreach(fun reload_host/1, ejabberd_config:get_myhosts()).
 
 -spec start_host(binary()) -> ok.
 start_host(Host) ->
@@ -97,6 +96,13 @@ stop_host(Host) ->
     supervisor:delete_child(?MODULE, SupName),
     ok.
 
+-spec reload_host(binary()) -> ok.
+reload_host(Host) ->
+    case needs_sql(Host) of
+	{true, _} -> ejabberd_sql_sup:reload(Host);
+	false -> ok
+    end.
+
 %% Returns {true, App} if we have configured sql for the given host
 needs_sql(Host) ->
     LHost = jid:nameprep(Host),
@@ -109,9 +115,7 @@ needs_sql(Host) ->
         undefined -> false
     end.
 
--type sql_type() :: mysql | pgsql | sqlite | mssql | odbc.
--spec opt_type(sql_type) -> fun((sql_type()) -> sql_type());
-	      (atom()) -> [atom()].
+-spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
 opt_type(sql_type) ->
     fun (mysql) -> mysql;
 	(pgsql) -> pgsql;

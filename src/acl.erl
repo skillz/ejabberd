@@ -5,7 +5,7 @@
 %%% Created : 18 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -32,18 +32,17 @@
 
 -export([add_access/3, clear/0]).
 -export([start_link/0, add/3, add_list/3, add_local/3, add_list_local/3,
-	 load_from_config/0, match_rule/3, any_rules_allowed/3,
-	 transform_options/1, opt_type/1, acl_rule_matches/3,
-	 acl_rule_verify/1, access_matches/3,
+	 load_from_config/0, reload_from_config/0, match_rule/3,
+	 any_rules_allowed/3, transform_options/1, opt_type/1,
+	 acl_rule_matches/3, acl_rule_verify/1, access_matches/3,
 	 transform_access_rules_config/1,
-	 parse_ip_netmask/1,
+	 parse_ip_netmask/1, ip_matches_mask/3,
 	 access_rules_validator/1, shaper_rules_validator/1,
 	 normalize_spec/1, resolve_access/2]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 -include("jid.hrl").
 
@@ -92,7 +91,7 @@ init([]) ->
                         [{ram_copies, [node()]},
                          {local_content, true},
 			 {attributes, record_info(fields, access)}]),
-    ejabberd_hooks:add(config_reloaded, ?MODULE, load_from_config, 20),
+    ejabberd_hooks:add(config_reloaded, ?MODULE, reload_from_config, 20),
     load_from_config(),
     {ok, #state{}}.
 
@@ -195,7 +194,7 @@ add_access(Host, Access, Rules) ->
 -spec load_from_config() -> ok.
 
 load_from_config() ->
-    Hosts = [global|?MYHOSTS],
+    Hosts = [global|ejabberd_config:get_myhosts()],
     lists:foreach(
       fun(Host) ->
               ACLs = ejabberd_config:get_option(
@@ -235,6 +234,12 @@ load_from_config() ->
                         add_access(Host, Access, Rules)
                 end, ShaperRules)
       end, Hosts).
+
+-spec reload_from_config() -> ok.
+
+reload_from_config() ->
+    clear(),
+    load_from_config().
 
 %% Delete all previous set ACLs and Access rules
 clear() ->
@@ -307,7 +312,7 @@ normalize_spec(Spec) ->
                 {ok, Net, Mask} ->
                     {ip, {Net, Mask}};
                 error ->
-                    ?INFO_MSG("Invalid network address: ~p", [S]),
+                    ?WARNING_MSG("Invalid network address: ~p", [S]),
                     none
 	    end;
 	BadVal ->
@@ -441,13 +446,13 @@ acl_rule_matches({acl, Name}, Data, Host) ->
     RawACLs = lists:map(fun(#acl{aclspec = R}) -> R end, ACLs),
     any_acl_rules_matches(RawACLs, Data, Host);
 acl_rule_matches({ip, {Net, Mask}}, #{ip := {IP, _Port}}, _Host) ->
-    is_ip_match(IP, Net, Mask);
+    ip_matches_mask(IP, Net, Mask);
 acl_rule_matches({ip, {Net, Mask}}, #{ip := IP}, _Host) ->
-    is_ip_match(IP, Net, Mask);
+    ip_matches_mask(IP, Net, Mask);
 acl_rule_matches({user, {U, S}}, #{usr := {U, S, _}}, _Host) ->
     true;
 acl_rule_matches({user, U}, #{usr := {U, S, _}}, _Host) ->
-    lists:member(S, ?MYHOSTS);
+    lists:member(S, ejabberd_config:get_myhosts());
 acl_rule_matches({server, S}, #{usr := {_, S, _}}, _Host) ->
     true;
 acl_rule_matches({resource, R}, #{usr := {_, _, R}}, _Host) ->
@@ -461,7 +466,7 @@ acl_rule_matches({shared_group, G}, #{usr := {U, S, _}}, Host) ->
 acl_rule_matches({user_regexp, {UR, S}}, #{usr := {U, S, _}}, _Host) ->
     is_regexp_match(U, UR);
 acl_rule_matches({user_regexp, UR}, #{usr := {U, S, _}}, _Host) ->
-    lists:member(S, ?MYHOSTS) andalso is_regexp_match(U, UR);
+    lists:member(S, ejabberd_config:get_myhosts()) andalso is_regexp_match(U, UR);
 acl_rule_matches({server_regexp, SR}, #{usr := {_, S, _}}, _Host) ->
     is_regexp_match(S, SR);
 acl_rule_matches({resource_regexp, RR}, #{usr := {_, _, R}}, _Host) ->
@@ -471,7 +476,7 @@ acl_rule_matches({node_regexp, {UR, SR}}, #{usr := {U, S, _}}, _Host) ->
 acl_rule_matches({user_glob, {UR, S}}, #{usr := {U, S, _}}, _Host) ->
     is_glob_match(U, UR);
 acl_rule_matches({user_glob, UR}, #{usr := {U, S, _}}, _Host) ->
-    lists:member(S, ?MYHOSTS) andalso is_glob_match(U, UR);
+    lists:member(S, ejabberd_config:get_myhosts()) andalso is_glob_match(U, UR);
 acl_rule_matches({server_glob, SR}, #{usr := {_, S, _}}, _Host) ->
     is_glob_match(S, SR);
 acl_rule_matches({resource_glob, RR}, #{usr := {_, _, R}}, _Host) ->
@@ -543,18 +548,30 @@ is_glob_match(String, Glob) ->
     is_regexp_match(String,
 		    ejabberd_regexp:sh_to_awk(Glob)).
 
-is_ip_match({_, _, _, _} = IP, {_, _, _, _} = Net, Mask) ->
+ip_matches_mask({_, _, _, _} = IP, {_, _, _, _} = Net, Mask) ->
     IPInt = ip_to_integer(IP),
     NetInt = ip_to_integer(Net),
     M = bnot (1 bsl (32 - Mask) - 1),
     IPInt band M =:= NetInt band M;
-is_ip_match({_, _, _, _, _, _, _, _} = IP,
-            {_, _, _, _, _, _, _, _} = Net, Mask) ->
+ip_matches_mask({_, _, _, _, _, _, _, _} = IP,
+		{_, _, _, _, _, _, _, _} = Net, Mask) ->
     IPInt = ip_to_integer(IP),
     NetInt = ip_to_integer(Net),
     M = bnot (1 bsl (128 - Mask) - 1),
     IPInt band M =:= NetInt band M;
-is_ip_match(_, _, _) ->
+ip_matches_mask({_, _, _, _} = IP,
+		{0, 0, 0, 0, 0, 16#FFFF, _, _} = Net, Mask) ->
+    IPInt = ip_to_integer({0, 0, 0, 0, 0, 16#FFFF, 0, 0}) + ip_to_integer(IP),
+    NetInt = ip_to_integer(Net),
+    M = bnot (1 bsl (128 - Mask) - 1),
+    IPInt band M =:= NetInt band M;
+ip_matches_mask({0, 0, 0, 0, 0, 16#FFFF, _, _} = IP,
+		{_, _, _, _} = Net, Mask) ->
+    IPInt = ip_to_integer(IP) - ip_to_integer({0, 0, 0, 0, 0, 16#FFFF, 0, 0}),
+    NetInt = ip_to_integer(Net),
+    M = bnot (1 bsl (32 - Mask) - 1),
+    IPInt band M =:= NetInt band M;
+ip_matches_mask(_, _, _) ->
     false.
 
 ip_to_integer({IP1, IP2, IP3, IP4}) ->

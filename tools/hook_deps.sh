@@ -34,7 +34,8 @@ main([Dir]) ->
 						{ejabberd_hooks, {add, N}}
 						  when N == 4; N == 5 ->
 						    analyze_run_fun(Form, Acc);
-						{gen_iq_handler, {add_iq_handler, 6}} ->
+						{gen_iq_handler, {add_iq_handler, N}}
+						  when N == 5; N == 6 ->
 						    analyze_iq_handler(Form, Acc);
 						_ ->
 						    Acc
@@ -136,7 +137,7 @@ analyze_run_fun(Form, State) ->
     end.
 
 analyze_iq_handler(Form, State) ->
-    [_Component, _Host, _NS, Module, Function, _IQDisc] =
+    [_Component, _Host, _NS, Module, Function|_] =
 	erl_syntax:application_arguments(Form),
     Mod = module_name(Module, State),
     Fun = atom_value(Function, State),
@@ -273,8 +274,6 @@ emit_module(RunDeps, RunFoldDeps, Specs, Dir, Module) ->
 	emit_export(Fd, RunFoldDeps, "run_fold hooks"),
 	emit_run_hooks(Fd, RunDeps, Specs),
 	emit_run_fold_hooks(Fd, RunFoldDeps, Specs),
-	write(Fd, "bypass_stop({stop, Acc}) -> Acc;~n"
-	      "bypass_stop(Acc) -> Acc.~n", []),
 	file:close(Fd),
 	log("Module written to file ~s~n", [File])
     catch _:{badmatch, {error, Reason}} ->
@@ -311,19 +310,18 @@ emit_run_fold_hooks(Fd, Deps, Specs) ->
 	      emit_specs(Fd, Funs, Specs),
 	      write(Fd, "%% called at ~s:~p~n", [File, LineNo]),
 	      Args = [[N] || N <- lists:sublist(lists:seq($A, $Z), Arity - 1)],
-	      write(Fd, "~s(~s) ->", [Hook, string:join(["Acc"|Args], ", ")]),
-	      FunsCascade = make_funs_cascade(
-			      lists:reverse(lists:keysort(2, Funs)),
-			      1, Args),
-	      write(Fd, "~s.~n~n", [FunsCascade])
+	      write(Fd, "~s(~s) ->~n    ", [Hook, string:join(["Acc0"|Args], ", ")]),
+	      {Calls, _} = lists:mapfoldl(
+			     fun({{Mod, Fun, _}, _Seq, _}, N) ->
+				     Args1 = ["Acc" ++ integer_to_list(N)|Args],
+				     {io_lib:format("Acc~p = ~s:~s(~s)",
+						    [N+1, Mod, Fun,
+						     string:join(Args1, ", ")]),
+				      N + 1}
+			     end, 0, lists:keysort(2, Funs)),
+	      write(Fd, "~s,~n", [string:join(Calls, ",\n    ")]),
+	      write(Fd, "    Acc~p.~n~n", [length(Funs)])
       end, DepsList).
-
-make_funs_cascade([{{Mod, Fun, _}, _Seq, _}|Funs], N, Args) ->
-    io_lib:format("~n~sbypass_stop(~s:~s(~s))",
-		  [lists:duplicate(N, "    "),
-		   Mod, Fun, string:join([make_funs_cascade(Funs, N+1, Args)|Args], ", ")]);
-make_funs_cascade([], _N, _Args) ->
-    "Acc".
 
 emit_export(Fd, Deps, Comment) ->
     DepsList = lists:sort(dict:to_list(Deps)),

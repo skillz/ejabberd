@@ -5,7 +5,7 @@
 %%% Created :  1 Dec 2007 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -88,7 +88,6 @@ options() ->
 	{max_payload_size, ?MAX_PAYLOAD_SIZE},
 	{send_last_published_item, on_sub_and_presence},
 	{deliver_notifications, true},
-        {title, <<>>},
 	{presence_based_delivery, false},
 	{itemreply, none}].
 
@@ -104,8 +103,10 @@ features() ->
 	<<"modify-affiliations">>,
 	<<"outcast-affiliation">>,
 	<<"persistent-items">>,
+	<<"multi-items">>,
 	<<"publish">>,
 	<<"publish-only-affiliation">>,
+	<<"publish-options">>,
 	<<"purge-nodes">>,
 	<<"retract-items">>,
 	<<"retrieve-affiliations">>,
@@ -159,10 +160,10 @@ delete_node(Nodes) ->
 %% can decide to:<ul>
 %%  <li>reject the subscription;</li>
 %%  <li>allow it as is, letting the main module perform the database
-%%  persistance;</li>
+%%  persistence;</li>
 %%  <li>allow it, modifying the record. The main module will store the
 %%  modified record;</li>
-%%  <li>allow it, but perform the needed persistance operations.</li></ul>
+%%  <li>allow it, but perform the needed persistence operations.</li></ul>
 %% </li></ul></p>
 %% <p>The selected behaviour depends on the return parameter:
 %%  <ul>
@@ -176,9 +177,9 @@ delete_node(Nodes) ->
 %%   passed in parameter <tt>SubscribeResult</tt>.</li>
 %%   <li><tt>{true, done}</tt>: Subscribe operation is allowed, but the
 %%   {@link mod_pubsub:pubsubState()} will be considered as already stored and
-%%   no further persistance operation will be performed. This case is used,
-%%   when the plugin module is doing the persistance by itself or when it want
-%%   to completly disable persistance.</li></ul>
+%%   no further persistence operation will be performed. This case is used,
+%%   when the plugin module is doing the persistence by itself or when it want
+%%   to completly disable persistence.</li></ul>
 %% </p>
 %% <p>In the default plugin module, the record is unchanged.</p>
 subscribe_node(Nidx, Sender, Subscriber, AccessModel,
@@ -328,9 +329,9 @@ delete_subscriptions(SubState, Subscriptions) ->
 %% result of the preparation as a {@link mod_pubsub:pubsubItem()} record.</li>
 %% <li>This function gets the prepared record and several other parameters and can decide to:<ul>
 %%  <li>reject the publication;</li>
-%%  <li>allow the publication as is, letting the main module perform the database persistance;</li>
+%%  <li>allow the publication as is, letting the main module perform the database persistence;</li>
 %%  <li>allow the publication, modifying the record. The main module will store the modified record;</li>
-%%  <li>allow it, but perform the needed persistance operations.</li></ul>
+%%  <li>allow it, but perform the needed persistence operations.</li></ul>
 %% </li></ul></p>
 %% <p>The selected behaviour depends on the return parameter:
 %%  <ul>
@@ -342,13 +343,13 @@ delete_subscriptions(SubState, Subscriptions) ->
 %%   performed.</li>
 %%   <li><tt>{true, Item}</tt>: Publication operation is allowed, but the
 %%   {@link mod_pubsub:pubsubItem()} record returned replaces the value passed
-%%   in parameter <tt>Item</tt>. The persistance will be performed by the main
+%%   in parameter <tt>Item</tt>. The persistence will be performed by the main
 %%   module.</li>
 %%   <li><tt>{true, done}</tt>: Publication operation is allowed, but the
 %%   {@link mod_pubsub:pubsubItem()} will be considered as already stored and
-%%   no further persistance operation will be performed. This case is used,
-%%   when the plugin module is doing the persistance by itself or when it want
-%%   to completly disable persistance.</li></ul>
+%%   no further persistence operation will be performed. This case is used,
+%%   when the plugin module is doing the persistence by itself or when it want
+%%   to completly disable persistence.</li></ul>
 %% </p>
 %% <p>In the default plugin module, the record is unchanged.</p>
 publish_item(Nidx, Publisher, PublishModel, MaxItems, ItemId, Payload,
@@ -376,23 +377,26 @@ publish_item(Nidx, Publisher, PublishModel, MaxItems, ItemId, Payload,
 	true ->
 	    if MaxItems > 0 ->
 		    Now = p1_time_compat:timestamp(),
-		    PubId = {Now, SubKey},
-		    Item = case get_item(Nidx, ItemId) of
-			{result, OldItem} ->
-			    OldItem#pubsub_item{modification = PubId,
-				payload = Payload};
+		    case get_item(Nidx, ItemId) of
+			{result, #pubsub_item{creation = {_, GenKey}} = OldItem} ->
+			    set_item(OldItem#pubsub_item{
+					modification = {Now, SubKey},
+					payload = Payload}),
+			    {result, {default, broadcast, []}};
+			{result, _} ->
+			    {error, xmpp:err_forbidden()};
 			_ ->
-			    #pubsub_item{itemid = {ItemId, Nidx},
-				nodeidx = Nidx,
-				creation = {Now, GenKey},
-				modification = PubId,
-				payload = Payload}
-		    end,
-		    Items = [ItemId | GenState#pubsub_state.items -- [ItemId]],
-		    {result, {NI, OI}} = remove_extra_items(Nidx, MaxItems, Items),
-		    set_item(Item),
-		    set_state(GenState#pubsub_state{items = NI}),
-		    {result, {default, broadcast, OI}};
+			    Items = [ItemId | GenState#pubsub_state.items],
+			    {result, {NI, OI}} = remove_extra_items(Nidx, MaxItems, Items),
+			    set_state(GenState#pubsub_state{items = NI}),
+			    set_item(#pubsub_item{
+					itemid = {ItemId, Nidx},
+					nodeidx = Nidx,
+					creation = {Now, GenKey},
+					modification = {Now, SubKey},
+					payload = Payload}),
+			    {result, {default, broadcast, OI}}
+		    end;
 		true ->
 		    {result, {default, broadcast, []}}
 	    end
@@ -443,21 +447,30 @@ delete_item(Nidx, Publisher, PublishModel, ItemId) ->
 		    case Affiliation of
 			owner ->
 			    {result, States} = get_states(Nidx),
+			    Records = States ++ mnesia:read({pubsub_orphan, Nidx}),
 			    lists:foldl(fun
-				    (#pubsub_state{items = PI} = S, Res) ->
-					case lists:member(ItemId, PI) of
+				    (#pubsub_state{items = RI} = S, Res) ->
+					case lists:member(ItemId, RI) of
 					    true ->
-						Nitems = lists:delete(ItemId, PI),
+						NI = lists:delete(ItemId, RI),
 						del_item(Nidx, ItemId),
-						set_state(S#pubsub_state{items = Nitems}),
+						mnesia:write(S#pubsub_state{items = NI}),
 						{result, {default, broadcast}};
 					    false ->
 						Res
 					end;
-				    (_, Res) ->
-					Res
+				    (#pubsub_orphan{items = RI} = S, Res) ->
+					case lists:member(ItemId, RI) of
+					    true ->
+						NI = lists:delete(ItemId, RI),
+						del_item(Nidx, ItemId),
+						mnesia:write(S#pubsub_orphan{items = NI}),
+						{result, {default, broadcast}};
+					    false ->
+						Res
+					end
 				end,
-				{error, xmpp:err_item_not_found()}, States);
+				{error, xmpp:err_item_not_found()}, Records);
 			_ ->
 			    {error, xmpp:err_forbidden()}
 		    end
@@ -562,17 +575,10 @@ get_entity_subscriptions(Host, Owner) ->
 get_node_subscriptions(Nidx) ->
     {result, States} = get_states(Nidx),
     Tr = fun (#pubsub_state{stateid = {J, _}, subscriptions = Subscriptions}) ->
-	    case Subscriptions of
-		[_ | _] ->
-		    lists:foldl(fun ({S, SubId}, Acc) ->
-				[{J, S, SubId} | Acc]
-			end,
-			[], Subscriptions);
-		[] ->
-		    [];
-		_ ->
-		    [{J, none}]
-	    end
+	    lists:foldl(fun ({S, SubId}, Acc) ->
+			[{J, S, SubId} | Acc]
+		end,
+		[], Subscriptions)
     end,
     {result, lists:flatmap(Tr, States)}.
 
@@ -725,9 +731,50 @@ del_state(#pubsub_state{stateid = {Key, Nidx}, items = Items}) ->
 %% mod_pubsub module.</p>
 %% <p>PubSub plugins can store the items where they wants (for example in a
 %% relational database), or they can even decide not to persist any items.</p>
-get_items(Nidx, _From, _RSM) ->
-    Items = mnesia:index_read(pubsub_item, Nidx, #pubsub_item.nodeidx),
-    {result, {lists:reverse(lists:keysort(#pubsub_item.modification, Items)), undefined}}.
+get_items(Nidx, _From, undefined) ->
+    RItems = lists:keysort(#pubsub_item.creation,
+			   mnesia:index_read(pubsub_item, Nidx, #pubsub_item.nodeidx)),
+    {result, {RItems, undefined}};
+
+get_items(Nidx, _From, #rsm_set{max = Max, index = IncIndex,
+				'after' = After, before = Before}) ->
+    case lists:keysort(#pubsub_item.creation,
+                       mnesia:index_read(pubsub_item, Nidx, #pubsub_item.nodeidx)) of
+        [] ->
+            {result, {[], #rsm_set{count = 0}}};
+        RItems ->
+            Count = length(RItems),
+            Limit = case Max of
+                        undefined -> ?MAXITEMS;
+                        _ -> Max
+                    end,
+            {Offset, ItemsPage} =
+                case {IncIndex, Before, After} of
+                    {I, undefined, undefined} ->
+                        SubList = lists:nthtail(I, RItems),
+                        {I, lists:sublist(SubList, Limit)};
+                    {_, <<>>, undefined} ->
+                        %% 2.5 Requesting the Last Page in a Result Set
+                        SubList = lists:reverse(RItems),
+                        {0, lists:sublist(SubList, Limit)};
+                    {_, Stamp, undefined} ->
+                        BeforeNow = encode_stamp(Stamp),
+                        SubList = lists:dropwhile(
+                                    fun(#pubsub_item{creation = {Now, _}}) ->
+                                            Now >= BeforeNow
+                                    end, lists:reverse(RItems)),
+                        {0, lists:sublist(SubList, Limit)};
+                    {_, undefined, Stamp} ->
+                        AfterNow = encode_stamp(Stamp),
+                        SubList = lists:dropwhile(
+                                    fun(#pubsub_item{creation = {Now, _}}) ->
+                                            Now =< AfterNow
+                                    end, RItems),
+                        {0, lists:sublist(SubList, Limit)}
+                end,
+            Rsm = rsm_page(Count, IncIndex, Offset, ItemsPage),
+            {result, {ItemsPage, Rsm}}
+    end.
 
 get_items(Nidx, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId, RSM) ->
     SubKey = jid:tolower(JID),
@@ -765,9 +812,10 @@ get_items(Nidx, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId, RSM
 	    get_items(Nidx, JID, RSM)
     end.
 
-get_last_items(Nidx, From, Count) when Count > 0 ->
-    {result, {Items, _}} = get_items(Nidx, From, undefined),
-    {result, lists:sublist(Items, Count)};
+get_last_items(Nidx, _From, Count) when Count > 0 ->
+    Items = mnesia:index_read(pubsub_item, Nidx, #pubsub_item.nodeidx),
+    LastItems = lists:reverse(lists:keysort(#pubsub_item.modification, Items)),
+    {result, lists:sublist(LastItems, Count)};
 get_last_items(_Nidx, _From, _Count) ->
     {result, []}.
 
@@ -874,6 +922,28 @@ first_in_list(Pred, [H | T]) ->
     case Pred(H) of
 	true -> {value, H};
 	_ -> first_in_list(Pred, T)
+    end.
+
+rsm_page(Count, _, _, []) ->
+    #rsm_set{count = Count};
+rsm_page(Count, Index, Offset, Items) ->
+    FirstItem = hd(Items),
+    LastItem = lists:last(Items),
+    First = decode_stamp(element(1, FirstItem#pubsub_item.creation)),
+    Last = decode_stamp(element(1, LastItem#pubsub_item.creation)),
+    #rsm_set{count = Count, index = Index,
+	     first = #rsm_first{index = Offset, data = First},
+	     last = Last}.
+
+encode_stamp(Stamp) ->
+    case catch xmpp_util:decode_timestamp(Stamp) of
+	{MS,S,US} -> {MS,S,US};
+	_ -> Stamp
+    end.
+decode_stamp(Stamp) ->
+    case catch xmpp_util:encode_timestamp(Stamp) of
+	TimeStamp when is_binary(TimeStamp) -> TimeStamp;
+	_ -> Stamp
     end.
 
 transform({pubsub_state, {Id, Nidx}, Is, A, Ss}) ->
