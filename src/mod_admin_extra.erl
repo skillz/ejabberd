@@ -1569,18 +1569,26 @@ get_offline_user(To, From) ->
 
 %% Note this doesn't filter what we are sending to it.  Don't pass along user generated
 %% messages :) (if you need to , fun the filter_packet hook!)
+%% If the room exists, send to the room.  Otherwise, don't bring the room up.
 send_stanza(FromString, ToString, Stanza) ->
     try
 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
 	To            = jid:decode(ToString),
-	From          = get_offline_user(To, jid:decode(FromString)),
-	LServer       = From#jid.lserver,
-	Packet        = xmpp:decode(El, ?NS_CLIENT, [ignore_els]), 
-	ArchivePacket = ejabberd_hooks:run_fold(muc_filter_message, LServer, Packet, 
-	                                        [spoof_muc_state(LServer, To), From#jid.user]),
-	Wrapped       = wrap(To, From, ArchivePacket, ?NS_MUCSUB_NODES_MESSAGES),
-	PacketToSend  = xmpp:set_from_to(Wrapped, To, From),
-	ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
+	case mod_muc:find_online_room() of
+		{ok, _} ->
+			From = jid:decode(FromString),
+			Pkt = xmpp:decode(El, ?NS_CLIENT, [ignore_els]),
+			ejabberd_router:route(xmpp:set_from_to(Pkt, From, To));
+		error ->
+			From          = get_offline_user(To, jid:decode(FromString)),
+			LServer       = From#jid.lserver,
+			Packet        = xmpp:decode(El, ?NS_CLIENT, [ignore_els]), 
+			ArchivePacket = ejabberd_hooks:run_fold(muc_filter_message, LServer, Packet, 
+													[spoof_muc_state(LServer, To), From#jid.user]),
+			Wrapped       = wrap(To, From, ArchivePacket, ?NS_MUCSUB_NODES_MESSAGES),
+			PacketToSend  = xmpp:set_from_to(Wrapped, To, From),
+			ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
+	end
     catch _:{xmpp_codec, Why} ->
 	    io:format("incorrect stanza: ~s~n", [xmpp:format_error(Why)]),
 	    {error, Why};
