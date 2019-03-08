@@ -85,8 +85,6 @@
 -include("mod_privacy.hrl").
 -include("ejabberd_sm.hrl").
 -include("xmpp.hrl").
--include("mod_muc_room.hrl").
--include("mod_mam.hrl").
 
 %%%
 %%% gen_mod
@@ -1535,52 +1533,13 @@ build_packet(Type, Subject, Body) ->
 	     body = xmpp:mk_text(Body),
 	     subject = xmpp:mk_text(Subject)}.
 
-%% Taken from mod_muc_room 
--spec wrap(jid(), jid(), stanza(), binary()) -> message().
-wrap(From, To, Packet, Node) ->
-    El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
-    #message{
-       sub_els = [#ps_event{
-		     items = #ps_items{
-				node = Node,
-				items = [#ps_item{
-					    id = randoms:get_string(),
-					    xml_els = [El]}]}}]}.
-
-%% Kind of a bad hack.  We might want to add a funciton in mod_mam in the future
-%% to handle this case.
-spoof_muc_state(LServer, RoomJID) ->
-	#state{ 
-	   server_host = LServer, 
-	   jid = RoomJID, 
-	   config = #config{
-			mam = true}}.
-
-get_offline_user(To, From) ->
-	FromUser      = From#jid.user,
-	Room          = To#jid.user,
-	Users         = string:lexemes(Room, "-" ++ [[$\r,$\n]]),
-	[User1|User2] = Users,
-	NewUser       = case User1 of
-		FromUser -> hd(User2);
-		_        -> User1
-	end,
-	From#jid{user = NewUser, luser = NewUser}.
-
-%% Note this doesn't filter what we are sending to it.  Don't pass along user generated
-%% messages :) (if you need to , fun the filter_packet hook!)
 send_stanza(FromString, ToString, Stanza) ->
     try
 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
-	To            = jid:decode(ToString),
-	From          = get_offline_user(To, jid:decode(FromString)),
-	LServer       = From#jid.lserver,
-	Packet        = xmpp:decode(El, ?NS_CLIENT, [ignore_els]), 
-	ArchivePacket = ejabberd_hooks:run_fold(muc_filter_message, LServer, Packet, 
-	                                        [spoof_muc_state(LServer, To), From#jid.user]),
-	Wrapped       = wrap(To, From, ArchivePacket, ?NS_MUCSUB_NODES_MESSAGES),
-	PacketToSend  = xmpp:set_from_to(Wrapped, To, From),
-	ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
+	From = jid:decode(FromString),
+	To = jid:decode(ToString),
+	Pkt = xmpp:decode(El, ?NS_CLIENT, [ignore_els]),
+	ejabberd_router:route(xmpp:set_from_to(Pkt, From, To))
     catch _:{xmpp_codec, Why} ->
 	    io:format("incorrect stanza: ~s~n", [xmpp:format_error(Why)]),
 	    {error, Why};

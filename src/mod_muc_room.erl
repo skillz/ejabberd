@@ -156,14 +156,9 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
     add_to_log(room_existence, started, NewState),
     {ok, normal_state, NewState}.
 
-%% This is a top level call to normal_state to kill the muc room during any event.
-%% Another hack we should remove once we have the process that sweeps empty mucs
-normal_state(Event, StateData) ->
-	{_, _, NewStateData} = normal_state(Event, StateData, true),
-	close_room_without_occupants(NewStateData).
 normal_state({route, <<"">>,
 	      #message{from = From, type = Type, lang = Lang} = Packet},
-	     StateData, _) ->
+	     StateData) ->
     case is_user_online(From, StateData) orelse
 	is_subscriber(From, StateData) orelse
 	is_user_allowed_message_nonparticipant(From, StateData) of
@@ -277,7 +272,7 @@ normal_state({route, <<"">>,
     end;
 normal_state({route, <<"">>,
 	      #iq{from = From, type = Type, lang = Lang, sub_els = [_]} = IQ0},
-	     StateData, _) when Type == get; Type == set ->
+	     StateData) when Type == get; Type == set ->
     try
 	case ejabberd_hooks:run_fold(
 	       muc_process_iq,
@@ -341,14 +336,14 @@ normal_state({route, <<"">>,
 	    Err = xmpp:err_bad_request(ErrTxt, Lang),
 	    ejabberd_router:route_error(IQ0, Err)
     end;
-normal_state({route, <<"">>, #iq{} = IQ}, StateData, _) ->
+normal_state({route, <<"">>, #iq{} = IQ}, StateData) ->
     Err = xmpp:err_bad_request(),
     ejabberd_router:route_error(IQ, Err),
     case StateData#state.just_created of
 	true -> {stop, normal, StateData};
 	false -> {next_state, normal_state, StateData}
     end;
-normal_state({route, Nick, #presence{from = From} = Packet}, StateData, _) ->
+normal_state({route, Nick, #presence{from = From} = Packet}, StateData) ->
     Activity = get_user_activity(From, StateData),
     Now = p1_time_compat:system_time(micro_seconds),
     MinPresenceInterval =
@@ -376,7 +371,7 @@ normal_state({route, Nick, #presence{from = From} = Packet}, StateData, _) ->
     end;
 normal_state({route, ToNick,
 	      #message{from = From, type = Type, lang = Lang} = Packet},
-	     StateData, _) ->
+	     StateData) ->
     case decide_fate_message(Packet, From, StateData) of
 	{expulse_sender, Reason} ->
 	    ?DEBUG(Reason, []),
@@ -442,7 +437,7 @@ normal_state({route, ToNick,
     end;
 normal_state({route, ToNick,
 	      #iq{from = From, id = StanzaId, lang = Lang} = Packet},
-	     StateData, _) ->
+	     StateData) ->
     case {(StateData#state.config)#config.allow_query_users,
 	  is_user_online_iq(StanzaId, From, StateData)} of
 	{true, {true, NewId, FromFull}} ->
@@ -473,7 +468,7 @@ normal_state({route, ToNick,
 	    ejabberd_router:route_error(Packet, Err)
     end,
     {next_state, normal_state, StateData};
-normal_state(_Event, StateData, _) ->
+normal_state(_Event, StateData) ->
     {next_state, normal_state, StateData}.
 
 handle_event({service_message, Msg}, _StateName,
@@ -974,7 +969,7 @@ process_presence(Nick, #presence{from = From, type = Type0} = Packet0, StateData
 	     drop ->
 		 {next_state, normal_state, StateData};
 	     #presence{} = Packet ->
-		 close_room_without_occupants(
+		 close_room_if_temporary_and_empty(
 		   do_process_presence(Nick, Packet, StateData))
 	   end;
        true ->
@@ -3330,14 +3325,13 @@ set_config(Opts, Config, ServerHost, Lang) ->
 
 -spec change_config(#config{}, state()) -> {result, undefined, state()}.
 change_config(Config, StateData) ->
-    NewStateData = StateData#state{config = Config},
-    send_config_change_info(Config, NewStateData),
+    send_config_change_info(Config, StateData),
     case {(StateData#state.config)#config.persistent,
 	  Config#config.persistent}
 	of
       {_, true} ->
 	  mod_muc:store_room(StateData#state.server_host,
-			     StateData#state.host, StateData#state.room, make_opts(NewStateData));
+			     StateData#state.host, StateData#state.room, make_opts(StateData));
       {true, false} ->
 	  mod_muc:forget_room(StateData#state.server_host,
 			      StateData#state.host, StateData#state.room);
@@ -3347,8 +3341,8 @@ change_config(Config, StateData) ->
 	  Config#config.members_only}
 	of
       {false, true} ->
-	  NSD1 = remove_nonmembers(NewStateData), {result, undefined, NSD1};
-      _ -> {result, undefined, NewStateData}
+	  NSD1 = remove_nonmembers(StateData), {result, undefined, NSD1};
+      _ -> {result, undefined, StateData}
     end.
 
 -spec send_config_change_info(#config{}, state()) -> ok.
@@ -3814,7 +3808,11 @@ process_iq_mucsub(From, #iq{type = get, lang = Lang,
 		     fun(_, #subscriber{jid = J}, Acc) ->
 			     [J|Acc]
 		     end, [], StateData#state.subscribers),
-	    {result, #muc_subscriptions{list = JIDs}, StateData};
+      NewStateData = case close_room_without_occupants(StateData) of
+    {stop, normal, _} -> stop;
+    {next_state, normal_state, SD} -> SD
+       end,
+	    {result, #muc_subscriptions{list = JIDs}, NewStateData};
        true ->
 	    Txt = <<"Moderator privileges required">>,
 	    {error, xmpp:err_forbidden(Txt, Lang)}
