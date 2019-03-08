@@ -156,14 +156,9 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
     add_to_log(room_existence, started, NewState),
     {ok, normal_state, NewState}.
 
-%% This is a top level call to normal_state to kill the muc room during any event.
-%% Another hack we should remove once we have the process that sweeps empty mucs
-normal_state(Event, StateData) ->
-	{_, _, NewStateData} = normal_state(Event, StateData, true),
-	close_room_without_occupants(NewStateData).
 normal_state({route, <<"">>,
 	      #message{from = From, type = Type, lang = Lang} = Packet},
-	     StateData, _) ->
+	     StateData) ->
     case is_user_online(From, StateData) orelse
 	is_subscriber(From, StateData) orelse
 	is_user_allowed_message_nonparticipant(From, StateData) of
@@ -277,7 +272,7 @@ normal_state({route, <<"">>,
     end;
 normal_state({route, <<"">>,
 	      #iq{from = From, type = Type, lang = Lang, sub_els = [_]} = IQ0},
-	     StateData, _) when Type == get; Type == set ->
+	     StateData) when Type == get; Type == set ->
     try
 	case ejabberd_hooks:run_fold(
 	       muc_process_iq,
@@ -341,14 +336,14 @@ normal_state({route, <<"">>,
 	    Err = xmpp:err_bad_request(ErrTxt, Lang),
 	    ejabberd_router:route_error(IQ0, Err)
     end;
-normal_state({route, <<"">>, #iq{} = IQ}, StateData, _) ->
+normal_state({route, <<"">>, #iq{} = IQ}, StateData) ->
     Err = xmpp:err_bad_request(),
     ejabberd_router:route_error(IQ, Err),
     case StateData#state.just_created of
 	true -> {stop, normal, StateData};
 	false -> {next_state, normal_state, StateData}
     end;
-normal_state({route, Nick, #presence{from = From} = Packet}, StateData, _) ->
+normal_state({route, Nick, #presence{from = From} = Packet}, StateData) ->
     Activity = get_user_activity(From, StateData),
     Now = p1_time_compat:system_time(micro_seconds),
     MinPresenceInterval =
@@ -376,7 +371,7 @@ normal_state({route, Nick, #presence{from = From} = Packet}, StateData, _) ->
     end;
 normal_state({route, ToNick,
 	      #message{from = From, type = Type, lang = Lang} = Packet},
-	     StateData, _) ->
+	     StateData) ->
     case decide_fate_message(Packet, From, StateData) of
 	{expulse_sender, Reason} ->
 	    ?DEBUG(Reason, []),
@@ -442,7 +437,7 @@ normal_state({route, ToNick,
     end;
 normal_state({route, ToNick,
 	      #iq{from = From, id = StanzaId, lang = Lang} = Packet},
-	     StateData, _) ->
+	     StateData) ->
     case {(StateData#state.config)#config.allow_query_users,
 	  is_user_online_iq(StanzaId, From, StateData)} of
 	{true, {true, NewId, FromFull}} ->
@@ -473,7 +468,7 @@ normal_state({route, ToNick,
 	    ejabberd_router:route_error(Packet, Err)
     end,
     {next_state, normal_state, StateData};
-normal_state(_Event, StateData, _) ->
+normal_state(_Event, StateData) ->
     {next_state, normal_state, StateData}.
 
 handle_event({service_message, Msg}, _StateName,
