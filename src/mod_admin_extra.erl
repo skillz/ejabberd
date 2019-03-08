@@ -1556,24 +1556,13 @@ spoof_muc_state(LServer, RoomJID) ->
 	   config = #config{
 			mam = true}}.
 
-get_offline_user(To, From) ->
-	FromUser      = From#jid.user,
-	Room          = To#jid.user,
-	Users         = string:lexemes(Room, "-" ++ [[$\r,$\n]]),
-	[User1|User2] = Users,
-	NewUser       = case User1 of
-		FromUser -> hd(User2);
-		_        -> User1
-	end,
-	From#jid{user = NewUser, luser = NewUser}.
-
 %% Note this doesn't filter what we are sending to it.  Don't pass along user generated
 %% messages :) (if you need to , fun the filter_packet hook!)
 send_stanza(FromString, ToString, Stanza) ->
     try
 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
+	From          = jid:decode(FromString),
 	To            = jid:decode(ToString),
-	From          = get_offline_user(To, jid:decode(FromString)),
 	LServer       = From#jid.lserver,
 	Packet        = xmpp:decode(El, ?NS_CLIENT, [ignore_els]), 
 	ArchivePacket = ejabberd_hooks:run_fold(muc_filter_message, LServer, Packet, 
