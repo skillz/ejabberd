@@ -969,8 +969,8 @@ process_presence(Nick, #presence{from = From, type = Type0} = Packet0, StateData
 	     drop ->
 		 {next_state, normal_state, StateData};
 	     #presence{} = Packet ->
-		 close_room_if_temporary_and_empty(
-		   close_room_without_occupants(Nick, Packet, StateData))
+		 close_room_without_occupants(
+		   do_process_presence(Nick, Packet, StateData))
 	   end;
        true ->
 		close_room_without_occupants(StateData)
