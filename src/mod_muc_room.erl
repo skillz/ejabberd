@@ -155,14 +155,9 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
     add_to_log(room_existence, started, NewState),
     {ok, normal_state, NewState}.
 
-%% This is a top level call to normal_state to kill the muc room during any event.
-%% Another hack we should remove once we have the process that sweeps empty mucs
-normal_state(Event, StateData) ->
-	{_, _, NewStateData} = normal_state(Event, StateData, true),
-	close_room_if_temporary_and_empty(NewStateData).
 normal_state({route, <<"">>,
 	      #message{from = From, type = Type, lang = Lang} = Packet},
-	     StateData, _) ->
+	     StateData) ->
     case is_user_online(From, StateData) orelse
 	is_subscriber(From, StateData) orelse
 	is_user_allowed_message_nonparticipant(From, StateData) of
@@ -276,7 +271,7 @@ normal_state({route, <<"">>,
     end;
 normal_state({route, <<"">>,
 	      #iq{from = From, type = Type, lang = Lang, sub_els = [_]} = IQ0},
-	     StateData, _) when Type == get; Type == set ->
+	     StateData) when Type == get; Type == set ->
     try
 	case ejabberd_hooks:run_fold(
 	       muc_process_iq,
@@ -341,14 +336,14 @@ normal_state({route, <<"">>,
 	    ejabberd_router:route_error(IQ0, Err),
 	    {next_state, normal_state, StateData}
     end;
-normal_state({route, <<"">>, #iq{} = IQ}, StateData, _) ->
+normal_state({route, <<"">>, #iq{} = IQ}, StateData) ->
     Err = xmpp:err_bad_request(),
     ejabberd_router:route_error(IQ, Err),
     case StateData#state.just_created of
 	true -> {stop, normal, StateData};
 	_ -> {next_state, normal_state, StateData}
     end;
-normal_state({route, Nick, #presence{from = From} = Packet}, StateData, _) ->
+normal_state({route, Nick, #presence{from = From} = Packet}, StateData) ->
     Activity = get_user_activity(From, StateData),
     Now = p1_time_compat:system_time(micro_seconds),
     MinPresenceInterval =
@@ -376,7 +371,7 @@ normal_state({route, Nick, #presence{from = From} = Packet}, StateData, _) ->
     end;
 normal_state({route, ToNick,
 	      #message{from = From, type = Type, lang = Lang} = Packet},
-	     StateData, _) ->
+	     StateData) ->
     case decide_fate_message(Packet, From, StateData) of
 	{expulse_sender, Reason} ->
 	    ?DEBUG(Reason, []),
@@ -442,7 +437,7 @@ normal_state({route, ToNick,
     end;
 normal_state({route, ToNick,
 	      #iq{from = From, lang = Lang} = Packet},
-	     #state{config = #config{allow_query_users = AllowQuery}} = StateData, _) ->
+	     #state{config = #config{allow_query_users = AllowQuery}} = StateData) ->
     try maps:get(jid:tolower(From), StateData#state.users) of
 	#user{nick = FromNick} when AllowQuery orelse ToNick == FromNick ->
 	    case find_jid_by_nick(ToNick, StateData) of
@@ -481,7 +476,7 @@ normal_state({route, ToNick,
 	    ejabberd_router:route_error(Packet, Err)
     end,
     {next_state, normal_state, StateData};
-normal_state(_Event, StateData, _) ->
+normal_state(_Event, StateData) ->
     {next_state, normal_state, StateData}.
 
 handle_event({service_message, Msg}, _StateName,
@@ -1032,7 +1027,7 @@ process_presence(Nick, #presence{from = From, type = Type0} = Packet0, StateData
 		   do_process_presence(Nick, Packet, StateData))
 	   end;
        true ->
-	    {next_state, normal_state, StateData}
+		close_room_without_occupants(StateData)
     end.
 
 -spec do_process_presence(binary(), presence(), state()) -> state().
@@ -1130,18 +1125,28 @@ maybe_strip_status_from_presence(From, Packet, StateData) ->
 	_Allowed -> Packet
     end.
 
+-spec close_room_without_occupants(state()) -> fsm_transition().
+close_room_without_occupants(StateData1) ->
+	case maps:size(StateData1#state.users) == 0 of
+	  true ->
+		?INFO_MSG("Destoryed MUC room ~s becuase it lacks occupants",
+		  [jid:encode(StateData1#state.jid)]),
+		add_to_log(room_existence, destroyed, StateData1),
+		{stop, normal, StateData1};
+	  _ -> {next_state, normal_state, StateData1}
+	end.
+
 -spec close_room_if_temporary_and_empty(state()) -> fsm_transition().
 close_room_if_temporary_and_empty(StateData1) ->
-% force destroy room without occupant
-%    case not (StateData1#state.config)#config.persistent
-%	andalso maps:size(StateData1#state.users) == 0
-%	andalso maps:size(StateData1#state.subscribers) == 0 of
-    case maps:size(StateData1#state.users) == 0 of
-      true ->
-	  ?INFO_MSG("Destoryed MUC room ~s becuase it lacks occupants",
+	case not (StateData1#state.config)#config.persistent
+		andalso maps:size(StateData1#state.users) == 0
+		andalso maps:size(StateData1#state.subscribers) == 0 of
+	  true ->
+        ?INFO_MSG("Destroyed MUC room ~s because it's temporary "
+		    "and empty",
 		    [jid:encode(StateData1#state.jid)]),
-	  add_to_log(room_existence, destroyed, StateData1),
-	  {stop, normal, StateData1};
+		add_to_log(room_existence, destroyed, StateData1),
+		{stop, normal, StateData1};
       _ -> {next_state, normal_state, StateData1}
     end.
 
@@ -4435,15 +4440,15 @@ send_to_room_or_offline(_, _, Packet, _) -> ejabberd_router:route(Packet).
 send_wrapped(From, To, Packet, Node, State) ->
     LTo = jid:tolower(To),
     LBareTo = jid:tolower(jid:remove_resource(To)),
-	IsSubscriber = case map:get(LBareTo, State#state.subscribers) of
-		{ok, #subscriber{nodes = NodeCheck, jid = _}} ->
-			lists:member(Node, NodeCheck);
-		_ ->
-			false
+	IsSubscriber = case maps:get(LBareTo, State#state.subscribers, error) of
+		{ok, #subscriber{nodes = NodeCheck, jid = _}} -> lists:member(Node, NodeCheck);
+		error -> false;
+		_ -> false
 	end,
-	IsInRoom = case map:get(LTo, State#state.users) of
+	IsInRoom = case maps:get(LTo, State#state.users, error) of
 		{ok, _} -> true;
-		error -> false
+		error -> false;
+		_ -> false
 	end,
     IsOffline = case maps:get(LTo, State#state.users, error) of
 		    #user{last_presence = undefined} -> true;
@@ -4456,7 +4461,7 @@ send_wrapped(From, To, Packet, Node, State) ->
 		#subscriber{nodes = Nodes, jid = JID} ->
 		    case lists:member(Node, Nodes) of
 			true ->
-			    NewPacket = wrap(From, JID, Packet, Node),
+			    NewPacket          = wrap(From, JID, Packet, Node),
 				PrivacyCheckPacket = xmpp:set_from_to(NewPacket, From, JID),
 				PacketToSend       = xmpp:set_from_to(NewPacket, State#state.jid, JID),
 				LServer            = To#jid.lserver,
