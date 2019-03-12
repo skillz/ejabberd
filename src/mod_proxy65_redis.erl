@@ -3,7 +3,7 @@
 %%% Created : 31 Mar 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,7 +26,6 @@
 %% API
 -export([init/0, register_stream/2, unregister_stream/1, activate_stream/4]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 
 -record(proxy65, {pid_t :: pid(),

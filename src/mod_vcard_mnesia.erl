@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,11 +31,12 @@
 	 search_fields/1, search_reported/1, remove_user/2]).
 -export([is_search_supported/1]).
 -export([need_transform/1, transform/1]).
+-export([mod_opt_type/1, mod_options/1]).
 
--include("ejabberd.hrl").
 -include("xmpp.hrl").
 -include("mod_vcard.hrl").
 -include("logger.hrl").
+-include("translate.hrl").
 
 %%%===================================================================
 %%% API
@@ -95,32 +96,32 @@ search(LServer, Data, AllowReturnAll, MaxMatch) ->
     end.
 
 search_fields(_LServer) ->
-    [{<<"User">>, <<"user">>},
-     {<<"Full Name">>, <<"fn">>},
-     {<<"Name">>, <<"first">>},
-     {<<"Middle Name">>, <<"middle">>},
-     {<<"Family Name">>, <<"last">>},
-     {<<"Nickname">>, <<"nick">>},
-     {<<"Birthday">>, <<"bday">>},
-     {<<"Country">>, <<"ctry">>},
-     {<<"City">>, <<"locality">>},
-     {<<"Email">>, <<"email">>},
-     {<<"Organization Name">>, <<"orgname">>},
-     {<<"Organization Unit">>, <<"orgunit">>}].
+    [{?T("User"), <<"user">>},
+     {?T("Full Name"), <<"fn">>},
+     {?T("Name"), <<"first">>},
+     {?T("Middle Name"), <<"middle">>},
+     {?T("Family Name"), <<"last">>},
+     {?T("Nickname"), <<"nick">>},
+     {?T("Birthday"), <<"bday">>},
+     {?T("Country"), <<"ctry">>},
+     {?T("City"), <<"locality">>},
+     {?T("Email"), <<"email">>},
+     {?T("Organization Name"), <<"orgname">>},
+     {?T("Organization Unit"), <<"orgunit">>}].
 
 search_reported(_LServer) ->
-    [{<<"Jabber ID">>, <<"jid">>},
-     {<<"Full Name">>, <<"fn">>},
-     {<<"Name">>, <<"first">>},
-     {<<"Middle Name">>, <<"middle">>},
-     {<<"Family Name">>, <<"last">>},
-     {<<"Nickname">>, <<"nick">>},
-     {<<"Birthday">>, <<"bday">>},
-     {<<"Country">>, <<"ctry">>},
-     {<<"City">>, <<"locality">>},
-     {<<"Email">>, <<"email">>},
-     {<<"Organization Name">>, <<"orgname">>},
-     {<<"Organization Unit">>, <<"orgunit">>}].
+    [{?T("Jabber ID"), <<"jid">>},
+     {?T("Full Name"), <<"fn">>},
+     {?T("Name"), <<"first">>},
+     {?T("Middle Name"), <<"middle">>},
+     {?T("Family Name"), <<"last">>},
+     {?T("Nickname"), <<"nick">>},
+     {?T("Birthday"), <<"bday">>},
+     {?T("Country"), <<"ctry">>},
+     {?T("City"), <<"locality">>},
+     {?T("Email"), <<"email">>},
+     {?T("Organization Name"), <<"orgname">>},
+     {?T("Organization Unit"), <<"orgunit">>}].
 
 remove_user(LUser, LServer) ->
     US = {LUser, LServer},
@@ -191,9 +192,8 @@ filter_fields([{SVar, [Val]} | Ds], Match, LServer)
     LVal = mod_vcard:string2lower(Val),
     NewMatch = case SVar of
 		   <<"user">> ->
-		       case gen_mod:get_module_opt(LServer, ?MODULE,
-						   search_all_hosts,
-						   true) of
+		       case gen_mod:get_module_opt(LServer, mod_vcard,
+						   search_all_hosts) of
 			   true -> Match#vcard_search{luser = make_val(LVal)};
 			   false ->
 			       Host = find_my_host(LServer),
@@ -234,9 +234,9 @@ make_val(Val) ->
 
 find_my_host(LServer) ->
     Parts = str:tokens(LServer, <<".">>),
-    find_my_host(Parts, ?MYHOSTS).
+    find_my_host(Parts, ejabberd_config:get_myhosts()).
 
-find_my_host([], _Hosts) -> ?MYNAME;
+find_my_host([], _Hosts) -> ejabberd_config:get_myname();
 find_my_host([_ | Tail] = Parts, Hosts) ->
     Domain = parts_to_string(Parts),
     case lists:member(Domain, Hosts) of
@@ -264,3 +264,9 @@ record_to_item(R) ->
      {<<"email">>, (R#vcard_search.email)},
      {<<"orgname">>, (R#vcard_search.orgname)},
      {<<"orgunit">>, (R#vcard_search.orgunit)}].
+
+mod_opt_type(search_all_hosts) ->
+    fun (B) when is_boolean(B) -> B end.
+
+mod_options(_) ->
+    [{search_all_hosts, true}].

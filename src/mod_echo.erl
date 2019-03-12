@@ -5,7 +5,7 @@
 %%% Created : 15 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -36,9 +36,8 @@
 
 -export([init/1, handle_call/3, handle_cast/2,
 	 handle_info/2, terminate/2, code_change/3,
-	 mod_opt_type/1, depends/2]).
+	 mod_opt_type/1, depends/2, mod_options/1]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 
 -include("xmpp.hrl").
@@ -61,10 +60,11 @@ reload(Host, NewOpts, OldOpts) ->
 depends(_Host, _Opts) ->
     [].
 
-mod_opt_type(host) -> fun iolist_to_binary/1;
-mod_opt_type(hosts) ->
-    fun(L) -> lists:map(fun iolist_to_binary/1, L) end;
-mod_opt_type(_) -> [host, hosts].
+mod_opt_type(host) -> fun ejabberd_config:v_host/1;
+mod_opt_type(hosts) -> fun ejabberd_config:v_hosts/1.
+
+mod_options(_Host) ->
+    [{host, <<"echo.@HOST@">>}, {hosts, []}].
 
 %%====================================================================
 %% gen_server callbacks
@@ -79,8 +79,7 @@ mod_opt_type(_) -> [host, hosts].
 %%--------------------------------------------------------------------
 init([Host, Opts]) ->
     process_flag(trap_exit, true),
-    Hosts = gen_mod:get_opt_hosts(Host, Opts,
-				  <<"echo.@HOST@">>),
+    Hosts = gen_mod:get_opt_hosts(Host, Opts),
     lists:foreach(
       fun(H) ->
 	      ejabberd_router:register_route(H, Host)
@@ -106,10 +105,8 @@ handle_call(stop, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 handle_cast({reload, Host, NewOpts, OldOpts}, State) ->
-    NewMyHosts = gen_mod:get_opt_hosts(Host, NewOpts,
-				       <<"echo.@HOST@">>),
-    OldMyHosts = gen_mod:get_opt_hosts(Host, OldOpts,
-				       <<"echo.@HOST@">>),
+    NewMyHosts = gen_mod:get_opt_hosts(Host, NewOpts),
+    OldMyHosts = gen_mod:get_opt_hosts(Host, OldOpts),
     lists:foreach(
       fun(H) ->
 	      ejabberd_router:unregister_route(H)
@@ -190,12 +187,12 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 do_client_version(disabled, _From, _To) -> ok;
 do_client_version(enabled, From, To) ->
-    Random_resource = randoms:get_string(),
+    Random_resource = p1_rand:get_string(),
     From2 = From#jid{resource = Random_resource,
 		     lresource = Random_resource},
-    ID = randoms:get_string(),
+    ID = p1_rand:get_string(),
     Packet = #iq{from = From2, to = To, type = get,
-		 id = randoms:get_string(),
+		 id = p1_rand:get_string(),
 		 sub_els = [#version{}]},
     ejabberd_router:route(Packet),
     receive

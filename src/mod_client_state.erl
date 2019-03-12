@@ -5,7 +5,7 @@
 %%% Created : 11 Sep 2014 by Holger Weiss <holger@zedat.fu-berlin.de>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2014-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2014-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -28,19 +28,18 @@
 -protocol({xep, 85, '2.1'}).
 -protocol({xep, 352, '0.1'}).
 
--behavior(gen_mod).
+-behaviour(gen_mod).
 
 %% gen_mod callbacks.
--export([start/2, stop/1, reload/3, mod_opt_type/1, depends/2]).
+-export([start/2, stop/1, reload/3, mod_opt_type/1, depends/2, mod_options/1]).
 
 %% ejabberd_hooks callbacks.
 -export([filter_presence/1, filter_chat_states/1,
 	 filter_pep/1, filter_other/1,
 	 c2s_stream_started/2, add_stream_feature/2,
-	 c2s_copy_session/2, c2s_authenticated_packet/2,
-	 c2s_session_resumed/1]).
+	 c2s_authenticated_packet/2, csi_activity/2,
+	 c2s_copy_session/2, c2s_session_resumed/1]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 
@@ -59,9 +58,9 @@
 %%--------------------------------------------------------------------
 -spec start(binary(), gen_mod:opts()) -> ok.
 start(Host, Opts) ->
-    QueuePresence = gen_mod:get_opt(queue_presence, Opts, true),
-    QueueChatStates = gen_mod:get_opt(queue_chat_states, Opts, true),
-    QueuePEP = gen_mod:get_opt(queue_pep, Opts, true),
+    QueuePresence = gen_mod:get_opt(queue_presence, Opts),
+    QueueChatStates = gen_mod:get_opt(queue_chat_states, Opts),
+    QueuePEP = gen_mod:get_opt(queue_pep, Opts),
     if QueuePresence; QueueChatStates; QueuePEP ->
 	   register_hooks(Host),
 	   if QueuePresence ->
@@ -84,9 +83,9 @@ start(Host, Opts) ->
 
 -spec stop(binary()) -> ok.
 stop(Host) ->
-    QueuePresence = gen_mod:get_module_opt(Host, ?MODULE, queue_presence, true),
-    QueueChatStates = gen_mod:get_module_opt(Host, ?MODULE, queue_chat_states, true),
-    QueuePEP = gen_mod:get_module_opt(Host, ?MODULE, queue_pep, true),
+    QueuePresence = gen_mod:get_module_opt(Host, ?MODULE, queue_presence),
+    QueueChatStates = gen_mod:get_module_opt(Host, ?MODULE, queue_chat_states),
+    QueuePEP = gen_mod:get_module_opt(Host, ?MODULE, queue_pep),
     if QueuePresence; QueueChatStates; QueuePEP ->
 	   unregister_hooks(Host),
 	   if QueuePresence ->
@@ -109,9 +108,9 @@ stop(Host) ->
 
 -spec reload(binary(), gen_mod:opts(), gen_mod:opts()) -> ok.
 reload(Host, NewOpts, _OldOpts) ->
-    QueuePresence = gen_mod:get_opt(queue_presence, NewOpts, true),
-    QueueChatStates = gen_mod:get_opt(queue_chat_states, NewOpts, true),
-    QueuePEP = gen_mod:get_opt(queue_pep, NewOpts, true),
+    QueuePresence = gen_mod:get_opt(queue_presence, NewOpts),
+    QueueChatStates = gen_mod:get_opt(queue_chat_states, NewOpts),
+    QueuePEP = gen_mod:get_opt(queue_pep, NewOpts),
     if QueuePresence; QueueChatStates; QueuePEP ->
 	    register_hooks(Host);
        true ->
@@ -145,8 +144,12 @@ mod_opt_type(queue_presence) ->
 mod_opt_type(queue_chat_states) ->
     fun(B) when is_boolean(B) -> B end;
 mod_opt_type(queue_pep) ->
-    fun(B) when is_boolean(B) -> B end;
-mod_opt_type(_) -> [queue_presence, queue_chat_states, queue_pep].
+    fun(B) when is_boolean(B) -> B end.
+
+mod_options(_) ->
+    [{queue_presence, true},
+     {queue_chat_states, true},
+     {queue_pep, true}].
 
 -spec depends(binary(), gen_mod:opts()) -> [{module(), hard | soft}].
 depends(_Host, _Opts) ->
@@ -160,6 +163,8 @@ register_hooks(Host) ->
 		       add_stream_feature, 50),
     ejabberd_hooks:add(c2s_authenticated_packet, Host, ?MODULE,
 		       c2s_authenticated_packet, 50),
+    ejabberd_hooks:add(csi_activity, Host, ?MODULE,
+		       csi_activity, 50),
     ejabberd_hooks:add(c2s_copy_session, Host, ?MODULE,
 		       c2s_copy_session, 50),
     ejabberd_hooks:add(c2s_session_resumed, Host, ?MODULE,
@@ -175,6 +180,8 @@ unregister_hooks(Host) ->
 			  add_stream_feature, 50),
     ejabberd_hooks:delete(c2s_authenticated_packet, Host, ?MODULE,
 			  c2s_authenticated_packet, 50),
+    ejabberd_hooks:delete(csi_activity, Host, ?MODULE,
+			  csi_activity, 50),
     ejabberd_hooks:delete(c2s_copy_session, Host, ?MODULE,
 			  c2s_copy_session, 50),
     ejabberd_hooks:delete(c2s_session_resumed, Host, ?MODULE,
@@ -187,16 +194,22 @@ unregister_hooks(Host) ->
 %%--------------------------------------------------------------------
 -spec c2s_stream_started(c2s_state(), stream_start()) -> c2s_state().
 c2s_stream_started(State, _) ->
-    State#{csi_state => active, csi_queue => queue_new()}.
+    init_csi_state(State).
 
 -spec c2s_authenticated_packet(c2s_state(), xmpp_element()) -> c2s_state().
-c2s_authenticated_packet(C2SState, #csi{type = active}) ->
-    C2SState1 = C2SState#{csi_state => active},
-    flush_queue(C2SState1);
-c2s_authenticated_packet(C2SState, #csi{type = inactive}) ->
-    C2SState#{csi_state => inactive};
+c2s_authenticated_packet(#{lserver := LServer} = C2SState, #csi{type = active}) ->
+    ejabberd_hooks:run_fold(csi_activity, LServer, C2SState, [active]);
+c2s_authenticated_packet(#{lserver := LServer} = C2SState, #csi{type = inactive}) ->
+    ejabberd_hooks:run_fold(csi_activity, LServer, C2SState, [inactive]);
 c2s_authenticated_packet(C2SState, _) ->
     C2SState.
+
+-spec csi_activity(c2s_state(), active | inactive) -> c2s_state().
+csi_activity(C2SState, active) ->
+    C2SState1 = C2SState#{csi_state => active},
+    flush_queue(C2SState1);
+csi_activity(C2SState, inactive) ->
+    C2SState#{csi_state => inactive}.
 
 -spec c2s_copy_session(c2s_state(), c2s_state()) -> c2s_state().
 c2s_copy_session(C2SState, #{csi_queue := Q}) ->
@@ -224,7 +237,7 @@ filter_chat_states({#message{meta = #{csi_resend := true}}, _} = Acc) ->
     Acc;
 filter_chat_states({#message{from = From, to = To} = Msg,
 		    #{csi_state := inactive} = C2SState} = Acc) ->
-    case xmpp_util:is_standalone_chat_state(Msg) of
+    case misc:is_standalone_chat_state(Msg) of
 	true ->
 	    case {From, To} of
 		{#jid{luser = U, lserver = S}, #jid{luser = U, lserver = S}} ->
@@ -265,7 +278,10 @@ filter_other({Stanza, #{jid := JID} = C2SState} = Acc) when ?is_stanza(Stanza) -
 	    Acc;
 	_ ->
 	    ?DEBUG("Won't add stanza for ~s to CSI queue", [jid:encode(JID)]),
-	    From = xmpp:get_from(Stanza),
+	    From = case xmpp:get_from(Stanza) of
+		       undefined -> JID;
+		       F -> F
+		   end,
 	    C2SState1 = dequeue_sender(From, C2SState),
 	    {Stanza, C2SState1}
     end;
@@ -276,7 +292,7 @@ filter_other(Acc) ->
 add_stream_feature(Features, Host) ->
     case gen_mod:is_loaded(Host, ?MODULE) of
 	true ->
-	    [#feature_csi{xmlns = <<"urn:xmpp:csi:0">>} | Features];
+	    [#feature_csi{} | Features];
 	false ->
 	    Features
     end.
@@ -284,6 +300,10 @@ add_stream_feature(Features, Host) ->
 %%--------------------------------------------------------------------
 %% Internal functions.
 %%--------------------------------------------------------------------
+-spec init_csi_state(c2s_state()) -> c2s_state().
+init_csi_state(C2SState) ->
+    C2SState#{csi_state => active, csi_queue => queue_new()}.
+
 -spec enqueue_stanza(csi_type(), stanza(), c2s_state()) -> filter_acc().
 enqueue_stanza(Type, Stanza, #{csi_state := inactive,
 			       csi_queue := Q} = C2SState) ->
@@ -302,12 +322,18 @@ enqueue_stanza(_Type, Stanza, State) ->
 
 -spec dequeue_sender(jid(), c2s_state()) -> c2s_state().
 dequeue_sender(#jid{luser = U, lserver = S} = Sender,
-	       #{csi_queue := Q, jid := JID} = C2SState) ->
-    ?DEBUG("Flushing packets of ~s@~s from CSI queue of ~s",
-	   [U, S, jid:encode(JID)]),
-    {Elems, Q1} = queue_take(Sender, Q),
-    C2SState1 = flush_stanzas(C2SState, Elems),
-    C2SState1#{csi_queue => Q1}.
+	       #{jid := JID} = C2SState) ->
+    case maps:get(csi_queue, C2SState, undefined) of
+	undefined ->
+	    %% This may happen when the module is (re)loaded in runtime
+	    init_csi_state(C2SState);
+	Q ->
+	    ?DEBUG("Flushing packets of ~s@~s from CSI queue of ~s",
+		   [U, S, jid:encode(JID)]),
+	    {Elems, Q1} = queue_take(Sender, Q),
+	    C2SState1 = flush_stanzas(C2SState, Elems),
+	    C2SState1#{csi_queue => Q1}
+    end.
 
 -spec flush_queue(c2s_state()) -> c2s_state().
 flush_queue(#{csi_queue := Q, jid := JID} = C2SState) ->
@@ -326,7 +352,7 @@ flush_stanzas(#{lserver := LServer} = C2SState, Elems) ->
 
 -spec add_delay_info(stanza(), binary(), csi_timestamp()) -> stanza().
 add_delay_info(Stanza, LServer, {_Seq, TimeStamp}) ->
-    Stanza1 = xmpp_util:add_delay_info(
+    Stanza1 = misc:add_delay_info(
 		Stanza, jid:make(LServer), TimeStamp,
 		<<"Client Inactive">>),
     xmpp:put_meta(Stanza1, csi_resend, true).

@@ -28,7 +28,7 @@
 
 -author('stephen.roettger@googlemail.com').
 
--include("ejabberd.hrl").
+-include("scram.hrl").
 -include("logger.hrl").
 
 %% External exports
@@ -132,7 +132,7 @@ password_to_scram(Password) ->
 password_to_scram(#scram{} = Password, _) ->
     Password;
 password_to_scram(Password, IterationCount) ->
-    Salt = crypto:rand_bytes(?SALT_LENGTH),
+    Salt = p1_rand:bytes(?SALT_LENGTH),
     SaltedPassword = salted_password(Password, Salt, IterationCount),
     StoredKey = stored_key(scram2:client_key(SaltedPassword)),
     ServerKey = server_key(SaltedPassword),
@@ -196,3 +196,4 @@ crypto_hmac(sha, Key, Data) ->
 crypto_hmac(sha, Key, Data) ->
     crypto:hmac(sha, Key, Data).
 -endif.
+

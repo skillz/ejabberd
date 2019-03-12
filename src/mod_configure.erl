@@ -5,7 +5,7 @@
 %%% Created : 19 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -35,10 +35,9 @@
 	 get_local_features/5, get_local_items/5,
 	 adhoc_local_items/4, adhoc_local_commands/4,
 	 get_sm_identity/5, get_sm_features/5, get_sm_items/5,
-	 adhoc_sm_items/4, adhoc_sm_commands/4, mod_opt_type/1,
+	 adhoc_sm_items/4, adhoc_sm_commands/4, mod_options/1,
 	 depends/2]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 -include("ejabberd_sm.hrl").
@@ -192,7 +191,7 @@ get_local_identity(Acc, _From, _To, Node, Lang) ->
 
 -define(INFO_RESULT(Allow, Feats, Lang),
 	case Allow of
-	  deny -> {error, xmpp:err_forbidden(<<"Denied by ACL">>, Lang)};
+	  deny -> {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
 	  allow -> {result, Feats}
 	end).
 
@@ -310,7 +309,7 @@ get_sm_items(Acc, From,
 		 Items ++ Nodes ++ get_user_resources(User, Server)};
 	    {allow, <<"config">>} -> {result, []};
 	    {_, <<"config">>} ->
-		  {error, xmpp:err_forbidden(<<"Denied by ACL">>, Lang)};
+		  {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
 	    _ -> Acc
 	  end
     end.
@@ -432,7 +431,7 @@ get_local_items(Acc, From, #jid{lserver = LServer} = To,
       _ ->
 	  LNode = tokenize(Node),
 	  Allow = acl:match_rule(LServer, configure, From),
-	  Err = xmpp:err_forbidden(<<"Denied by ACL">>, Lang),
+	  Err = xmpp:err_forbidden(<<"Access denied by service policy">>, Lang),
 	  case LNode of
 	    [<<"config">>] ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
@@ -753,7 +752,7 @@ get_stopped_nodes(_Lang) ->
 	  lists:map(
 	    fun (N) ->
 		    S = iolist_to_binary(atom_to_list(N)),
-		    #disco_item{jid = jid:make(?MYNAME),
+		    #disco_item{jid = jid:make(ejabberd_config:get_myname()),
 				node = <<"stopped nodes/", S/binary>>,
 				name = S}
 	    end,
@@ -765,7 +764,7 @@ get_stopped_nodes(_Lang) ->
 -define(COMMANDS_RESULT(LServerOrGlobal, From, To,
 			Request, Lang),
 	case acl:match_rule(LServerOrGlobal, configure, From) of
-	  deny -> {error, xmpp:err_forbidden(<<"Denied by ACL">>, Lang)};
+	  deny -> {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
 	  allow -> adhoc_local_commands(From, To, Request)
 	end).
 
@@ -1092,7 +1091,7 @@ get_form(Host, [<<"config">>, <<"acls">>], Lang) ->
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'text-multi',
-				   label = ?T(Lang, <<"Access control lists">>),
+				   label = ?T(Lang, <<"Access Control Lists">>),
 				   var = <<"acls">>,
 				   values = ACLs}]}};
 get_form(Host, [<<"config">>, <<"access">>], Lang) ->
@@ -1110,7 +1109,7 @@ get_form(Host, [<<"config">>, <<"access">>], Lang) ->
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'text-multi',
-				   label = ?T(Lang, <<"Access rules">>),
+				   label = ?T(Lang, <<"Access Rules">>),
 				   var = <<"access">>,
 				   values = Accs}]}};
 get_form(_Host, ?NS_ADMINL(<<"add-user">>), Lang) ->
@@ -1525,11 +1524,14 @@ set_form(From, Host, ?NS_ADMINL(<<"add-user">>), _Lang,
     AccountJID = jid:decode(AccountString),
     User = AccountJID#jid.luser,
     Server = AccountJID#jid.lserver,
-    true = lists:member(Server, ?MYHOSTS),
+    true = lists:member(Server, ejabberd_config:get_myhosts()),
     true = Server == Host orelse
 	     get_permission_level(From) == global,
-    ejabberd_auth:try_register(User, Server, Password),
-    {result, undefined};
+    case ejabberd_auth:try_register(User, Server, Password) of
+	ok -> {result, undefined};
+	{error, exists} -> {error, xmpp:err_conflict()};
+	{error, not_allowed} -> {error, xmpp:err_not_allowed()}
+    end;
 set_form(From, Host, ?NS_ADMINL(<<"delete-user">>),
 	 _Lang, XData) ->
     AccountStringList = get_values(<<"accountjids">>,
@@ -1549,39 +1551,17 @@ set_form(From, Host, ?NS_ADMINL(<<"delete-user">>),
      || {User, Server} <- ASL2],
     {result, undefined};
 set_form(From, Host, ?NS_ADMINL(<<"end-user-session">>),
-	 Lang, XData) ->
+	 _Lang, XData) ->
     AccountString = get_value(<<"accountjid">>, XData),
     JID = jid:decode(AccountString),
-    LUser = JID#jid.luser,
     LServer = JID#jid.lserver,
     true = LServer == Host orelse
 	     get_permission_level(From) == global,
-    Xmlelement = xmpp:serr_policy_violation(<<"has been kicked">>, Lang),
     case JID#jid.lresource of
-      <<>> ->
-	  SIs = mnesia:dirty_select(session,
-				    [{#session{usr = {LUser, LServer, '_'},
-					       sid = '$1',
-					       info = '$2',
-						_ = '_'},
-				      [], [{{'$1', '$2'}}]}]),
-	  Pids = [P || {{_, P}, Info} <- SIs,
-		       not proplists:get_bool(offline, Info)],
-	  lists:foreach(fun(Pid) ->
-				Pid ! {kick, kicked_by_admin, Xmlelement}
-			end, Pids);
-      R ->
-	  [{{_, Pid}, Info}] = mnesia:dirty_select(
-				 session,
-				 [{#session{usr = {LUser, LServer, R},
-					    sid = '$1',
-					    info = '$2',
-						      _ = '_'},
-				   [], [{{'$1', '$2'}}]}]),
-	  case proplists:get_bool(offline, Info) of
-	    true -> ok;
-	    false -> Pid ! {kick, kicked_by_admin, Xmlelement}
-	  end
+	<<>> ->
+	    ejabberd_sm:kick_user(JID#jid.luser, JID#jid.lserver);
+	R ->
+	    ejabberd_sm:kick_user(JID#jid.luser, JID#jid.lserver, R)
     end,
     {result, undefined};
 set_form(From, Host,
@@ -1737,7 +1717,7 @@ adhoc_sm_commands(_Acc, From,
 				 action = Action, xdata = XData} = Request) ->
     case acl:match_rule(LServer, configure, From) of
 	deny ->
-	    {error, xmpp:err_forbidden(<<"Denied by ACL">>, Lang)};
+	    {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
 	allow ->
 	    ActionIsExecute = Action == execute orelse Action == complete,
 	    if Action == cancel ->
@@ -1809,4 +1789,4 @@ set_sm_form(User, Server, <<"config">>,
 set_sm_form(_User, _Server, _Node, _Request) ->
     {error, xmpp:err_service_unavailable()}.
 
-mod_opt_type(_) -> [].
+mod_options(_) -> [].
