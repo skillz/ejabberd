@@ -5,7 +5,7 @@
 %%% Created :  2 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -33,20 +33,21 @@
 -behaviour(gen_server).
 -behaviour(gen_mod).
 
--export([start/2, stop/1, get_sm_features/5, mod_options/1,
+-export([start/2, stop/1, get_sm_features/5,
 	 process_local_iq/1, process_sm_iq/1, string2lower/1,
 	 remove_user/2, export/1, import_info/0, import/5, import_start/2,
 	 depends/2, process_search/1, process_vcard/1, get_vcard/2,
 	 disco_items/5, disco_features/5, disco_identity/5,
-	 vcard_iq_set/1, mod_opt_type/1, set_vcard/3, make_vcard_search/4]).
+	 decode_iq_subel/1, mod_opt_type/1, set_vcard/3, make_vcard_search/4]).
 -export([init/1, handle_call/3, handle_cast/2,
 	 handle_info/2, terminate/2, code_change/3]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 -include("mod_vcard.hrl").
--include("translate.hrl").
 
+-define(JUD_MATCHES, 30).
 -define(VCARD_CACHE, vcard_cache).
 
 -callback init(binary(), gen_mod:opts()) -> any().
@@ -87,15 +88,15 @@ init([Host, Opts]) ->
     init_cache(Mod, Host, Opts),
     ejabberd_hooks:add(remove_user, Host, ?MODULE,
 		       remove_user, 50),
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, gen_iq_handler:iqdisc(Host)),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host,
-				  ?NS_VCARD, ?MODULE, process_local_iq),
+				  ?NS_VCARD, ?MODULE, process_local_iq, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host,
-				  ?NS_VCARD, ?MODULE, process_sm_iq),
+				  ?NS_VCARD, ?MODULE, process_sm_iq, IQDisc),
     ejabberd_hooks:add(disco_sm_features, Host, ?MODULE,
 		       get_sm_features, 50),
-    ejabberd_hooks:add(vcard_iq_set, Host, ?MODULE, vcard_iq_set, 50),
-    MyHosts = gen_mod:get_opt_hosts(Host, Opts),
-    Search = gen_mod:get_opt(search, Opts),
+    MyHosts = gen_mod:get_opt_hosts(Host, Opts, <<"vjud.@HOST@">>),
+    Search = gen_mod:get_opt(search, Opts, false),
     if Search ->
 	    lists:foreach(
 	      fun(MyHost) ->
@@ -106,20 +107,20 @@ init([Host, Opts]) ->
 		      ejabberd_hooks:add(
 			disco_local_identity, MyHost, ?MODULE, disco_identity, 100),
 		      gen_iq_handler:add_iq_handler(
-			ejabberd_local, MyHost, ?NS_SEARCH, ?MODULE, process_search),
+			ejabberd_local, MyHost, ?NS_SEARCH, ?MODULE, process_search, IQDisc),
 		      gen_iq_handler:add_iq_handler(
-			ejabberd_local, MyHost, ?NS_VCARD, ?MODULE, process_vcard),
+			ejabberd_local, MyHost, ?NS_VCARD, ?MODULE, process_vcard, IQDisc),
 		      gen_iq_handler:add_iq_handler(
 			ejabberd_local, MyHost, ?NS_DISCO_ITEMS, mod_disco,
-			process_local_iq_items),
+			process_local_iq_items, IQDisc),
 		      gen_iq_handler:add_iq_handler(
 			ejabberd_local, MyHost, ?NS_DISCO_INFO, mod_disco,
-			process_local_iq_info),
+			process_local_iq_info, IQDisc),
 		      case Mod:is_search_supported(Host) of
 			  false ->
 			      ?WARNING_MSG("vcard search functionality is "
 					   "not implemented for ~s backend",
-					   [gen_mod:get_opt(db_type, Opts)]);
+					   [gen_mod:db_type(Host, Opts, ?MODULE)]);
 			  true ->
 			      ejabberd_router:register_route(MyHost, Host)
 		      end
@@ -151,7 +152,6 @@ terminate(_Reason, #state{hosts = MyHosts, server_host = Host}) ->
     gen_iq_handler:remove_iq_handler(ejabberd_local, Host, ?NS_VCARD),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_VCARD),
     ejabberd_hooks:delete(disco_sm_features, Host, ?MODULE, get_sm_features, 50),
-    ejabberd_hooks:delete(vcard_iq_set, Host, ?MODULE, vcard_iq_set, 50),
     Mod = gen_mod:db_mod(Host, ?MODULE),
     Mod:stop(Host),
     lists:foreach(
@@ -185,10 +185,18 @@ get_sm_features(Acc, _From, _To, Node, _Lang) ->
       <<"">> ->
 	  case Acc of
 	    {result, Features} ->
-		{result, [?NS_VCARD | Features]};
-	    empty -> {result, [?NS_VCARD]}
+		{result, [?NS_DISCO_INFO, ?NS_VCARD | Features]};
+	    empty -> {result, [?NS_DISCO_INFO, ?NS_VCARD]}
 	  end;
       _ -> Acc
+    end.
+
+-spec decode_iq_subel(xmpp_element() | xmlel()) -> xmpp_element() | xmlel().
+%% Tell gen_iq_handler not to decode vcard elements
+decode_iq_subel(El) ->
+    case xmpp:get_ns(El) of
+	?NS_VCARD -> xmpp:encode(El);
+	_ -> xmpp:decode(El)
     end.
 
 -spec process_local_iq(iq()) -> iq().
@@ -196,22 +204,21 @@ process_local_iq(#iq{type = set, lang = Lang} = IQ) ->
     Txt = <<"Value 'set' of 'type' attribute is not allowed">>,
     xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
 process_local_iq(#iq{type = get, lang = Lang} = IQ) ->
+    Desc = translate:translate(Lang, <<"Erlang Jabber Server">>),
     xmpp:make_iq_result(
       IQ, #vcard_temp{fn = <<"ejabberd">>,
-		      url = ejabberd_config:get_uri(),
-		      desc = misc:get_descr(Lang, ?T("Erlang Jabber Server")),
+		      url = ?EJABBERD_URI,
+		      desc = <<Desc/binary, $\n, ?COPYRIGHT>>,
 		      bday = <<"2002-11-16">>}).
 
 -spec process_sm_iq(iq()) -> iq().
-process_sm_iq(#iq{type = set, lang = Lang, from = From} = IQ) ->
-    #jid{lserver = LServer} = From,
-    case lists:member(LServer, ejabberd_config:get_myhosts()) of
+process_sm_iq(#iq{type = set, lang = Lang, from = From,
+		  sub_els = [SubEl]} = IQ) ->
+    #jid{user = User, lserver = LServer} = From,
+    case lists:member(LServer, ?MYHOSTS) of
 	true ->
-	    case ejabberd_hooks:run_fold(vcard_iq_set, LServer, IQ, []) of
-		drop -> ignore;
-		#stanza_error{} = Err -> xmpp:make_error(IQ, Err);
-		_ -> xmpp:make_iq_result(IQ)
-	    end;
+	    set_vcard(User, LServer, SubEl),
+	    xmpp:make_iq_result(IQ);
 	false ->
 	    Txt = <<"The query is only allowed from local users">>,
 	    xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang))
@@ -233,10 +240,11 @@ process_vcard(#iq{type = set, lang = Lang} = IQ) ->
     Txt = <<"Value 'set' of 'type' attribute is not allowed">>,
     xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
 process_vcard(#iq{type = get, lang = Lang} = IQ) ->
+    Desc = translate:translate(Lang, <<"ejabberd vCard module">>),
     xmpp:make_iq_result(
       IQ, #vcard_temp{fn = <<"ejabberd/mod_vcard">>,
-		      url = ejabberd_config:get_uri(),
-		      desc = misc:get_descr(Lang, ?T("ejabberd vCard module"))}).
+		      url = ?EJABBERD_URI,
+		      desc = <<Desc/binary, $\n, ?COPYRIGHT>>}).
 
 -spec process_search(iq()) -> iq().
 process_search(#iq{type = get, to = To, lang = Lang} = IQ) ->
@@ -282,12 +290,10 @@ disco_features(Acc, _From, _To, _Node, _Lang) ->
 
 -spec disco_identity([identity()], jid(), jid(),
 		     binary(),  binary()) -> [identity()].
-disco_identity(Acc, _From, To, <<"">>, Lang) ->
-    Host = ejabberd_router:host_of_route(To#jid.lserver),
-    Name = gen_mod:get_module_opt(Host, ?MODULE, name),
+disco_identity(Acc, _From, _To, <<"">>, Lang) ->
     [#identity{category = <<"directory">>,
 	       type = <<"user">>,
-	       name = translate:translate(Lang, Name)}|Acc];
+	       name = translate:translate(Lang, <<"vCard User Search">>)}|Acc];
 disco_identity(Acc, _From, _To, _Node, _Lang) ->
     Acc.
 
@@ -374,33 +380,19 @@ make_vcard_search(User, LUser, LServer, VCARD) ->
 		  orgunit = OrgUnit,
 		  lorgunit = LOrgUnit}.
 
--spec vcard_iq_set(iq()) -> iq() | {stop, stanza_error()}.
-vcard_iq_set(#iq{from = From, lang = Lang, sub_els = [VCard]} = IQ) ->
-    #jid{user = User, lserver = LServer} = From,
-    case set_vcard(User, LServer, VCard) of
-	{error, badarg} ->
-	    %% Should not be here?
-	    Txt = <<"Nodeprep has failed">>,
-	    {stop, xmpp:err_internal_server_error(Txt, Lang)};
-	ok ->
-	    IQ
-    end;
-vcard_iq_set(Acc) ->
-    Acc.
-
--spec set_vcard(binary(), binary(), xmlel() | vcard_temp()) -> {error, badarg} | ok.
+-spec set_vcard(binary(), binary(), xmlel()) -> {error, badarg} | ok.
 set_vcard(User, LServer, VCARD) ->
     case jid:nodeprep(User) of
 	error ->
 	    {error, badarg};
 	LUser ->
-	    VCardEl = xmpp:encode(VCARD),
-	    VCardSearch = make_vcard_search(User, LUser, LServer, VCardEl),
+	    VCardSearch = make_vcard_search(User, LUser, LServer, VCARD),
 	    Mod = gen_mod:db_mod(LServer, ?MODULE),
-	    Mod:set_vcard(LUser, LServer, VCardEl, VCardSearch),
+	    Mod:set_vcard(LUser, LServer, VCARD, VCardSearch),
 	    ets_cache:delete(?VCARD_CACHE, {LUser, LServer},
 			     cache_nodes(Mod, LServer)),
-	    ok
+	    ejabberd_hooks:run(vcard_set, LServer,
+			       [LUser, LServer, VCARD])
     end.
 
 -spec string2lower(binary()) -> binary().
@@ -462,8 +454,9 @@ item_to_field(Items) ->
 search(LServer, XFields) ->
     Data = [{Var, Vals} || #xdata_field{var = Var, values = Vals} <- XFields],
     Mod = gen_mod:db_mod(LServer, ?MODULE),
-    AllowReturnAll = gen_mod:get_module_opt(LServer, ?MODULE, allow_return_all),
-    MaxMatch = gen_mod:get_module_opt(LServer, ?MODULE, matches),
+    AllowReturnAll = gen_mod:get_module_opt(LServer, ?MODULE, allow_return_all,
+                                            false),
+    MaxMatch = gen_mod:get_module_opt(LServer, ?MODULE, matches, ?JUD_MATCHES),
     Mod:search(LServer, Data, AllowReturnAll, MaxMatch).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -486,10 +479,16 @@ init_cache(Mod, Host, Opts) ->
     end.
 
 -spec cache_opts(binary(), gen_mod:opts()) -> [proplists:property()].
-cache_opts(_Host, Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
+cache_opts(Host, Opts) ->
+    MaxSize = gen_mod:get_opt(
+		cache_size, Opts,
+		ejabberd_config:cache_size(Host)),
+    CacheMissed = gen_mod:get_opt(
+		    cache_missed, Opts,
+		    ejabberd_config:cache_missed(Host)),
+    LifeTime = case gen_mod:get_opt(
+		      cache_life_time, Opts,
+		      ejabberd_config:cache_life_time(Host)) of
 		   infinity -> infinity;
 		   I -> timer:seconds(I)
 	       end,
@@ -499,7 +498,10 @@ cache_opts(_Host, Opts) ->
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false ->
+	    gen_mod:get_module_opt(
+	      Host, ?MODULE, use_cache,
+	      ejabberd_config:use_cache(Host))
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].
@@ -530,31 +532,25 @@ depends(_Host, _Opts) ->
 mod_opt_type(allow_return_all) ->
     fun (B) when is_boolean(B) -> B end;
 mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(name) -> fun iolist_to_binary/1;
-mod_opt_type(host) -> fun ejabberd_config:v_host/1;
-mod_opt_type(hosts) -> fun ejabberd_config:v_hosts/1;
+mod_opt_type(host) -> fun iolist_to_binary/1;
+mod_opt_type(hosts) ->
+    fun (L) -> lists:map(fun iolist_to_binary/1, L) end;
+mod_opt_type(iqdisc) -> fun gen_iq_handler:check_type/1;
 mod_opt_type(matches) ->
     fun (infinity) -> infinity;
 	(I) when is_integer(I), I > 0 -> I
     end;
 mod_opt_type(search) ->
     fun (B) when is_boolean(B) -> B end;
+mod_opt_type(search_all_hosts) ->
+    fun (B) when is_boolean(B) -> B end;
 mod_opt_type(O) when O == cache_life_time; O == cache_size ->
     fun (I) when is_integer(I), I > 0 -> I;
         (infinity) -> infinity
     end;
 mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
-
-mod_options(Host) ->
-    [{allow_return_all, false},
-     {host, <<"vjud.@HOST@">>},
-     {hosts, []},
-     {matches, 30},
-     {search, false},
-     {name, ?T("vCard User Search")},
-     {db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+    fun (B) when is_boolean(B) -> B end;
+mod_opt_type(_) ->
+    [allow_return_all, db_type, host, hosts, iqdisc, matches,
+     search, search_all_hosts, cache_life_time, cache_size,
+     use_cache, cache_missed].

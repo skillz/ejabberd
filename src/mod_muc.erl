@@ -5,7 +5,7 @@
 %%% Created : 19 Mar 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -39,7 +39,6 @@
 	 reload/3,
 	 room_destroyed/4,
 	 store_room/4,
-	 store_room/5,
 	 restore_room/3,
 	 forget_room/3,
 	 create_room/5,
@@ -66,16 +65,16 @@
 	 count_online_rooms_by_user/3,
 	 get_online_rooms_by_user/3,
 	 can_use_nick/4,
-	 check_create_room/4]).
+	 db_subscribe/3]).
 
 -export([init/1, handle_call/3, handle_cast/2,
 	 handle_info/2, terminate/2, code_change/3,
-	 mod_opt_type/1, mod_options/1, depends/2]).
+	 mod_opt_type/1, depends/2]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 -include("mod_muc.hrl").
--include("translate.hrl").
 
 -record(state,
 	{hosts = [] :: [binary()],
@@ -85,12 +84,12 @@
          max_rooms_discoitems = 100 :: non_neg_integer(),
 	 queue_type = ram :: ram | file,
          default_room_opts = [] :: list(),
-         room_shaper = none :: ejabberd_shaper:shaper()}).
+         room_shaper = none :: shaper:shaper()}).
 
 -type muc_room_opts() :: [{atom(), any()}].
 -callback init(binary(), gen_mod:opts()) -> any().
 -callback import(binary(), binary(), [binary()]) -> ok.
--callback store_room(binary(), binary(), binary(), list(), list()|undefined) -> {atomic, any()}.
+-callback store_room(binary(), binary(), binary(), list()) -> {atomic, any()}.
 -callback restore_room(binary(), binary(), binary()) -> muc_room_opts() | error.
 -callback forget_room(binary(), binary(), binary()) -> {atomic, any()}.
 -callback can_use_nick(binary(), binary(), jid(), binary()) -> boolean().
@@ -107,20 +106,16 @@
 -callback unregister_online_user(binary(), ljid(), binary(), binary()) -> any().
 -callback count_online_rooms_by_user(binary(), binary(), binary()) -> non_neg_integer().
 -callback get_online_rooms_by_user(binary(), binary(), binary()) -> [{binary(), binary()}].
--callback get_subscribed_rooms(binary(), binary(), jid()) -> [{ljid(), [binary()]}] | [].
 
 %%====================================================================
 %% API
 %%====================================================================
 start(Host, Opts) ->
-    ejabberd_hooks:add(check_create_room, Host, ?MODULE,
-               check_create_room, 50),
     gen_mod:start_child(?MODULE, Host, Opts).
 
 stop(Host) ->
     Rooms = shutdown_rooms(Host),
-    ejabberd_hooks:delete(check_create_room, Host, ?MODULE,
-               check_create_room, 50),
+    ejabberd_hooks:delete(db_subscribe, ?MODULE, db_subscribe, 10),
     gen_mod:stop_child(?MODULE, Host),
     {wait, Rooms}.
 
@@ -164,12 +159,9 @@ create_room(Host, Name, From, Nick, Opts) ->
     gen_server:call(Proc, {create, Name, Host, From, Nick, Opts}).
 
 store_room(ServerHost, Host, Name, Opts) ->
-    store_room(ServerHost, Host, Name, Opts, undefined).
-
-store_room(ServerHost, Host, Name, Opts, ChangesHints) ->
     LServer = jid:nameprep(ServerHost),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
-    Mod:store_room(LServer, Host, Name, Opts, ChangesHints).
+    Mod:store_room(LServer, Host, Name, Opts).
 
 restore_room(ServerHost, Host, Name) ->
     LServer = jid:nameprep(ServerHost),
@@ -178,8 +170,7 @@ restore_room(ServerHost, Host, Name) ->
 
 forget_room(ServerHost, Host, Name) ->
     LServer = jid:nameprep(ServerHost),
-    % Removed hook which triggers archive removal
-    % ejabberd_hooks:run(remove_room, LServer, [LServer, Name, Host]),
+    %% Removed hook that erases MAM.
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:forget_room(LServer, Host, Name).
 
@@ -237,6 +228,7 @@ get_online_rooms_by_user(ServerHost, LUser, LServer) ->
 
 init([Host, Opts]) ->
     process_flag(trap_exit, true),
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, gen_iq_handler:iqdisc(Host)),
     #state{access = Access, hosts = MyHosts,
 	   history_size = HistorySize, queue_type = QueueType,
 	   room_shaper = RoomShaper} = State = init_state(Host, Opts),
@@ -246,12 +238,12 @@ init([Host, Opts]) ->
     RMod:init(Host, [{hosts, MyHosts}|Opts]),
     lists:foreach(
       fun(MyHost) ->
-	      register_iq_handlers(MyHost),
+	      register_iq_handlers(MyHost, IQDisc),
 	      ejabberd_router:register_route(MyHost, Host)
-%	      Permenent rooms are not loaded into memory.
-%	      load_permanent_rooms(MyHost, Host, Access, HistorySize,
-%				   RoomShaper, QueueType)
+        %% Permenent rooms are not loaded into memory.
       end, MyHosts),
+    %% Hook added to save subscription to DB.
+    ejabberd_hooks:add(db_subscribe, ?MODULE, db_subscribe, 10),
     {ok, State}.
 
 handle_call(stop, _From, State) ->
@@ -277,6 +269,8 @@ handle_call({create, Room, Host, From, Nick, Opts}, _From,
     {reply, ok, State}.
 
 handle_cast({reload, ServerHost, NewOpts, OldOpts}, #state{hosts = OldHosts}) ->
+    NewIQDisc = gen_mod:get_opt(iqdisc, NewOpts, gen_iq_handler:iqdisc(ServerHost)),
+    OldIQDisc = gen_mod:get_opt(iqdisc, OldOpts, gen_iq_handler:iqdisc(ServerHost)),
     NewMod = gen_mod:db_mod(ServerHost, NewOpts, ?MODULE),
     NewRMod = gen_mod:ram_db_mod(ServerHost, NewOpts, ?MODULE),
     OldMod = gen_mod:db_mod(ServerHost, OldOpts, ?MODULE),
@@ -292,25 +286,24 @@ handle_cast({reload, ServerHost, NewOpts, OldOpts}, #state{hosts = OldHosts}) ->
        true ->
 	    ok
     end,
+    if (NewIQDisc /= OldIQDisc) ->
+	    lists:foreach(
+	      fun(NewHost) ->
+		      register_iq_handlers(NewHost, NewIQDisc)
+	      end, NewHosts -- (NewHosts -- OldHosts));
+       true ->
+	    ok
+    end,
     lists:foreach(
       fun(NewHost) ->
 	      ejabberd_router:register_route(NewHost, ServerHost),
-	      register_iq_handlers(NewHost)
+	      register_iq_handlers(NewHost, NewIQDisc)
       end, NewHosts -- OldHosts),
     lists:foreach(
       fun(OldHost) ->
 	      ejabberd_router:unregister_route(OldHost),
 	      unregister_iq_handlers(OldHost)
       end, OldHosts -- NewHosts),
-    lists:foreach(
-      fun(Host) ->
-	      lists:foreach(
-		fun({_, _, Pid}) when node(Pid) == node() ->
-			Pid ! config_reloaded;
-		   (_) ->
-			ok
-		end, get_online_rooms(ServerHost, Host))
-      end, misc:intersection(NewHosts, OldHosts)),
     {noreply, NewState};
 handle_cast(Msg, State) ->
     ?WARNING_MSG("unexpected cast: ~p", [Msg]),
@@ -356,39 +349,40 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%% Internal functions
 %%--------------------------------------------------------------------
 init_state(Host, Opts) ->
-    MyHosts = gen_mod:get_opt_hosts(Host, Opts),
-    Access = gen_mod:get_opt(access, Opts),
-    AccessCreate = gen_mod:get_opt(access_create, Opts),
-    AccessAdmin = gen_mod:get_opt(access_admin, Opts),
-    AccessPersistent = gen_mod:get_opt(access_persistent, Opts),
-    AccessMam = gen_mod:get_opt(access_mam, Opts),
-    HistorySize = gen_mod:get_opt(history_size, Opts),
-    MaxRoomsDiscoItems = gen_mod:get_opt(max_rooms_discoitems, Opts),
-    DefRoomOpts = gen_mod:get_opt(default_room_options, Opts),
-    QueueType = gen_mod:get_opt(queue_type, Opts),
-    RoomShaper = gen_mod:get_opt(room_shaper, Opts),
+    MyHosts = gen_mod:get_opt_hosts(Host, Opts,
+				    <<"conference.@HOST@">>),
+    Access = gen_mod:get_opt(access, Opts, all),
+    AccessCreate = gen_mod:get_opt(access_create, Opts, all),
+    AccessAdmin = gen_mod:get_opt(access_admin, Opts, none),
+    AccessPersistent = gen_mod:get_opt(access_persistent, Opts, all),
+    HistorySize = gen_mod:get_opt(history_size, Opts, 20),
+    MaxRoomsDiscoItems = gen_mod:get_opt(max_rooms_discoitems, Opts, 100),
+    DefRoomOpts = gen_mod:get_opt(default_room_options, Opts, []),
+    QueueType = gen_mod:get_opt(queue_type, Opts,
+				ejabberd_config:default_queue_type(Host)),
+    RoomShaper = gen_mod:get_opt(room_shaper, Opts, none),
     #state{hosts = MyHosts,
 	   server_host = Host,
-	   access = {Access, AccessCreate, AccessAdmin, AccessPersistent, AccessMam},
+	   access = {Access, AccessCreate, AccessAdmin, AccessPersistent},
 	   default_room_opts = DefRoomOpts,
 	   queue_type = QueueType,
 	   history_size = HistorySize,
 	   max_rooms_discoitems = MaxRoomsDiscoItems,
 	   room_shaper = RoomShaper}.
 
-register_iq_handlers(Host) ->
+register_iq_handlers(Host, IQDisc) ->
     gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_REGISTER,
-				  ?MODULE, process_register),
+				  ?MODULE, process_register, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_VCARD,
-				  ?MODULE, process_vcard),
+				  ?MODULE, process_vcard, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_MUCSUB,
-				  ?MODULE, process_mucsub),
+				  ?MODULE, process_mucsub, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_MUC_UNIQUE,
-				  ?MODULE, process_muc_unique),
+				  ?MODULE, process_muc_unique, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_DISCO_INFO,
-				  ?MODULE, process_disco_info),
+				  ?MODULE, process_disco_info, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_DISCO_ITEMS,
-				  ?MODULE, process_disco_items).
+				  ?MODULE, process_disco_items, IQDisc).
 
 unregister_iq_handlers(Host) ->
     gen_iq_handler:remove_iq_handler(ejabberd_local, Host, ?NS_REGISTER),
@@ -400,7 +394,7 @@ unregister_iq_handlers(Host) ->
 
 do_route(Host, ServerHost, Access, HistorySize, RoomShaper,
 	 From, To, Packet, DefRoomOpts, _MaxRoomsDiscoItems, QueueType) ->
-    {AccessRoute, _AccessCreate, _AccessAdmin, _AccessPersistent, _AccessMam} = Access,
+    {AccessRoute, _AccessCreate, _AccessAdmin, _AccessPersistent} = Access,
     case acl:match_rule(ServerHost, AccessRoute, From) of
 	allow ->
 	    do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
@@ -415,11 +409,11 @@ do_route(Host, ServerHost, Access, HistorySize, RoomShaper,
 do_route1(_Host, _ServerHost, _Access, _HistorySize, _RoomShaper,
 	  _From, #jid{luser = <<"">>, lresource = <<"">>} = _To,
 	  #iq{} = IQ, _DefRoomOpts, _QueueType) ->
-    ejabberd_router:process_iq(IQ);
+    ejabberd_local:process_iq(IQ);
 do_route1(Host, ServerHost, Access, _HistorySize, _RoomShaper,
 	  From, #jid{luser = <<"">>, lresource = <<"">>} = _To,
 	  #message{lang = Lang, body = Body, type = Type} = Packet, _, _) ->
-    {_AccessRoute, _AccessCreate, AccessAdmin, _AccessPersistent, _AccessMam} = Access,
+    {_AccessRoute, _AccessCreate, AccessAdmin, _AccessPersistent} = Access,
     if Type == error ->
 	    ok;
        true ->
@@ -440,40 +434,27 @@ do_route1(_Host, _ServerHost, _Access, _HistorySize, _RoomShaper,
     ejabberd_router:route_error(Packet, Err);
 do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 	  From, To, Packet, DefRoomOpts, QueueType) ->
-    {_AccessRoute, AccessCreate, _AccessAdmin, _AccessPersistent, _AccessMam} = Access,
+    {_AccessRoute, AccessCreate, _AccessAdmin, _AccessPersistent} = Access,
     {Room, _, Nick} = jid:tolower(To),
     RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
     case RMod:find_online_room(ServerHost, Room, Host) of
 	error ->
-% force room creation
-%	    case is_create_request(Packet) of
-%		true ->
-		    case % check_user_can_create_room(
-			 %   ServerHost, AccessCreate, From, Room) and
-			ejabberd_hooks:run_fold(check_create_room,
-					ServerHost, true,
-					[ServerHost, Room, Host]) of
-			true ->
-			    {ok, Pid} = start_new_room(
-					  Host, ServerHost, Access,
-					  Room, HistorySize,
-					  RoomShaper, From, Nick, DefRoomOpts,
-					  QueueType),
-			    RMod:register_online_room(ServerHost, Room, Host, Pid),
-			    mod_muc_room:route(Pid, Packet),
-			    ok;
-			false ->
-			    Lang = xmpp:get_lang(Packet),
-			    ErrText = <<"Room creation is denied by service policy">>,
-			    Err = xmpp:err_forbidden(ErrText, Lang),
-			    ejabberd_router:route_error(Packet, Err)
-		    end;
-%		false ->
-%		    Lang = xmpp:get_lang(Packet),
-%		    ErrText = <<"Conference room does not exist">>,
-%		    Err = xmpp:err_item_not_found(ErrText, Lang),
-%		    ejabberd_router:route_error(Packet, Err)
-%	    end;
+      case check_create_roomid(ServerHost, Room) of
+    true ->
+        {ok, Pid} = start_new_room(
+          Host, ServerHost, Access,
+          Room, HistorySize,
+          RoomShaper, From, Nick, DefRoomOpts,
+          QueueType),
+        RMod:register_online_room(ServerHost, Room, Host, Pid),
+        mod_muc_room:route(Pid, Packet),
+        ok;
+    false ->
+        Lang = xmpp:get_lang(Packet),
+        ErrText = <<"Room creation is denied by service policy">>,
+        Err = xmpp:err_forbidden(ErrText, Lang),
+        ejabberd_router:route_error(Packet, Err)
+      end;
 	{ok, Pid} ->
 	    ?DEBUG("MUC: send to process ~p~n", [Pid]),
 	    mod_muc_room:route(Pid, Packet),
@@ -482,10 +463,11 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 
 -spec process_vcard(iq()) -> iq().
 process_vcard(#iq{type = get, lang = Lang, sub_els = [#vcard_temp{}]} = IQ) ->
+    Desc = translate:translate(Lang, <<"ejabberd MUC module">>),
     xmpp:make_iq_result(
       IQ, #vcard_temp{fn = <<"ejabberd/mod_muc">>,
-		      url = ejabberd_config:get_uri(),
-		      desc = misc:get_descr(Lang, ?T("ejabberd MUC module"))});
+		      url = ?EJABBERD_URI,
+		      desc = <<Desc/binary, $\n, ?COPYRIGHT>>});
 process_vcard(#iq{type = set, lang = Lang} = IQ) ->
     Txt = <<"Value 'set' of 'type' attribute is not allowed">>,
     xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
@@ -494,28 +476,19 @@ process_vcard(#iq{lang = Lang} = IQ) ->
     xmpp:make_error(IQ, xmpp:err_service_unavailable(Txt, Lang)).
 
 -spec process_register(iq()) -> iq().
-process_register(#iq{type = Type, from = From, to = To, lang = Lang,
-		     sub_els = [El = #register{}]} = IQ) ->
+process_register(#iq{type = get, from = From, to = To, lang = Lang,
+		     sub_els = [#register{}]} = IQ) ->
     Host = To#jid.lserver,
     ServerHost = ejabberd_router:host_of_route(Host),
-    AccessRegister = gen_mod:get_module_opt(ServerHost, ?MODULE, access_register),
-    case acl:match_rule(ServerHost, AccessRegister, From) of
-	allow ->
-	    case Type of
-		get ->
-		    xmpp:make_iq_result(
-		      IQ, iq_get_register_info(ServerHost, Host, From, Lang));
-		set ->
-		    case process_iq_register_set(ServerHost, Host, From, El, Lang) of
-			{result, Result} ->
-			    xmpp:make_iq_result(IQ, Result);
-			{error, Err} ->
-			    xmpp:make_error(IQ, Err)
-		    end
-	    end;
-	deny ->
-	    ErrText = <<"Access denied by service policy">>,
-	    Err = xmpp:err_forbidden(ErrText, Lang),
+    xmpp:make_iq_result(IQ, iq_get_register_info(ServerHost, Host, From, Lang));
+process_register(#iq{type = set, from = From, to = To,
+		     lang = Lang, sub_els = [El = #register{}]} = IQ) ->
+    Host = To#jid.lserver,
+    ServerHost = ejabberd_router:host_of_route(Host),
+    case process_iq_register_set(ServerHost, Host, From, El, Lang) of
+	{result, Result} ->
+	    xmpp:make_iq_result(IQ, Result);
+	{error, Err} ->
 	    xmpp:make_error(IQ, Err)
     end.
 
@@ -523,32 +496,26 @@ process_register(#iq{type = Type, from = From, to = To, lang = Lang,
 process_disco_info(#iq{type = set, lang = Lang} = IQ) ->
     Txt = <<"Value 'set' of 'type' attribute is not allowed">>,
     xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
-process_disco_info(#iq{type = get, from = From, to = To, lang = Lang,
+process_disco_info(#iq{type = get, to = To, lang = Lang,
 		       sub_els = [#disco_info{node = <<"">>}]} = IQ) ->
     ServerHost = ejabberd_router:host_of_route(To#jid.lserver),
     RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
-    AccessRegister = gen_mod:get_module_opt(ServerHost, ?MODULE, access_register),
     X = ejabberd_hooks:run_fold(disco_info, ServerHost, [],
 				[ServerHost, ?MODULE, <<"">>, Lang]),
     MAMFeatures = case gen_mod:is_loaded(ServerHost, mod_mam) of
-		      true -> [?NS_MAM_TMP, ?NS_MAM_0, ?NS_MAM_1, ?NS_MAM_2];
+		      true -> [?NS_MAM_TMP, ?NS_MAM_0, ?NS_MAM_1];
 		      false -> []
 		  end,
     RSMFeatures = case RMod:rsm_supported() of
 		      true -> [?NS_RSM];
 		      false -> []
 		  end,
-    RegisterFeatures = case acl:match_rule(ServerHost, AccessRegister, From) of
-			   allow -> [?NS_REGISTER];
-			   deny -> []
-		       end,
     Features = [?NS_DISCO_INFO, ?NS_DISCO_ITEMS,
-		?NS_MUC, ?NS_VCARD, ?NS_MUCSUB, ?NS_MUC_UNIQUE
-		| RegisterFeatures ++ RSMFeatures ++ MAMFeatures],
-    Name = gen_mod:get_module_opt(ServerHost, ?MODULE, name),
+		?NS_REGISTER, ?NS_MUC, ?NS_VCARD, ?NS_MUCSUB, ?NS_MUC_UNIQUE
+		| RSMFeatures ++ MAMFeatures],
     Identity = #identity{category = <<"conference">>,
 			 type = <<"text">>,
-			 name = translate:translate(Lang, Name)},
+			 name = translate:translate(Lang, <<"Chatrooms">>)},
     xmpp:make_iq_result(
       IQ, #disco_info{features = Features,
 		      identities = [Identity],
@@ -569,7 +536,8 @@ process_disco_items(#iq{type = get, from = From, to = To, lang = Lang,
     Host = To#jid.lserver,
     ServerHost = ejabberd_router:host_of_route(Host),
     MaxRoomsDiscoItems = gen_mod:get_module_opt(
-			   ServerHost, ?MODULE, max_rooms_discoitems),
+			   ServerHost, ?MODULE, max_rooms_discoitems,
+			   100),
     case iq_disco_items(ServerHost, Host, From, Lang,
 			MaxRoomsDiscoItems, Node, RSM) of
 	{error, Err} ->
@@ -588,7 +556,7 @@ process_muc_unique(#iq{type = set, lang = Lang} = IQ) ->
 process_muc_unique(#iq{from = From, type = get,
 		       sub_els = [#muc_unique{}]} = IQ) ->
     Name = str:sha(term_to_binary([From, p1_time_compat:timestamp(),
-				      p1_rand:get_string()])),
+				      randoms:get_string()])),
     xmpp:make_iq_result(IQ, #muc_unique{name = Name}).
 
 -spec process_mucsub(iq()) -> iq().
@@ -599,8 +567,8 @@ process_mucsub(#iq{type = get, from = From, to = To,
 		   sub_els = [#muc_subscriptions{}]} = IQ) ->
     Host = To#jid.lserver,
     ServerHost = ejabberd_router:host_of_route(Host),
-    Subs = get_subscribed_rooms(ServerHost, Host, From),
-    xmpp:make_iq_result(IQ, #muc_subscriptions{list = Subs});
+    RoomJIDs = get_subscribed_rooms(ServerHost, Host, From),
+    xmpp:make_iq_result(IQ, #muc_subscriptions{list = RoomJIDs});
 process_mucsub(#iq{lang = Lang} = IQ) ->
     Txt = <<"No module is handling this query">>,
     xmpp:make_error(IQ, xmpp:err_service_unavailable(Txt, Lang)).
@@ -621,10 +589,9 @@ check_user_can_create_room(ServerHost, AccessCreate,
       _ -> false
     end.
 
-check_create_room(Acc, ServerHost, RoomID, _Host) ->
-    Max = gen_mod:get_module_opt(ServerHost, ?MODULE, max_room_id),
-    Regexp = gen_mod:get_module_opt(ServerHost, ?MODULE, regexp_room_id),
-    Acc and
+check_create_roomid(ServerHost, RoomID) ->
+    Max = gen_mod:get_module_opt(ServerHost, ?MODULE, max_room_id, infinity),
+    Regexp = gen_mod:get_module_opt(ServerHost, ?MODULE, regexp_room_id, ""),
     (byte_size(RoomID) =< Max) and
     (re:run(RoomID, Regexp, [unicode, {capture, none}]) == match).
 
@@ -707,7 +674,7 @@ iq_disco_items(_ServerHost, _Host, _From, Lang, _MaxRoomsDiscoItems, _Node, _RSM
 
 -spec get_room_disco_item({binary(), binary(), pid()},
 			  term()) -> {ok, disco_item()} |
-				     {error, timeout | notfound}.
+							   {error, timeout | notfound}.
 get_room_disco_item({Name, Host, Pid}, Query) ->
 	    RoomJID = jid:make(Name, Host),
 	    try p1_fsm:sync_send_all_state_event(Pid, Query, 100) of
@@ -715,32 +682,17 @@ get_room_disco_item({Name, Host, Pid}, Query) ->
 		    {ok, #disco_item{jid = RoomJID, name = Desc}};
 		false ->
 		    {error, notfound}
-	    catch _:{timeout, {p1_fsm, _, _}} ->
+	    catch _:{timeout, _} ->
 		    {error, timeout};
-		  _:{_, {p1_fsm, _, _}} ->
+		  _:{noproc, _} ->
 		    {error, notfound}
     end.
 
 get_subscribed_rooms(ServerHost, Host, From) ->
     LServer = jid:nameprep(ServerHost),
+    LBareJID = jid:tolower(jid:remove_resource(From)),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
-    BareFrom = jid:remove_resource(From),
-    case Mod:get_subscribed_rooms(LServer, Host, BareFrom) of
-	not_implemented ->
-	    Rooms = get_online_rooms(ServerHost, Host),
-	    lists:flatmap(
-	      fun({Name, _, Pid}) ->
-		      case p1_fsm:sync_send_all_state_event(Pid, {is_subscribed, BareFrom}) of
-			  {true, Nodes} ->
-				[#muc_subscription{jid = jid:make(Name, Host), events = Nodes}];
-			  false -> []
-		      end;
-		 (_) ->
-		      []
-	      end, Rooms);
-	V ->
-	    [#muc_subscription{jid = Jid, events = Nodes} || {Jid, Nodes} <- V]
-    end.
+    Mod:get_db_subscribers(LServer, LBareJID).
 
 get_nick(ServerHost, Host, From) ->
     LServer = jid:nameprep(ServerHost),
@@ -760,7 +712,7 @@ iq_get_register_info(ServerHost, Host, From, Lang) ->
 	       instructions = [Inst], fields = Fields},
     #register{nick = Nick,
 	      registered = Registered,
-	      instructions =
+	      instructions = 
 		  translate:translate(
 		    Lang, <<"You need a client that supports x:data "
 			    "to register the nickname">>),
@@ -843,7 +795,7 @@ opts_to_binary(Opts) ->
               {description, iolist_to_binary(Desc)};
          ({password, Pass}) ->
               {password, iolist_to_binary(Pass)};
-         ({subject, [C|_] = Subj}) when is_integer(C), C >= 0, C =< 255 ->
+         ({subject, Subj}) ->
               {subject, iolist_to_binary(Subj)};
          ({subject_author, Author}) ->
               {subject_author, iolist_to_binary(Author)};
@@ -873,6 +825,13 @@ opts_to_binary(Opts) ->
               Opt
       end, Opts).
 
+db_subscribe(ServerHost, LBareJID, RoomJID)  ->
+  LBareRoomJID = jid:tolower(jid:remove_resource(RoomJID)),
+  LServer = jid:nameprep(ServerHost),
+  Mod = gen_mod:db_mod(LServer, ?MODULE),
+  Mod:db_subscribe(LServer, LBareJID, LBareRoomJID),
+  ok.
+
 export(LServer) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:export(LServer).
@@ -896,17 +855,13 @@ mod_opt_type(access_create) ->
     fun acl:access_rules_validator/1;
 mod_opt_type(access_persistent) ->
     fun acl:access_rules_validator/1;
-mod_opt_type(access_mam) ->
-    fun acl:access_rules_validator/1;
-mod_opt_type(access_register) ->
-    fun acl:access_rules_validator/1;
 mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
 mod_opt_type(ram_db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
 mod_opt_type(history_size) ->
     fun (I) when is_integer(I), I >= 0 -> I end;
-mod_opt_type(host) -> fun ejabberd_config:v_host/1;
-mod_opt_type(name) -> fun iolist_to_binary/1;
-mod_opt_type(hosts) -> fun ejabberd_config:v_hosts/1;
+mod_opt_type(host) -> fun iolist_to_binary/1;
+mod_opt_type(hosts) ->
+    fun (L) -> lists:map(fun iolist_to_binary/1, L) end;
 mod_opt_type(max_room_desc) ->
     fun (infinity) -> infinity;
 	(I) when is_integer(I), I > 0 -> I
@@ -998,59 +953,34 @@ mod_opt_type({default_room_options, presence_broadcast}) ->
 		 (visitor) -> visitor
 	      end, L)
     end;
-mod_opt_type({default_room_options, lang}) ->
-    fun xmpp_lang:check/1.
-
-mod_options(Host) ->
-    [{access, all},
-     {access_admin, none},
-     {access_create, all},
-     {access_persistent, all},
-     {access_mam, all},
-     {access_register, all},
-     {db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {ram_db_type, ejabberd_config:default_ram_db(Host, ?MODULE)},
-     {history_size, 20},
-     {host, <<"conference.@HOST@">>},
-     {hosts, []},
-     {name, ?T("Chatrooms")},
-     {max_room_desc, infinity},
-     {max_room_id, infinity},
-     {max_room_name, infinity},
-     {max_rooms_discoitems, 100},
-     {max_user_conferences, 100},
-     {max_users, 200},
-     {max_users_admin_threshold, 5},
-     {max_users_presence, 1000},
-     {min_message_interval, 0},
-     {min_presence_interval, 0},
-     {queue_type, ejabberd_config:default_queue_type(Host)},
-     {regexp_room_id, <<"">>},
-     {room_shaper, none},
-     {user_message_shaper, none},
-     {user_presence_shaper, none},
-     {default_room_options,
-      [{allow_change_subj,true},
-       {allow_private_messages,true},
-       {allow_query_users,true},
-       {allow_user_invites,false},
-       {allow_visitor_nickchange,true},
-       {allow_visitor_status,true},
-       {anonymous,true},
-       {captcha_protected,false},
-       {lang,<<>>},
-       {logging,false},
-       {members_by_default,true},
-       {members_only,false},
-       {moderated,true},
-       {password_protected,false},
-       {persistent,false},
-       {public,true},
-       {public_list,true},
-       {mam,false},
-       {allow_subscription,false},
-       {password,<<>>},
-       {title,<<>>},
-       {allow_private_messages_from_visitors,anyone},
-       {max_users,200},
-       {presence_broadcast,[moderator,participant,visitor]}]}].
+mod_opt_type(_) ->
+    [access, access_admin, access_create, access_persistent,
+     db_type, ram_db_type, history_size, host, hosts,
+     max_room_desc, max_room_id, max_room_name,
+     max_rooms_discoitems, max_user_conferences, max_users,
+     max_users_admin_threshold, max_users_presence,
+     min_message_interval, min_presence_interval, queue_type,
+     regexp_room_id, room_shaper, user_message_shaper, user_presence_shaper,
+     {default_room_options, allow_change_subj},
+     {default_room_options, allow_private_messages},
+     {default_room_options, allow_query_users},
+     {default_room_options, allow_user_invites},
+     {default_room_options, allow_visitor_nickchange},
+     {default_room_options, allow_visitor_status},
+     {default_room_options, anonymous},
+     {default_room_options, captcha_protected},
+     {default_room_options, logging},
+     {default_room_options, members_by_default},
+     {default_room_options, members_only},
+     {default_room_options, moderated},
+     {default_room_options, password_protected},
+     {default_room_options, persistent},
+     {default_room_options, public},
+     {default_room_options, public_list},
+     {default_room_options, mam},
+     {default_room_options, allow_subscription},
+     {default_room_options, password},
+     {default_room_options, title},
+     {default_room_options, allow_private_messages_from_visitors},
+     {default_room_options, max_users},
+     {default_room_options, presence_broadcast}].

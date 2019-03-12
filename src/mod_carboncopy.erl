@@ -7,7 +7,7 @@
 %%%              {mod_carboncopy, []}
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -29,24 +29,30 @@
 -author ('ecestari@process-one.net').
 -protocol({xep, 280, '0.8'}).
 
--behaviour(gen_mod).
+-behavior(gen_mod).
 
 %% API:
 -export([start/2, stop/1, reload/3]).
 
 -export([user_send_packet/1, user_receive_packet/1,
-	 iq_handler/1, disco_features/5,
-	 is_carbon_copy/1, mod_opt_type/1, depends/2,
-	 mod_options/1]).
--export([c2s_copy_session/2, c2s_session_opened/1, c2s_session_resumed/1]).
-%% For debugging purposes
--export([list/2]).
+	 iq_handler/1, remove_connection/4, disco_features/5,
+	 is_carbon_copy/1, mod_opt_type/1, depends/2, clean_cache/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
+-include("mod_carboncopy.hrl").
 
 -type direction() :: sent | received.
--type c2s_state() :: ejabberd_c2s:state().
+
+-callback init(binary(), gen_mod:opts()) -> any().
+-callback enable(binary(), binary(), binary(), binary()) -> ok | {error, any()}.
+-callback disable(binary(), binary(), binary()) -> ok | {error, any()}.
+-callback list(binary(), binary()) -> [{binary(), binary(), node()}].
+-callback use_cache(binary()) -> boolean().
+-callback cache_nodes(binary()) -> [node()].
+
+-optional_callbacks([use_cache/1, cache_nodes/1]).
 
 -spec is_carbon_copy(stanza()) -> boolean().
 is_carbon_copy(#message{meta = #{carbon_copy := true}}) ->
@@ -54,15 +60,18 @@ is_carbon_copy(#message{meta = #{carbon_copy := true}}) ->
 is_carbon_copy(_) ->
     false.
 
-start(Host, _Opts) ->
+start(Host, Opts) ->
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, gen_iq_handler:iqdisc(Host)),
     ejabberd_hooks:add(disco_local_features, Host, ?MODULE, disco_features, 50),
+    Mod = gen_mod:ram_db_mod(Host, ?MODULE),
+    init_cache(Mod, Host, Opts),
+    Mod:init(Host, Opts),
+    clean_cache(),
+    ejabberd_hooks:add(unset_presence_hook,Host, ?MODULE, remove_connection, 10),
     %% why priority 89: to define clearly that we must run BEFORE mod_logdb hook (90)
     ejabberd_hooks:add(user_send_packet,Host, ?MODULE, user_send_packet, 89),
     ejabberd_hooks:add(user_receive_packet,Host, ?MODULE, user_receive_packet, 89),
-    ejabberd_hooks:add(c2s_copy_session, Host, ?MODULE, c2s_copy_session, 50),
-    ejabberd_hooks:add(c2s_session_resumed, Host, ?MODULE, c2s_session_resumed, 50),
-    ejabberd_hooks:add(c2s_session_opened, Host, ?MODULE, c2s_session_opened, 50),
-    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_CARBONS_2, ?MODULE, iq_handler).
+    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_CARBONS_2, ?MODULE, iq_handler, IQDisc).
 
 stop(Host) ->
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_CARBONS_2),
@@ -70,12 +79,29 @@ stop(Host) ->
     %% why priority 89: to define clearly that we must run BEFORE mod_logdb hook (90)
     ejabberd_hooks:delete(user_send_packet,Host, ?MODULE, user_send_packet, 89),
     ejabberd_hooks:delete(user_receive_packet,Host, ?MODULE, user_receive_packet, 89),
-    ejabberd_hooks:delete(c2s_copy_session, Host, ?MODULE, c2s_copy_session, 50),
-    ejabberd_hooks:delete(c2s_session_resumed, Host, ?MODULE, c2s_session_resumed, 50),
-    ejabberd_hooks:delete(c2s_session_opened, Host, ?MODULE, c2s_session_opened, 50).
+    ejabberd_hooks:delete(unset_presence_hook,Host, ?MODULE, remove_connection, 10).
 
-reload(_Host, _NewOpts, _OldOpts) ->
-    ok.
+reload(Host, NewOpts, OldOpts) ->
+    NewMod = gen_mod:ram_db_mod(Host, NewOpts, ?MODULE),
+    OldMod = gen_mod:ram_db_mod(Host, OldOpts, ?MODULE),
+    if NewMod /= OldMod ->
+	    NewMod:init(Host, NewOpts);
+       true ->
+	    ok
+    end,
+    case use_cache(NewMod, Host) of
+	true ->
+	    ets_cache:new(?CARBONCOPY_CACHE, cache_opts(Host, NewOpts));
+	false ->
+	    ok
+    end,
+    case gen_mod:is_equal_opt(iqdisc, NewOpts, OldOpts, gen_iq_handler:iqdisc(Host)) of
+	{false, IQDisc, _} ->
+	    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_CARBONS_2,
+					  ?MODULE, iq_handler, IQDisc);
+	true ->
+	    ok
+    end.
 
 -spec disco_features({error, stanza_error()} | {result, [binary()]} | empty,
 		     jid(), jid(), binary(), binary()) ->
@@ -95,13 +121,19 @@ iq_handler(#iq{type = set, lang = Lang, from = From,
 					  is_record(El, carbons_disable) ->
     {U, S, R} = jid:tolower(From),
     Result = case El of
-		 #carbons_enable{} -> enable(S, U, R, ?NS_CARBONS_2);
-		 #carbons_disable{} -> disable(S, U, R)
+		 #carbons_enable{} ->
+		     ?INFO_MSG("carbons enabled for user ~s@~s/~s", [U,S,R]),
+		     enable(S, U, R, ?NS_CARBONS_2);
+		 #carbons_disable{} ->
+		     ?INFO_MSG("carbons disabled for user ~s@~s/~s", [U,S,R]),
+		     disable(S, U, R)
 	     end,
     case Result of
 	ok ->
+	    ?DEBUG("carbons IQ result: ok", []),
 	    xmpp:make_iq_result(IQ);
-	{error, _} ->
+	{error,_Error} ->
+	    ?ERROR_MSG("Error enabling / disabling carbons: ~p", [Result]),
 	    Txt = <<"Database failure">>,
 	    xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
     end;
@@ -131,29 +163,6 @@ user_receive_packet({Packet, #{jid := JID} = C2SState}) ->
 	Pkt -> {Pkt, C2SState}
     end.
 
--spec c2s_copy_session(c2s_state(), c2s_state()) -> c2s_state().
-c2s_copy_session(State, #{user := U, server := S, resource := R}) ->
-    case ejabberd_sm:get_user_info(U, S, R) of
-	offline -> State;
-	Info ->
-	    case lists:keyfind(carboncopy, 1, Info) of
-		{_, CC} -> State#{carboncopy => CC};
-		false -> State
-	    end
-    end.
-
--spec c2s_session_resumed(c2s_state()) -> c2s_state().
-c2s_session_resumed(#{user := U, server := S, resource := R,
-		      carboncopy := CC} = State) ->
-    ejabberd_sm:set_user_info(U, S, R, carboncopy, CC),
-    maps:remove(carboncopy, State);
-c2s_session_resumed(State) ->
-    State.
-
--spec c2s_session_opened(c2s_state()) -> c2s_state().
-c2s_session_opened(State) ->
-    maps:remove(carboncopy, State).
-
 % Modified from original version:
 %    - registered to the user_send_packet hook, to be called only once even for multicast
 %    - do not support "private" message mode, and do not modify the original packet in any way
@@ -162,9 +171,9 @@ c2s_session_opened(State) ->
 			       stanza() | {stop, stanza()}.
 check_and_forward(JID, To, Packet, Direction)->
     case is_chat_message(Packet) andalso
-	not is_received_muc_pm(To, Packet, Direction) andalso
-	not xmpp:has_subtag(Packet, #carbons_private{}) andalso
-	not xmpp:has_subtag(Packet, #hint{type = 'no-copy'}) of
+	not is_muc_pm(To, Packet) andalso
+	xmpp:has_subtag(Packet, #carbons_private{}) == false andalso
+	xmpp:has_subtag(Packet, #hint{type = 'no-copy'}) == false of
 	true ->
 	    case is_carbon_copy(Packet) of
 		false ->
@@ -178,6 +187,12 @@ check_and_forward(JID, To, Packet, Direction)->
         _ ->
 	    Packet
     end.
+
+-spec remove_connection(binary(), binary(), binary(), binary()) -> ok.
+remove_connection(User, Server, Resource, _Status)->
+    disable(Server, User, Resource),
+    ok.
+
 
 %%% Internal
 %% Direction = received | sent <received xmlns='urn:xmpp:carbons:1'/>
@@ -231,7 +246,7 @@ send_copies(JID, To, Packet, Direction)->
 
 -spec build_forward_packet(jid(), message(), jid(), jid(), direction()) -> message().
 build_forward_packet(JID, #message{type = T} = Msg, Sender, Dest, Direction) ->
-    Forwarded = #forwarded{sub_els = [complete_packet(JID, Msg, Direction)]},
+    Forwarded = #forwarded{xml_els = [xmpp:encode(complete_packet(JID, Msg, Direction))]},
     Carbon = case Direction of
 		 sent -> #carbons_sent{forwarded = Forwarded};
 		 received -> #carbons_received{forwarded = Forwarded}
@@ -241,26 +256,22 @@ build_forward_packet(JID, #message{type = T} = Msg, Sender, Dest, Direction) ->
 
 -spec enable(binary(), binary(), binary(), binary()) -> ok | {error, any()}.
 enable(Host, U, R, CC)->
-    ?DEBUG("Enabling carbons for ~s@~s/~s", [U, Host, R]),
-    case ejabberd_sm:set_user_info(U, Host, R, carboncopy, CC) of
-	ok -> ok;
-	{error, Reason} = Err ->
-	    ?ERROR_MSG("Failed to disable carbons for ~s@~s/~s: ~p",
-		       [U, Host, R, Reason]),
+    ?DEBUG("enabling for ~p", [U]),
+    Mod = gen_mod:ram_db_mod(Host, ?MODULE),
+    case Mod:enable(U, Host, R, CC) of
+	ok ->
+	    delete_cache(Mod, U, Host);
+	{error, _} = Err ->
 	    Err
     end.
 
 -spec disable(binary(), binary(), binary()) -> ok | {error, any()}.
 disable(Host, U, R)->
-    ?DEBUG("Disabling carbons for ~s@~s/~s", [U, Host, R]),
-    case ejabberd_sm:del_user_info(U, Host, R, carboncopy) of
-	ok -> ok;
-	{error, notfound} -> ok;
-	{error, Reason} = Err ->
-	    ?ERROR_MSG("Failed to disable carbons for ~s@~s/~s: ~p",
-		       [U, Host, R, Reason]),
-	    Err
-    end.
+    ?DEBUG("disabling for ~p", [U]),
+    Mod = gen_mod:ram_db_mod(Host, ?MODULE),
+    Res = Mod:disable(U, Host, R),
+    delete_cache(Mod, U, Host),
+    Res.
 
 -spec complete_packet(jid(), message(), direction()) -> message().
 complete_packet(From, #message{from = undefined} = Msg, sent) ->
@@ -278,40 +289,111 @@ is_chat_message(#message{type = normal, body = [_|_]}) ->
 is_chat_message(_) ->
     false.
 
--spec is_received_muc_pm(jid(), message(), direction()) -> boolean().
-is_received_muc_pm(#jid{lresource = <<>>}, _Packet, _Direction) ->
+is_muc_pm(#jid{lresource = <<>>}, _Packet) ->
     false;
-is_received_muc_pm(_To, _Packet, sent) ->
-    false;
-is_received_muc_pm(_To, Packet, received) ->
+is_muc_pm(_To, Packet) ->
     xmpp:has_subtag(Packet, #muc_user{}).
 
 -spec list(binary(), binary()) -> [{Resource :: binary(), Namespace :: binary()}].
 list(User, Server) ->
-    lists:filtermap(
-      fun({Resource, Info}) ->
-	      case lists:keyfind(carboncopy, 1, Info) of
-		  {_, NS} -> {true, {Resource, NS}};
-		  false -> false
-	      end
-      end, ejabberd_sm:get_user_info(User, Server)).
+    Mod = gen_mod:ram_db_mod(Server, ?MODULE),
+    case use_cache(Mod, Server) of
+	true ->
+	    case ets_cache:lookup(
+		   ?CARBONCOPY_CACHE, {User, Server},
+		   fun() ->
+			   case Mod:list(User, Server) of
+			       {ok, L} when L /= [] -> {ok, L};
+			       _ -> error
+			   end
+		   end) of
+		{ok, L} -> [{Resource, NS} || {Resource, NS, _} <- L];
+		error -> []
+	    end;
+	false ->
+	    case Mod:list(User, Server) of
+		{ok, L} -> [{Resource, NS} || {Resource, NS, _} <- L];
+		error -> []
+	    end
+    end.
+
+-spec init_cache(module(), binary(), gen_mod:opts()) -> ok.
+init_cache(Mod, Host, Opts) ->
+    case use_cache(Mod, Host) of
+	true ->
+	    ets_cache:new(?CARBONCOPY_CACHE, cache_opts(Host, Opts));
+	false ->
+	    ets_cache:delete(?CARBONCOPY_CACHE)
+    end.
+
+-spec cache_opts(binary(), gen_mod:opts()) -> [proplists:property()].
+cache_opts(Host, Opts) ->
+    MaxSize = gen_mod:get_opt(
+		cache_size, Opts,
+		ejabberd_config:cache_size(Host)),
+    CacheMissed = gen_mod:get_opt(
+		    cache_missed, Opts,
+		    ejabberd_config:cache_missed(Host)),
+    LifeTime = case gen_mod:get_opt(
+		      cache_life_time, Opts,
+		      ejabberd_config:cache_life_time(Host)) of
+		   infinity -> infinity;
+		   I -> timer:seconds(I)
+	       end,
+    [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
+
+-spec use_cache(module(), binary()) -> boolean().
+use_cache(Mod, Host) ->
+    case erlang:function_exported(Mod, use_cache, 1) of
+	true -> Mod:use_cache(Host);
+	false ->
+	    gen_mod:get_module_opt(
+	      Host, ?MODULE, use_cache,
+	      ejabberd_config:use_cache(Host))
+    end.
+
+-spec cache_nodes(module(), binary()) -> [node()].
+cache_nodes(Mod, Host) ->
+    case erlang:function_exported(Mod, cache_nodes, 1) of
+	true -> Mod:cache_nodes(Host);
+	false -> ejabberd_cluster:get_nodes()
+    end.
+
+-spec clean_cache(node()) -> ok.
+clean_cache(Node) ->
+    ets_cache:filter(
+      ?CARBONCOPY_CACHE,
+      fun(_, error) ->
+	      false;
+	 (_, {ok, L}) ->
+	      not lists:any(fun({_, _, N}) -> N == Node end, L)
+      end).
+
+-spec clean_cache() -> ok.
+clean_cache() ->
+    ejabberd_cluster:eval_everywhere(?MODULE, clean_cache, [node()]).
+
+-spec delete_cache(module(), binary(), binary()) -> ok.
+delete_cache(Mod, User, Server) ->
+    case use_cache(Mod, Server) of
+	true ->
+	    ets_cache:delete(?CARBONCOPY_CACHE, {User, Server},
+			     cache_nodes(Mod, Server));
+	false ->
+	    ok
+    end.
 
 depends(_Host, _Opts) ->
     [].
 
-mod_opt_type(O) when O == cache_size; O == cache_life_time;
-		     O == use_cache; O == cache_missed;
-		     O == ram_db_type ->
-    fun(deprecated) -> deprecated;
-       (_) ->
-	    ?WARNING_MSG("Option ~s of ~s has no effect anymore "
-			 "and will be ingored", [O, ?MODULE]),
-	    deprecated
-    end.
-
-mod_options(_) ->
-    [{ram_db_type, deprecated},
-     {use_cache, deprecated},
-     {cache_size, deprecated},
-     {cache_missed, deprecated},
-     {cache_life_time, deprecated}].
+mod_opt_type(iqdisc) -> fun gen_iq_handler:check_type/1;
+mod_opt_type(ram_db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
+mod_opt_type(O) when O == use_cache; O == cache_missed ->
+    fun(B) when is_boolean(B) -> B end;
+mod_opt_type(O) when O == cache_size; O == cache_life_time ->
+    fun(I) when is_integer(I), I>0 -> I;
+       (unlimited) -> infinity;
+       (infinity) -> infinity
+    end;
+mod_opt_type(_) ->
+    [ram_db_type, iqdisc, use_cache, cache_size, cache_missed, cache_life_time].

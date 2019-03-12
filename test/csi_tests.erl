@@ -3,7 +3,7 @@
 %%% Created : 16 Nov 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -55,7 +55,7 @@ master_slave_cases() ->
 all_master(Config) ->
     Peer = ?config(peer, Config),
     Presence = #presence{to = Peer},
-    ChatState = #message{to = Peer, thread = #message_thread{data = <<"1">>},
+    ChatState = #message{to = Peer, thread = <<"1">>,
 			 sub_els = [#chatstate{type = active}]},
     Message = ChatState#message{body = [#text{data = <<"body">>}]},
     PepPayload = xmpp:encode(#presence{}),
@@ -69,7 +69,7 @@ all_master(Config) ->
 			       items =
 				   [#ps_item{
 				       id = <<"pep-1">>,
-				       sub_els = [PepPayload]}]}}]},
+				       xml_els = [PepPayload]}]}}]},
     PepTwo = #message{
 		to = Peer,
 		sub_els =
@@ -80,7 +80,7 @@ all_master(Config) ->
 			       items =
 				   [#ps_item{
 				       id = <<"pep-2">>,
-				       sub_els = [PepPayload]}]}}]},
+				       xml_els = [PepPayload]}]}}]},
     %% Wait for the slave to become inactive.
     wait_for_slave(Config),
     %% Should be queued (but see below):
@@ -133,15 +133,15 @@ all_slave(Config) ->
 			  [#ps_item{
 			      id = <<"pep-2">>}]}},
 	    #delay{}]} = recv_message(Config),
-    #message{from = Peer, thread = #message_thread{data = <<"1">>},
+    #message{from = Peer, thread = <<"1">>,
 	     sub_els = [#chatstate{type = composing},
 			#delay{}]} = recv_message(Config),
-    #message{from = Peer, thread = #message_thread{data = <<"1">>},
+    #message{from = Peer, thread = <<"1">>,
 	     body = [#text{data = <<"body">>}],
 	     sub_els = [#chatstate{type = active}]} = recv_message(Config),
     change_client_state(Config, active),
     wait_for_master(Config),
-    #message{from = Peer, thread = #message_thread{data = <<"1">>},
+    #message{from = Peer, thread = <<"1">>,
 	     sub_els = [#chatstate{type = active}]} = recv_message(Config),
     disconnect(Config).
 

@@ -5,7 +5,7 @@
 %%% Created : 20 Jan 2016 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,9 +26,9 @@
 -module(ejabberd_sql_pt).
 
 %% API
--export([parse_transform/2, format_error/1]).
+-export([parse_transform/2]).
 
-%-export([parse/2]).
+-export([parse/2]).
 
 -include("ejabberd_sql_pt.hrl").
 
@@ -39,10 +39,7 @@
                 args = [],
                 res = [],
                 res_vars = [],
-                res_pos = 0,
-                server_host_used = false,
-                used_vars = [],
-                use_new_schema}).
+                res_pos = 0}).
 
 -define(QUERY_RECORD, "sql_query").
 
@@ -50,12 +47,6 @@
 -define(ESCAPE_VAR, "__SQLEscape").
 
 -define(MOD, sql__module_).
-
--ifdef(NEW_SQL_SCHEMA).
--define(USE_NEW_SCHEMA, true).
--else.
--define(USE_NEW_SCHEMA, false).
--endif.
 
 %%====================================================================
 %% API
@@ -66,14 +57,11 @@
 %%--------------------------------------------------------------------
 parse_transform(AST, _Options) ->
     %io:format("PT: ~p~nOpts: ~p~n", [AST, Options]),
-    put(warnings, []),
     NewAST = top_transform(AST),
     %io:format("NewPT: ~p~n", [NewAST]),
-    NewAST ++ get(warnings).
+    NewAST.
 
 
-format_error(no_server_host) ->
-    "server_host field is not used".
 
 %%====================================================================
 %% Internal functions
@@ -89,7 +77,10 @@ transform(Form) ->
                         [Arg] ->
                             case erl_syntax:type(Arg) of
                                 string ->
-                                    transform_sql(Arg);
+                                    S = erl_syntax:string_value(Arg),
+                                    Pos = erl_syntax:get_pos(Arg),
+                                    ParseRes = parse(S, Pos),
+                                    set_pos(make_sql_query(ParseRes), Pos);
                                 _ ->
                                     throw({error, erl_syntax:get_pos(Form),
                                            "?SQL argument must be "
@@ -105,7 +96,14 @@ transform(Form) ->
                             case {erl_syntax:type(TableArg),
                                   erl_syntax:is_proper_list(FieldsArg)}of
                                 {string, true} ->
-                                    transform_upsert(Form, TableArg, FieldsArg);
+                                    Table = erl_syntax:string_value(TableArg),
+                                    ParseRes =
+                                        parse_upsert(
+                                          erl_syntax:list_elements(FieldsArg)),
+                                    Pos = erl_syntax:get_pos(Form),
+                                    set_pos(
+                                      make_sql_upsert(Table, ParseRes, Pos),
+                                      Pos);
                                 _ ->
                                     throw({error, erl_syntax:get_pos(Form),
                                            "?SQL_UPSERT arguments must be "
@@ -114,22 +112,6 @@ transform(Form) ->
                         _ ->
                             throw({error, erl_syntax:get_pos(Form),
                                    "wrong number of ?SQL_UPSERT args"})
-                    end;
-                {?SQL_INSERT_MARK, 2} ->
-                    case erl_syntax:application_arguments(Form) of
-                        [TableArg, FieldsArg] ->
-                            case {erl_syntax:type(TableArg),
-                                  erl_syntax:is_proper_list(FieldsArg)}of
-                                {string, true} ->
-                                    transform_insert(Form, TableArg, FieldsArg);
-                                _ ->
-                                    throw({error, erl_syntax:get_pos(Form),
-                                           "?SQL_INSERT arguments must be "
-                                           "a constant string and a list"})
-                            end;
-                        _ ->
-                            throw({error, erl_syntax:get_pos(Form),
-                                   "wrong number of ?SQL_INSERT args"})
                     end;
                 _ ->
                     Form
@@ -170,81 +152,11 @@ top_transform(Forms) when is_list(Forms) ->
 	      end
       end, Forms).
 
-transform_sql(Arg) ->
-    S = erl_syntax:string_value(Arg),
-    Pos = erl_syntax:get_pos(Arg),
-    ParseRes = parse(S, Pos, true),
-    ParseResOld = parse(S, Pos, false),
-    case ParseRes#state.server_host_used of
-        {true, _SHVar} ->
-            ok;
-        false ->
-            add_warning(
-              Pos, no_server_host),
-            []
-    end,
-    set_pos(
-      make_schema_check(
-        make_sql_query(ParseRes),
-        make_sql_query(ParseResOld)
-       ),
-      Pos).
+parse(S, Loc) ->
+    parse1(S, [], #state{loc = Loc}).
 
-transform_upsert(Form, TableArg, FieldsArg) ->
-    Table = erl_syntax:string_value(TableArg),
-    ParseRes =
-        parse_upsert(
-          erl_syntax:list_elements(FieldsArg)),
-    Pos = erl_syntax:get_pos(Form),
-    case lists:keymember(
-           "server_host", 1, ParseRes) of
-        true ->
-            ok;
-        false ->
-            add_warning(Pos, no_server_host)
-    end,
-    ParseResOld =
-        filter_upsert_sh(Table, ParseRes),
-    set_pos(
-      make_schema_check(
-        make_sql_upsert(Table, ParseRes, Pos),
-        make_sql_upsert(Table, ParseResOld, Pos)
-       ),
-      Pos).
-
-transform_insert(Form, TableArg, FieldsArg) ->
-    Table = erl_syntax:string_value(TableArg),
-    ParseRes =
-        parse_insert(
-          erl_syntax:list_elements(FieldsArg)),
-    Pos = erl_syntax:get_pos(Form),
-    case lists:keymember(
-           "server_host", 1, ParseRes) of
-        true ->
-            ok;
-        false ->
-            add_warning(Pos, no_server_host)
-    end,
-    ParseResOld =
-        filter_upsert_sh(Table, ParseRes),
-    set_pos(
-      make_schema_check(
-        make_sql_insert(Table, ParseRes),
-        make_sql_insert(Table, ParseResOld)
-       ),
-      Pos).
-
-
-parse(S, Loc, UseNewSchema) ->
-    parse1(S, [],
-           #state{loc = Loc,
-                  use_new_schema = UseNewSchema}).
-
-parse(S, ParamPos, Loc, UseNewSchema) ->
-    parse1(S, [],
-           #state{loc = Loc,
-                  param_pos = ParamPos,
-                  use_new_schema = UseNewSchema}).
+parse(S, ParamPos, Loc) ->
+    parse1(S, [], #state{loc = Loc, param_pos = ParamPos}).
 
 parse1([], Acc, State) ->
     State1 = append_string(lists:reverse(Acc), State),
@@ -256,7 +168,7 @@ parse1([], Acc, State) ->
                 };
 parse1([$@, $( | S], Acc, State) ->
     State1 = append_string(lists:reverse(Acc), State),
-    {Name, Type, S1, State2} = parse_name(S, false, State1),
+    {Name, Type, S1, State2} = parse_name(S, State1),
     Var = "__V" ++ integer_to_list(State2#state.res_pos),
     EVar = erl_syntax:variable(Var),
     Convert =
@@ -280,60 +192,21 @@ parse1([$@, $( | S], Acc, State) ->
     parse1(S1, [], State4);
 parse1([$%, $( | S], Acc, State) ->
     State1 = append_string(lists:reverse(Acc), State),
-    {Name, Type, S1, State2} = parse_name(S, true, State1),
+    {Name, Type, S1, State2} = parse_name(S, State1),
     Var = State2#state.param_pos,
+    Convert =
+        erl_syntax:application(
+          erl_syntax:record_access(
+            erl_syntax:variable(?ESCAPE_VAR),
+            erl_syntax:atom(?ESCAPE_RECORD),
+            erl_syntax:atom(Type)),
+          [erl_syntax:variable(Name)]),
+    State3 = State2,
     State4 =
-        case Type of
-            host ->
-                State3 =
-                    State2#state{server_host_used = {true, Name},
-                                 used_vars = [Name | State2#state.used_vars]},
-                case State#state.use_new_schema of
-                    true ->
-                        Convert =
-                            erl_syntax:application(
-                              erl_syntax:record_access(
-                                erl_syntax:variable(?ESCAPE_VAR),
-                                erl_syntax:atom(?ESCAPE_RECORD),
-                                erl_syntax:atom(string)),
-                              [erl_syntax:variable(Name)]),
-                        State3#state{'query' = [{var, Var},
-                                                {str, "server_host="} |
-                                                State3#state.'query'],
-                                     args = [Convert | State3#state.args],
-                                     params = [Var | State3#state.params],
-                                     param_pos = State3#state.param_pos + 1};
-                    false ->
-                        append_string("0=0", State3)
-                end;
-            {list, InternalType} ->
-                Convert = erl_syntax:application(
-                    erl_syntax:atom(ejabberd_sql),
-                    erl_syntax:atom(to_list),
-                    [erl_syntax:record_access(
-                        erl_syntax:variable(?ESCAPE_VAR),
-                        erl_syntax:atom(?ESCAPE_RECORD),
-                        erl_syntax:atom(InternalType)),
-                     erl_syntax:variable(Name)]),
-                State2#state{'query' = [{var, Var} | State2#state.'query'],
-                             args = [Convert | State2#state.args],
-                             params = [Var | State2#state.params],
-                             param_pos = State2#state.param_pos + 1,
-                             used_vars = [Name | State2#state.used_vars]};
-            _ ->
-                Convert =
-                    erl_syntax:application(
-                      erl_syntax:record_access(
-                        erl_syntax:variable(?ESCAPE_VAR),
-                        erl_syntax:atom(?ESCAPE_RECORD),
-                        erl_syntax:atom(Type)),
-                      [erl_syntax:variable(Name)]),
-                State2#state{'query' = [{var, Var} | State2#state.'query'],
-                             args = [Convert | State2#state.args],
-                             params = [Var | State2#state.params],
-                             param_pos = State2#state.param_pos + 1,
-                             used_vars = [Name | State2#state.used_vars]}
-        end,
+        State3#state{'query' = [{var, Var} | State3#state.'query'],
+                     args = [Convert | State3#state.args],
+                     params = [Var | State3#state.params],
+                     param_pos = State3#state.param_pos + 1},
     parse1(S1, [], State4);
 parse1([C | S], Acc, State) ->
     parse1(S, [C | Acc], State).
@@ -343,46 +216,32 @@ append_string([], State) ->
 append_string(S, State) ->
     State#state{query = [{str, S} | State#state.query]}.
 
-parse_name(S, IsArg, State) ->
-    parse_name(S, [], 0, IsArg, State).
+parse_name(S, State) ->
+    parse_name(S, [], 0, State).
 
-parse_name([], _Acc, _Depth, _IsArg, State) ->
+parse_name([], _Acc, _Depth, State) ->
     throw({error, State#state.loc,
            "expected ')', found end of string"});
-parse_name([$), $l, T | S], Acc, 0, true, State) ->
-    Type = case T of
-               $d -> {list, integer};
-               $s -> {list, string};
-               $b -> {list, boolean};
-               _ ->
-                   throw({error, State#state.loc,
-                          ["unknown type specifier 'l", T, "'"]})
-           end,
-    {lists:reverse(Acc), Type, S, State};
-parse_name([$), $l, T | _], _Acc, 0, false, State) ->
-    throw({error, State#state.loc,
-           ["list type 'l", T, "' is not allowed for outputs"]});
-parse_name([$), T | S], Acc, 0, IsArg, State) ->
+parse_name([$), T | S], Acc, 0, State) ->
     Type =
         case T of
             $d -> integer;
             $s -> string;
             $b -> boolean;
-            $H when IsArg -> host;
             _ ->
                 throw({error, State#state.loc,
                        ["unknown type specifier '", T, "'"]})
         end,
     {lists:reverse(Acc), Type, S, State};
-parse_name([$)], _Acc, 0, _IsArg, State) ->
+parse_name([$)], _Acc, 0, State) ->
     throw({error, State#state.loc,
            "expected type specifier, found end of string"});
-parse_name([$( = C | S], Acc, Depth, IsArg, State) ->
-    parse_name(S, [C | Acc], Depth + 1, IsArg, State);
-parse_name([$) = C | S], Acc, Depth, IsArg, State) ->
-    parse_name(S, [C | Acc], Depth - 1, IsArg, State);
-parse_name([C | S], Acc, Depth, IsArg, State) ->
-    parse_name(S, [C | Acc], Depth, IsArg, State).
+parse_name([$( = C | S], Acc, Depth, State) ->
+    parse_name(S, [C | Acc], Depth + 1, State);
+parse_name([$) = C | S], Acc, Depth, State) ->
+    parse_name(S, [C | Acc], Depth - 1, State);
+parse_name([C | S], Acc, Depth, State) ->
+    parse_name(S, [C | Acc], Depth, State).
 
 
 make_var(V) ->
@@ -391,7 +250,7 @@ make_var(V) ->
 
 
 make_sql_query(State) ->
-    Hash = erlang:phash2(State#state{loc = undefined, use_new_schema = true}),
+    Hash = erlang:phash2(State#state{loc = undefined}),
     SHash = <<"Q", (integer_to_binary(Hash))/binary>>,
     Query = pack_query(State#state.'query'),
     EQuery =
@@ -483,7 +342,7 @@ parse_upsert_field1([], _Acc, _ParamPos, Loc) ->
            "?SQL_UPSERT fields must have the "
            "following form: \"[!-]name=value\""});
 parse_upsert_field1([$= | S], Acc, ParamPos, Loc) ->
-    {lists:reverse(Acc), parse(S, ParamPos, Loc, true)};
+    {lists:reverse(Acc), parse(S, ParamPos, Loc)};
 parse_upsert_field1([C | S], Acc, ParamPos, Loc) ->
     parse_upsert_field1(S, [C | Acc], ParamPos, Loc).
 
@@ -585,7 +444,7 @@ make_sql_upsert_insert(Table, ParseRes) ->
            join_states(Fields, ", "),
            #state{'query' = [{str, ") VALUES ("}]},
            join_states(Vals, ", "),
-           #state{'query' = [{str, ");"}]}
+           #state{'query' = [{str, ")"}]}
           ]),
     State.
 
@@ -637,66 +496,6 @@ check_upsert(ParseRes, Pos) ->
             ok
     end,
     ok.
-
-
-parse_insert(Fields) ->
-    {Fs, _} =
-        lists:foldr(
-          fun(F, {Acc, Param}) ->
-                  case erl_syntax:type(F) of
-                      string ->
-                          V = erl_syntax:string_value(F),
-                          {_, _, State} = Res =
-                              parse_insert_field(
-                                V, Param, erl_syntax:get_pos(F)),
-                          {[Res | Acc], State#state.param_pos};
-                      _ ->
-                          throw({error, erl_syntax:get_pos(F),
-                                 "?SQL_INSERT field must be "
-                                 "a constant string"})
-                  end
-          end, {[], 0}, Fields),
-    Fs.
-
-parse_insert_field([$! | _S], _ParamPos, Loc) ->
-    throw({error, Loc,
-           "?SQL_INSERT fields must not start with \"!\""});
-parse_insert_field([$- | _S], _ParamPos, Loc) ->
-    throw({error, Loc,
-           "?SQL_INSERT fields must not start with \"-\""});
-parse_insert_field(S, ParamPos, Loc) ->
-    {Name, ParseState} = parse_insert_field1(S, [], ParamPos, Loc),
-    {Name, {true}, ParseState}.
-
-parse_insert_field1([], _Acc, _ParamPos, Loc) ->
-    throw({error, Loc,
-           "?SQL_INSERT fields must have the "
-           "following form: \"name=value\""});
-parse_insert_field1([$= | S], Acc, ParamPos, Loc) ->
-    {lists:reverse(Acc), parse(S, ParamPos, Loc, true)};
-parse_insert_field1([C | S], Acc, ParamPos, Loc) ->
-    parse_insert_field1(S, [C | Acc], ParamPos, Loc).
-
-
-make_sql_insert(Table, ParseRes) ->
-    make_sql_query(make_sql_upsert_insert(Table, ParseRes)).
-
-make_schema_check(Tree, Tree) ->
-    Tree;
-make_schema_check(New, Old) ->
-    erl_syntax:case_expr(
-      erl_syntax:application(
-        erl_syntax:atom(ejabberd_sql),
-        erl_syntax:atom(use_new_schema),
-        []),
-      [erl_syntax:clause(
-         [erl_syntax:abstract(true)],
-         none,
-         [New]),
-       erl_syntax:clause(
-         [erl_syntax:abstract(false)],
-         none,
-         [Old])]).
 
 
 concat_states(States) ->
@@ -767,24 +566,3 @@ set_pos(Tree, Pos) ->
                   _ -> Node
               end
       end, Tree).
-
-filter_upsert_sh(Table, ParseRes) ->
-    lists:filter(
-      fun({Field, _Match, _ST}) ->
-              Field /= "server_host" orelse Table == "route"
-      end, ParseRes).
-
--ifdef(ENABLE_PT_WARNINGS).
-
-add_warning(Pos, Warning) ->
-    Marker = erl_syntax:revert(
-               erl_syntax:warning_marker({Pos, ?MODULE, Warning})),
-    put(warnings, [Marker | get(warnings)]),
-    ok.
-
--else.
-
-add_warning(_Pos, _Warning) ->
-    ok.
-
--endif.

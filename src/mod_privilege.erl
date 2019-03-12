@@ -4,7 +4,7 @@
 %%% Purpose : XEP-0356: Privileged Entity
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,7 @@
 -behaviour(gen_mod).
 
 %% API
--export([start/2, stop/1, reload/3, mod_opt_type/1, mod_options/1, depends/2]).
+-export([start/2, stop/1, reload/3, mod_opt_type/1, depends/2]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
@@ -39,11 +39,12 @@
 	 roster_access/2, process_message/1,
 	 process_presence_out/1, process_presence_in/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 
 -record(state, {server_host = <<"">> :: binary(),
-		permissions = dict:new() :: dict:dict()}).
+		permissions = dict:new() :: ?TDICT}).
 
 %%%===================================================================
 %%% API
@@ -59,12 +60,10 @@ reload(_Host, _NewOpts, _OldOpts) ->
 
 mod_opt_type({roster, _}) -> fun acl:access_rules_validator/1;
 mod_opt_type({message, _}) -> fun acl:access_rules_validator/1;
-mod_opt_type({presence, _}) -> fun acl:access_rules_validator/1.
-
-mod_options(_) ->
-    [{roster, [{both, none}, {get, none}, {set, none}]},
-     {presence, [{managed_entity, none}, {roster, none}]},
-     {message, [{outgoing,none}]}].
+mod_opt_type({presence, _}) -> fun acl:access_rules_validator/1;
+mod_opt_type(_) ->
+    [{roster, both}, {roster, get}, {roster, set},
+     {message, outgoing}, {presence, managed_entity}, {presence, roster}].
 
 depends(_, _) ->
     [].
@@ -75,7 +74,7 @@ component_connected(Host) ->
       fun(ServerHost) ->
 	      Proc = gen_mod:get_module_proc(ServerHost, ?MODULE),
 	      gen_server:cast(Proc, {component_connected, Host})
-      end, ejabberd_config:get_myhosts()).
+      end, ?MYHOSTS).
 
 -spec component_disconnected(binary(), binary()) -> ok.
 component_disconnected(Host, _Reason) ->
@@ -83,7 +82,7 @@ component_disconnected(Host, _Reason) ->
       fun(ServerHost) ->
 	      Proc = gen_mod:get_module_proc(ServerHost, ?MODULE),
 	      gen_server:cast(Proc, {component_disconnected, Host})
-      end, ejabberd_config:get_myhosts()).
+      end, ?MYHOSTS).
 
 -spec process_message(stanza()) -> stop | ok.
 process_message(#message{from = #jid{luser = <<"">>, lresource = <<"">>} = From,
@@ -97,7 +96,7 @@ process_message(#message{from = #jid{luser = <<"">>, lresource = <<"">>} = From,
 	    case proplists:get_value(message, Access, none) of
 		outgoing ->
 		    forward_message(Msg);
-		_ ->
+		none ->
 		    Txt = <<"Insufficient privilege">>,
 		    Err = xmpp:err_forbidden(Txt, Lang),
 		    ejabberd_router:route_error(Msg, Err)
@@ -171,7 +170,7 @@ process_presence_in({#presence{
 			 true ->
 			      ok
 		      end;
-		 _ ->
+		 true ->
 		      ok
 	      end
       end, dict:to_list(Permissions)),
@@ -211,7 +210,7 @@ handle_cast({component_connected, Host}, State) ->
     RosterPerm = get_roster_permission(ServerHost, Host),
     PresencePerm = get_presence_permission(ServerHost, Host),
     MessagePerm = get_message_permission(ServerHost, Host),
-    if RosterPerm /= none; PresencePerm /= none; MessagePerm /= none ->
+    if RosterPerm /= none, PresencePerm /= none, MessagePerm /= none ->
 	    Priv = #privilege{perms = [#privilege_perm{access = message,
 						       type = MessagePerm},
 				       #privilege_perm{access = roster,
@@ -275,10 +274,9 @@ get_permissions(ServerHost) ->
 forward_message(#message{to = To} = Msg) ->
     ServerHost = To#jid.lserver,
     Lang = xmpp:get_lang(Msg),
-    CodecOpts = ejabberd_config:codec_options(ServerHost),
-    try xmpp:try_subtag(Msg, #privilege{}) of
-	#privilege{forwarded = #forwarded{sub_els = [SubEl]}} ->
-	    try xmpp:decode(SubEl, ?NS_CLIENT, CodecOpts) of
+    case xmpp:get_subtag(Msg, #privilege{}) of
+	#privilege{forwarded = #forwarded{xml_els = [SubEl]}} ->
+	    try xmpp:decode(SubEl, ?NS_CLIENT, [ignore_els]) of
 		#message{} = NewMsg ->
 		    case NewMsg#message.from of
 			#jid{lresource = <<"">>, lserver = ServerHost} ->
@@ -294,22 +292,18 @@ forward_message(#message{to = To} = Msg) ->
 		    Err = xmpp:err_bad_request(Txt, Lang),
 		    ejabberd_router:route_error(Msg, Err)
 	    catch _:{xmpp_codec, Why} ->
-		    Txt = xmpp:io_format_error(Why),
+		    Txt = xmpp:format_error(Why),
 		    Err = xmpp:err_bad_request(Txt, Lang),
 		    ejabberd_router:route_error(Msg, Err)
 	    end;
 	_ ->
-	    Txt = <<"No <forwarded/> element found">>,
-	    Err = xmpp:err_bad_request(Txt, Lang),
-	    ejabberd_router:route_error(Msg, Err)
-    catch _:{xmpp_codec, Why} ->
-	    Txt = xmpp:io_format_error(Why),
+	    Txt = <<"Invalid <forwarded/> element">>,
 	    Err = xmpp:err_bad_request(Txt, Lang),
 	    ejabberd_router:route_error(Msg, Err)
     end.
 
 get_roster_permission(ServerHost, Host) ->
-    Perms = gen_mod:get_module_opt(ServerHost, ?MODULE, roster),
+    Perms = gen_mod:get_module_opt(ServerHost, ?MODULE, roster, []),
     case match_rule(ServerHost, Host, Perms, both) of
 	allow ->
 	    both;
@@ -324,14 +318,14 @@ get_roster_permission(ServerHost, Host) ->
     end.
 
 get_message_permission(ServerHost, Host) ->
-    Perms = gen_mod:get_module_opt(ServerHost, ?MODULE, message),
+    Perms = gen_mod:get_module_opt(ServerHost, ?MODULE, message, []),
     case match_rule(ServerHost, Host, Perms, outgoing) of
 	allow -> outgoing;
 	deny -> none
     end.
 
 get_presence_permission(ServerHost, Host) ->
-    Perms = gen_mod:get_module_opt(ServerHost, ?MODULE, presence),
+    Perms = gen_mod:get_module_opt(ServerHost, ?MODULE, presence, []),
     case match_rule(ServerHost, Host, Perms, roster) of
 	allow ->
 	    roster;

@@ -5,7 +5,7 @@
 %%% Created : 12 Oct 2006 by Mickael Remond <mremond@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,9 +31,9 @@
 -export([generate_subfilter/1, find_ldap_attrs/2, check_filter/1,
 	 get_ldap_attr/2, get_user_part/2, make_filter/2,
 	 get_state/2, case_insensitive_match/2, get_config/2,
-	 decode_octet_string/3, uids_domain_subst/2, opt_type/1,
-	 options/1]).
+	 decode_octet_string/3, uids_domain_subst/2, opt_type/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("eldap.hrl").
 
@@ -180,16 +180,12 @@ get_config(Host, Opts) ->
     TLSCertFile = get_opt(ldap_tls_certfile, Host, Opts),
     TLSCAFile = get_opt(ldap_tls_cacertfile, Host, Opts),
     TLSDepth = get_opt(ldap_tls_depth, Host, Opts),
-    Port = case get_opt(ldap_port, Host, Opts) of
-	       undefined ->
+    Port = get_opt(ldap_port, Host, Opts,
 		   case Encrypt of
 		       tls -> ?LDAPS_PORT;
 		       starttls -> ?LDAP_PORT;
 		       _ -> ?LDAP_PORT
-		   end;
-	       P ->
-		   P
-	   end,
+		   end),
     RootDN = get_opt(ldap_rootdn, Host, Opts, <<"">>),
     Password = get_opt(ldap_password, Host, Opts, <<"">>),
     Base = get_opt(ldap_base, Host, Opts, <<"">>),
@@ -333,14 +329,26 @@ collect_parts_bit([{?N_BIT_STRING,<<Unused,Bits/binary>>}|Rest],Acc,Uacc) ->
 collect_parts_bit([],Acc,Uacc) ->
     list_to_binary([Uacc|lists:reverse(Acc)]).
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-type deref_aliases() :: never | searching | finding | always.
+-type uids() :: binary() | {binary()} | {binary(), binary()}.
+-spec opt_type(deref_aliases) -> fun((deref_aliases()) -> deref_aliases());
+	      (ldap_backups) -> fun(([binary()]) -> [binary()]);
+	      (ldap_base) -> fun((binary()) -> binary());
+	      (ldap_deref_aliases) -> fun((deref_aliases()) -> deref_aliases());
+	      (ldap_encrypt) -> fun((tls | starttls | none) -> tls | starttls | none);
+	      (ldap_password) -> fun((binary()) -> binary());
+	      (ldap_port) -> fun((0..65535) -> 0..65535);
+	      (ldap_rootdn) -> fun((binary()) -> binary());
+	      (ldap_servers) -> fun(([binary()]) -> [binary()]);
+	      (ldap_tls_certfile) -> fun((binary()) -> string());
+	      (ldap_tls_cacertfile) -> fun((binary()) -> string());
+	      (ldap_tls_depth) -> fun((non_neg_integer()) -> non_neg_integer());
+	      (ldap_tls_verify) -> fun((hard | soft | false) -> hard | soft | false);
+	      (ldap_filter) -> fun((binary()) -> binary());
+	      (ldap_uids) -> fun((uids()) -> uids());
+	      (atom()) -> [atom()].
 opt_type(deref_aliases) ->
-    fun(unspecified) -> unspecified;
-       (never) -> never;
-       (searching) -> searching;
-       (finding) -> finding;
-       (always) -> always
-    end;
+    opt_type(ldap_deref_aliases);
 opt_type(ldap_backups) ->
     fun (L) -> [iolist_to_binary(H) || H <- L] end;
 opt_type(ldap_base) -> fun iolist_to_binary/1;
@@ -357,33 +365,25 @@ opt_type(ldap_encrypt) ->
     end;
 opt_type(ldap_password) -> fun iolist_to_binary/1;
 opt_type(ldap_port) ->
-    fun(undefined) -> undefined;
-       (I) when is_integer(I), I > 0 -> I
-    end;
+    fun (I) when is_integer(I), I > 0 -> I end;
 opt_type(ldap_rootdn) -> fun iolist_to_binary/1;
 opt_type(ldap_servers) ->
     fun (L) -> [iolist_to_binary(H) || H <- L] end;
 opt_type(ldap_tls_certfile) ->
-    fun(undefined) -> undefined;
-       (S) -> binary_to_list(ejabberd_pkix:try_certfile(S))
+    fun(S) ->
+	    binary_to_list(ejabberd_pkix:try_certfile(S))
     end;
 opt_type(ldap_tls_cacertfile) ->
-    fun(undefined) -> undefined;
-       (S) -> binary_to_list(misc:try_read_file(S))
-    end;
+    fun(S) -> binary_to_list(misc:try_read_file(S)) end;
 opt_type(ldap_tls_depth) ->
-    fun(undefined) -> undefined;
-       (I) when is_integer(I), I >= 0 -> I
-    end;
+    fun (I) when is_integer(I), I >= 0 -> I end;
 opt_type(ldap_tls_verify) ->
     fun (hard) -> hard;
 	(soft) -> soft;
 	(false) -> false
     end;
 opt_type(ldap_filter) ->
-    fun(<<"">>) -> <<"">>;
-       (F) -> check_filter(F)
-    end;
+    fun check_filter/1;
 opt_type(ldap_uids) ->
     fun (Us) ->
 	    lists:map(fun ({U, P}) ->
@@ -399,20 +399,3 @@ opt_type(_) ->
      ldap_port, ldap_rootdn, ldap_servers, ldap_filter,
      ldap_tls_certfile, ldap_tls_cacertfile, ldap_tls_depth,
      ldap_tls_verify].
-
-options(_) ->
-    [{deref_aliases, unspecified},
-     {ldap_backups, []},
-     {ldap_base, <<"">>},
-     {ldap_uids, [{<<"uid">>, <<"%u">>}]},
-     {ldap_deref_aliases, never},
-     {ldap_encrypt, none},
-     {ldap_password, <<"">>},
-     {ldap_port, undefined},
-     {ldap_rootdn, <<"">>},
-     {ldap_servers, [<<"localhost">>]},
-     {ldap_filter, <<"">>},
-     {ldap_tls_certfile, undefined},
-     {ldap_tls_cacertfile, undefined},
-     {ldap_tls_depth, undefined},
-     {ldap_tls_verify, false}].

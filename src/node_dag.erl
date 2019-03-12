@@ -5,7 +5,7 @@
 %%% Created : 15 Jun 2009 by Brian Cully <bjc@kublai.com>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -80,7 +80,7 @@ publish_item(Nidx, Publisher, Model, MaxItems, ItemId, Payload, PubOpts) ->
 		collection ->
 		    Txt = <<"Publishing items to collection node is not allowed">>,
 		    {error, mod_pubsub:extended_error(
-			      xmpp:err_not_allowed(Txt, ejabberd_config:get_mylang()),
+			      xmpp:err_not_allowed(Txt, ?MYLANG),
 			      mod_pubsub:err_unsupported('publish'))};
 		_ ->
 		    node_hometree:publish_item(Nidx, Publisher, Model,

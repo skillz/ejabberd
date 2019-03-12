@@ -5,7 +5,7 @@
 %%% Created : 26 Jul 2014 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -529,4 +529,5 @@ report_and_stop(Tab, Err) ->
                  "Failed to convert '~s' table to binary: ~p",
                  [Tab, Err])),
     ?CRITICAL_MSG(ErrTxt, []),
-    ejabberd:halt().
+    timer:sleep(1000),
+    halt(string:substr(ErrTxt, 1, 199)).

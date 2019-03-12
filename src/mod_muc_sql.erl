@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,16 +30,16 @@
 -behaviour(mod_muc_room).
 
 %% API
--export([init/2, store_room/5, restore_room/3, forget_room/3,
+-export([init/2, store_room/4, restore_room/3, forget_room/3,
 	 can_use_nick/4, get_rooms/2, get_nick/3, set_nick/4,
 	 import/3, export/1]).
 -export([register_online_room/4, unregister_online_room/4, find_online_room/3,
 	 get_online_rooms/3, count_online_rooms/2, rsm_supported/0,
 	 register_online_user/4, unregister_online_user/4,
-	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
-	 get_subscribed_rooms/3]).
+	 count_online_rooms_by_user/3, get_online_rooms_by_user/3]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
 	 get_affiliations/3, search_affiliation/4]).
+-export([db_subscribe/3, get_db_subscribers/2]).
 
 -include("jid.hrl").
 -include("mod_muc.hrl").
@@ -57,48 +57,45 @@ init(Host, Opts) ->
 	    ok
     end.
 
-store_room(LServer, Host, Name, Opts, ChangesHints) ->
-    {Subs, Opts2} = case lists:keytake(subscribers, 1, Opts) of
-			{value, {subscribers, S}, OptN} -> {S, OptN};
-			_ -> {[], Opts}
-		    end,
-    SOpts = misc:term_to_expr(Opts2),
+db_subscribe(LServer, LBareJID, LBareRoomJID) ->
+    SJID = jid:encode(LBareJID),
+    SRoomJID = jid:encode(LBareRoomJID),
+    F = fun () ->
+        ejabberd_sql:sql_query_t(
+                  ?SQL("insert into subscription (jid, room) "
+                       "select %(SJID)s, %(SRoomJID)s from DUAL "
+                       "where not exists ("
+                       "   select 1 from subscription "
+                       "   where jid=%(SJID)s AND room=%(SRoomJID)s);"))
+    end,
+    ejabberd_sql:sql_transaction(LServer, F).
+
+get_db_subscribers(LServer, LBareJID) ->
+    SJID = jid:encode(LBareJID),
+    case catch ejabberd_sql:sql_query(
+	              LServer,
+	              ?SQL("select @(room)s from subscription "
+                     "where jid=%(SJID)s")) of
+  {selected, Subscriptions} ->
+    lists:map(
+      fun({Subscription}) ->
+        jid:tolower(jid:decode(Subscription))
+      end, Subscriptions);
+  Err ->
+    ?ERROR_MSG("failed to get subscriptions: ~p", [Err]),
+    []
+    end.
+
+store_room(LServer, Host, Name, Opts) ->
+    SOpts = misc:term_to_expr(Opts),
     F = fun () ->
 		?SQL_UPSERT_T(
                    "muc_room",
                    ["!name=%(Name)s",
                     "!host=%(Host)s",
-                    "server_host=%(LServer)s",
-                    "opts=%(SOpts)s"]),
-                case ChangesHints of
-                    Changes when is_list(Changes) ->
-                        [change_room(Host, Name, Change) || Change <- Changes];
-                    _ ->
-                        ejabberd_sql:sql_query_t(
-                          ?SQL("delete from muc_room_subscribers where "
-                               "room=%(Name)s and host=%(Host)s")),
-                        [change_room(Host, Name, {add_subscription, JID, Nick, Nodes})
-                         || {JID, Nick, Nodes} <- Subs]
-                end
+                    "opts=%(SOpts)s"])
 	end,
     ejabberd_sql:sql_transaction(LServer, F).
-
-change_room(Host, Room, {add_subscription, JID, Nick, Nodes}) ->
-    SJID = jid:encode(JID),
-    SNodes = misc:term_to_expr(Nodes),
-    ?SQL_UPSERT_T(
-       "muc_room_subscribers",
-       ["!jid=%(SJID)s",
-	"!host=%(Host)s",
-	"!room=%(Room)s",
-	"nick=%(Nick)s",
-	"nodes=%(SNodes)s"]);
-change_room(Host, Room, {del_subscription, JID}) ->
-    SJID = jid:encode(JID),
-    ejabberd_sql:sql_query_t(?SQL("delete from muc_room_subscribers where "
-				  "room=%(Room)s and host=%(Host)s and jid=%(SJID)s"));
-change_room(Host, Room, Change) ->
-    ?ERROR_MSG("Unsupported change on room ~s@~s: ~p", [Room, Host, Change]).
 
 restore_room(LServer, Host, Name) ->
     case catch ejabberd_sql:sql_query(
@@ -106,30 +103,7 @@ restore_room(LServer, Host, Name) ->
                  ?SQL("select @(opts)s from muc_room where name=%(Name)s"
                       " and host=%(Host)s")) of
 	{selected, [{Opts}]} ->
-	    OptsD = ejabberd_sql:decode_term(Opts),
-	    case catch ejabberd_sql:sql_query(
-		LServer,
-		?SQL("select @(jid)s, @(nick)s, @(nodes)s from muc_room_subscribers where room=%(Name)s"
-		     " and host=%(Host)s")) of
-		{selected, []} ->
-		    OptsR = mod_muc:opts_to_binary(OptsD),
-		    case lists:keymember(subscribers, 1, OptsD) of
-			true ->
-			    store_room(LServer, Host, Name, OptsR, undefined);
-			_ ->
-			    ok
-		    end,
-		    OptsR;
-		{selected, Subs} ->
-		    SubData = lists:map(
-			     fun({Jid, Nick, Nodes}) ->
-				 {jid:decode(Jid), Nick, ejabberd_sql:decode_term(Nodes)}
-			     end, Subs),
-		    Opts2 = lists:keystore(subscribers, 1, OptsD, {subscribers, SubData}),
-		    mod_muc:opts_to_binary(Opts2);
-		_ ->
-		    error
-	    end;
+	    mod_muc:opts_to_binary(ejabberd_sql:decode_term(Opts));
 	_ ->
 	    error
     end.
@@ -138,9 +112,6 @@ forget_room(LServer, Host, Name) ->
     F = fun () ->
 		ejabberd_sql:sql_query_t(
                   ?SQL("delete from muc_room where name=%(Name)s"
-                       " and host=%(Host)s")),
-		ejabberd_sql:sql_query_t(
-		    ?SQL("delete from muc_room_subscribers where room=%(Name)s"
                        " and host=%(Host)s"))
 	end,
     ejabberd_sql:sql_transaction(LServer, F).
@@ -162,35 +133,14 @@ get_rooms(LServer, Host) ->
                  ?SQL("select @(name)s, @(opts)s from muc_room"
                       " where host=%(Host)s")) of
 	{selected, RoomOpts} ->
-	    case catch ejabberd_sql:sql_query(
-		LServer,
-		?SQL("select @(room)s, @(jid)s, @(nick)s, @(nodes)s from muc_room_subscribers"
-		     " where host=%(Host)s")) of
-		{selected, Subs} ->
-		    SubsD = lists:foldl(
-			fun({Room, Jid, Nick, Nodes}, Dict) ->
-			    dict:append(Room, {jid:decode(Jid),
-					       Nick, ejabberd_sql:decode_term(Nodes)}, Dict)
-			end, dict:new(), Subs),
 	    lists:map(
 	      fun({Room, Opts}) ->
-			    OptsD = ejabberd_sql:decode_term(Opts),
-			    OptsD2 = case {dict:find(Room, SubsD), lists:keymember(subscribers, 1, OptsD)} of
-					 {_, true} ->
-					     store_room(LServer, Host, Room, mod_muc:opts_to_binary(OptsD), undefined),
-					     OptsD;
-					 {{ok, SubsI}, false} ->
-					     lists:keystore(subscribers, 1, OptsD, {subscribers, SubsI});
-					 _ ->
-					     OptsD
-			    end,
 		      #muc_room{name_host = {Room, Host},
-				      opts = mod_muc:opts_to_binary(OptsD2)}
+				opts = mod_muc:opts_to_binary(
+					 ejabberd_sql:decode_term(Opts))}
 	      end, RoomOpts);
-	_Err ->
-		    []
-	    end;
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to get rooms: ~p", [Err]),
 	    []
     end.
 
@@ -226,7 +176,6 @@ set_nick(LServer, Host, From, Nick) ->
                                   "muc_registered",
                                   ["!jid=%(JID)s",
                                    "!host=%(Host)s",
-                                   "server_host=%(LServer)s",
                                    "nick=%(Nick)s"]),
 				ok;
 			   true ->
@@ -258,12 +207,12 @@ register_online_room(ServerHost, Room, Host, Pid) ->
 		     "muc_online_room",
 		     ["!name=%(Room)s",
 		      "!host=%(Host)s",
-                      "server_host=%(ServerHost)s",
 		      "node=%(NodeS)s",
 		      "pid=%(PidS)s"]) of
 	ok ->
 	    ok;
 	Err ->
+	    ?ERROR_MSG("failed to update 'muc_online_room': ~p", [Err]),
 	    Err
     end.
 
@@ -287,7 +236,8 @@ find_online_room(ServerHost, Room, Host) ->
 	    end;
 	{selected, []} ->
 	    error;
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to select 'muc_online_room': ~p", [Err]),
 	    error
     end.
 
@@ -298,7 +248,8 @@ count_online_rooms(ServerHost, Host) ->
 		"where host=%(Host)s")) of
 	{selected, [{Num}]} ->
 	    Num;
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to select 'muc_online_room': ~p", [Err]),
 	    0
     end.
 
@@ -314,7 +265,8 @@ get_online_rooms(ServerHost, Host, _RSM) ->
 		      catch _:{bad_node, _} -> []
 		      end
 	      end, Rows);
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to select 'muc_online_room': ~p", [Err]),
 	    []
     end.
 
@@ -329,11 +281,11 @@ register_online_user(ServerHost, {U, S, R}, Room, Host) ->
 		      "!resource=%(R)s",
 		      "!name=%(Room)s",
 		      "!host=%(Host)s",
-                      "server_host=%(ServerHost)s",
 		      "node=%(NodeS)s"]) of
 	ok ->
 	    ok;
 	Err ->
+	    ?ERROR_MSG("failed to update 'muc_online_users': ~p", [Err]),
 	    Err
     end.
 
@@ -352,7 +304,8 @@ count_online_rooms_by_user(ServerHost, U, S) ->
 		"username=%(U)s and server=%(S)s")) of
 	{selected, [{Num}]} ->
 	    Num;
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to select 'muc_online_users': ~p", [Err]),
 	    0
     end.
 
@@ -363,7 +316,8 @@ get_online_rooms_by_user(ServerHost, U, S) ->
 		"username=%(U)s and server=%(S)s")) of
 	{selected, Rows} ->
 	    Rows;
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to select 'muc_online_users': ~p", [Err]),
 	    []
     end.
 
@@ -375,12 +329,9 @@ export(_Server) ->
                       SOpts = misc:term_to_expr(Opts),
                       [?SQL("delete from muc_room where name=%(Name)s"
                             " and host=%(RoomHost)s;"),
-                       ?SQL_INSERT(
-                          "muc_room",
-                          ["name=%(Name)s",
-                           "host=%(RoomHost)s",
-                           "server_host=%(Host)s",
-                           "opts=%(SOpts)s"])];
+                       ?SQL("insert into muc_room(name, host, opts) "
+                            "values ("
+                            "%(Name)s, %(RoomHost)s, %(SOpts)s);")];
                   false ->
                       []
               end
@@ -393,12 +344,9 @@ export(_Server) ->
                       SJID = jid:encode(jid:make(U, S)),
                       [?SQL("delete from muc_registered where"
                             " jid=%(SJID)s and host=%(RoomHost)s;"),
-                       ?SQL_INSERT(
-                          "muc_registered",
-                          ["jid=%(SJID)s",
-                           "host=%(RoomHost)s",
-                           "server_host=%(Host)s",
-                           "nick=%(Nick)s"])];
+                       ?SQL("insert into muc_registered(jid, host, "
+                            "nick) values ("
+                            "%(SJID)s, %(RoomHost)s, %(Nick)s);")];
                   false ->
                       []
               end
@@ -406,18 +354,6 @@ export(_Server) ->
 
 import(_, _, _) ->
     ok.
-
-get_subscribed_rooms(LServer, Host, Jid) ->
-    JidS = jid:encode(Jid),
-    case catch ejabberd_sql:sql_query(
-	LServer,
-	?SQL("select @(room)s, @(nodes)s from muc_room_subscribers where jid=%(JidS)s"
-	     " and host=%(Host)s")) of
-	{selected, Subs} ->
-	    [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs];
-	_Error ->
-	    []
-    end.
 
 %%%===================================================================
 %%% Internal functions

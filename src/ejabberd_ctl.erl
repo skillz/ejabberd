@@ -5,7 +5,7 @@
 %%% Created : 11 Jan 2004 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -58,8 +58,8 @@
 
 -include("ejabberd_ctl.hrl").
 -include("ejabberd_commands.hrl").
+-include("ejabberd.hrl").
 -include("logger.hrl").
--include("ejabberd_stacktrace.hrl").
 
 -define(DEFAULT_VERSION, 1000000).
 
@@ -133,7 +133,7 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%-----------------------------
-%% ejabberdctl Command management
+%% ejabberdctl Command managment
 %%-----------------------------
 
 register_commands(CmdDescs, Module, Function) ->
@@ -169,15 +169,15 @@ process(["status"], _Version) ->
     {InternalStatus, ProvidedStatus} = init:get_status(),
     print("The node ~p is ~p with status: ~p~n",
 	   [node(), InternalStatus, ProvidedStatus]),
-    case lists:keymember(ejabberd, 1, application:which_applications()) of
+    case lists:keysearch(ejabberd, 1, application:which_applications()) of
         false ->
             EjabberdLogPath = ejabberd_logger:get_log_path(),
             print("ejabberd is not running in that node~n"
 		   "Check for error messages: ~s~n"
 		   "or other files in that directory.~n", [EjabberdLogPath]),
             ?STATUS_ERROR;
-        true ->
-            print("ejabberd ~s is running in that node~n", [ejabberd_config:get_version()]),
+        {value, {_, _, Version}} ->
+            print("ejabberd ~s is running in that node~n", [Version]),
             ?STATUS_SUCCESS
     end;
 
@@ -328,9 +328,9 @@ try_call_command(Args, Auth, AccessCommands, Version) ->
     catch
 	throw:Error ->
 	    {io_lib:format("~p", [Error]), ?STATUS_ERROR};
-	?EX_RULE(A, Why, Stack) ->
-	    {io_lib:format("Problem '~p ~p' occurred executing the command.~nStacktrace: ~p",
-			   [A, Why, ?EX_STACK(Stack)]), ?STATUS_ERROR}
+	A:Why ->
+	    Stack = erlang:get_stacktrace(),
+	    {io_lib:format("Problem '~p ~p' occurred executing the command.~nStacktrace: ~p", [A, Why, Stack]), ?STATUS_ERROR}
     end.
 
 %% @spec (Args::[string()], Auth, AccessCommands) -> string() | integer() | {string(), integer()} | {error, ErrorType}
@@ -866,7 +866,7 @@ print(Format, Args) ->
     io:format(lists:flatten(Format), Args).
 
 %%-----------------------------
-%% Command management
+%% Command managment
 %%-----------------------------
 
 %%+++
@@ -875,7 +875,8 @@ print(Format, Args) ->
 %%    ["aaaa bbb ccc"].
 
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-spec opt_type(ejabberdctl_access_commands) -> fun((list()) -> list());
+	      (atom()) -> [atom()].
 opt_type(ejabberdctl_access_commands) ->
     fun (V) when is_list(V) -> V end;
 opt_type(_) -> [ejabberdctl_access_commands].

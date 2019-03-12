@@ -3,7 +3,7 @@
 %%% Created :  4 Mar 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -21,395 +21,515 @@
 %%%
 %%%-------------------------------------------------------------------
 -module(ejabberd_pkix).
+
 -behaviour(gen_server).
 -behaviour(ejabberd_config).
 
 %% API
--export([start_link/0, opt_type/1]).
--export([certs_dir/0, ca_file/0]).
--export([add_certfile/1, try_certfile/1, get_certfile/0, get_certfile/1]).
-%% Hooks
--export([ejabberd_started/0, config_reloaded/0]).
+-export([start_link/0, add_certfile/1, format_error/1, opt_type/1,
+	 get_certfile/1, try_certfile/1, route_registered/1]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-	 terminate/2, code_change/3, format_status/2]).
+	 terminate/2, code_change/3]).
 
+-include_lib("public_key/include/public_key.hrl").
 -include("logger.hrl").
--define(CALL_TIMEOUT, timer:minutes(1)).
+-include("jid.hrl").
 
--record(state, {files = sets:new() :: sets:set(filename())}).
+-record(state, {validate = true :: boolean(),
+		certs = #{}}).
+-record(cert_state, {domains = [] :: [binary()]}).
 
--type state() :: #state{}.
--type filename() :: binary().
+-type cert() :: #'OTPCertificate'{}.
+-type priv_key() :: public_key:private_key().
+-type pub_key() :: #'RSAPublicKey'{} | {integer(), #'Dss-Parms'{}} | #'ECPoint'{}.
+-type bad_cert_reason() :: cert_expired | invalid_issuer | invalid_signature |
+			   name_not_permitted | missing_basic_constraint |
+			   invalid_key_usage | selfsigned_peer | unknown_sig_algo |
+			   unknown_ca | missing_priv_key.
+-type bad_cert() :: {bad_cert, bad_cert_reason()}.
+-type cert_error() :: not_cert | not_der | not_pem | encrypted.
+-export_type([cert_error/0]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec start_link() -> {ok, pid()} | {error, {already_started, pid()} | term()}.
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+-spec add_certfile(filename:filename())
+      -> ok | {error, cert_error() | file:posix()}.
+add_certfile(Path) ->
+    gen_server:call(?MODULE, {add_certfile, prep_path(Path)}).
 
--spec add_certfile(file:filename_all()) -> {ok, filename()} | {error, pkix:error_reason()}.
-add_certfile(Path0) ->
-    Path = prep_path(Path0),
-    try gen_server:call(?MODULE, {add_certfile, Path}, ?CALL_TIMEOUT)
-    catch exit:{noproc, _} ->
-	    case add_file(Path) of
-		ok -> {ok, Path};
-		Err -> Err
-	    end
-    end.
-
--spec try_certfile(file:filename_all()) -> filename().
+-spec try_certfile(filename:filename()) -> binary().
 try_certfile(Path0) ->
     Path = prep_path(Path0),
-    case pkix:is_pem_file(Path) of
-	true -> Path;
-	{false, Reason} ->
-	    ?ERROR_MSG("Failed to read PEM file ~s: ~s",
-		       [Path, pkix:format_error(Reason)]),
-	    erlang:error(badarg)
+    case mk_cert_state(Path, false) of
+	{ok, _} -> Path;
+	{error, _} -> erlang:error(badarg)
     end.
 
--spec get_certfile(binary()) -> {ok, filename()} | error.
+route_registered(Route) ->
+    gen_server:call(?MODULE, {route_registered, Route}).
+
+-spec format_error(cert_error() | file:posix()) -> string().
+format_error(not_cert) ->
+    "no PEM encoded certificates found";
+format_error(not_pem) ->
+    "failed to decode from PEM format";
+format_error(not_der) ->
+    "failed to decode from DER format";
+format_error(encrypted) ->
+    "encrypted certificate found in the chain";
+format_error({bad_cert, cert_expired}) ->
+    "certificate is no longer valid as its expiration date has passed";
+format_error({bad_cert, invalid_issuer}) ->
+    "certificate issuer name does not match the name of the "
+	"issuer certificate in the chain";
+format_error({bad_cert, invalid_signature}) ->
+    "certificate was not signed by its issuer certificate in the chain";
+format_error({bad_cert, name_not_permitted}) ->
+    "invalid Subject Alternative Name extension";
+format_error({bad_cert, missing_basic_constraint}) ->
+    "certificate, required to have the basic constraints extension, "
+	"does not have a basic constraints extension";
+format_error({bad_cert, invalid_key_usage}) ->
+    "certificate key is used in an invalid way according "
+	"to the key-usage extension";
+format_error({bad_cert, selfsigned_peer}) ->
+    "self-signed certificate in the chain";
+format_error({bad_cert, unknown_sig_algo}) ->
+    "certificate is signed using unknown algorithm";
+format_error({bad_cert, unknown_ca}) ->
+    "certificate is signed by unknown CA";
+format_error({bad_cert, missing_priv_key}) ->
+    "no matching private key found for certificate in the chain";
+format_error({bad_cert, Unknown}) ->
+    lists:flatten(io_lib:format("~w", [Unknown]));
+format_error(Why) ->
+    case file:format_error(Why) of
+	"unknown POSIX error" ->
+	    atom_to_list(Why);
+	Reason ->
+	    Reason
+    end.
+
+-spec get_certfile(binary()) -> {ok, binary()} | error.
 get_certfile(Domain) ->
-    case get_certfile_no_default(Domain) of
-	{ok, Path} ->
-	    {ok, Path};
-	error ->
-	    get_certfile()
-    end.
-
--spec get_certfile_no_default(binary()) -> {ok, filename()} | error.
-get_certfile_no_default(Domain) ->
-    case xmpp_idna:domain_utf8_to_ascii(Domain) of
+    case ejabberd_idna:domain_utf8_to_ascii(Domain) of
 	false ->
 	    error;
 	ASCIIDomain ->
-	    case pkix:get_certfile(ASCIIDomain) of
-		error -> error;
-		Ret -> {ok, select_certfile(Ret)}
+	    case ets:lookup(?MODULE, ASCIIDomain) of
+		[] ->
+		    case binary:split(ASCIIDomain, <<".">>, [trim]) of
+			[_, Host] ->
+			    case ets:lookup(?MODULE, <<"*.", Host/binary>>) of
+				[{_, Path}|_] ->
+				    {ok, Path};
+				[] ->
+				    error
+			    end;
+			_ ->
+			    error
+		    end;
+		[{_, Path}|_] ->
+		    {ok, Path}
 	    end
     end.
 
--spec get_certfile() -> {ok, filename()} | error.
-get_certfile() ->
-    case pkix:get_certfile() of
-	error -> error;
-	Ret -> {ok, select_certfile(Ret)}
-    end.
-
--spec ca_file() -> filename() | undefined.
-ca_file() ->
-    ejabberd_config:get_option(ca_file).
-
--spec certs_dir() -> file:dirname_all().
-certs_dir() ->
-    MnesiaDir = mnesia:system_info(directory),
-    filename:join(MnesiaDir, "certs").
-
--spec ejabberd_started() -> ok.
-ejabberd_started() ->
-    gen_server:call(?MODULE, ejabberd_started, ?CALL_TIMEOUT).
-
--spec config_reloaded() -> ok.
-config_reloaded() ->
-    gen_server:call(?MODULE, config_reloaded, ?CALL_TIMEOUT).
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 opt_type(ca_path) ->
-    fun(_) ->
-	    ?WARNING_MSG("Option 'ca_path' has no effect anymore, "
-			 "use 'ca_file' instead", []),
-	    undefined
-    end;
-opt_type(ca_file) ->
-    fun try_certfile/1;
-opt_type(certfiles) ->
-    fun(Paths) -> [iolist_to_binary(Path) || Path <- Paths] end;
-opt_type(O) when O == c2s_certfile; O == s2s_certfile; O == domain_certfile ->
-    fun(Path) ->
-	    ?WARNING_MSG("Option '~s' is deprecated, use 'certfiles' instead", [O]),
-	    prep_path(Path)
-    end;
+    fun(Path) -> iolist_to_binary(Path) end;
 opt_type(_) ->
-    [ca_path, ca_file, certfiles, c2s_certfile, s2s_certfile, domain_certfile].
+    [ca_path].
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
--spec init([]) -> {ok, state()}.
 init([]) ->
     process_flag(trap_exit, true),
-    ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 100),
-    ejabberd_hooks:add(ejabberd_started, ?MODULE, ejabberd_started, 30),
-    case add_files() of
-	{Files, []} ->
-	    {ok, #state{files = Files}};
-	{Files, [_|_]} ->
-	    case ejabberd:is_loaded() of
-		true ->
-		    {ok, #state{files = Files}};
-		false ->
-		    del_files(Files),
-		    stop_ejabberd()
-	    end
-    end.
+    ets:new(?MODULE, [named_table, public, bag]),
+    ejabberd_hooks:add(route_registered, ?MODULE, route_registered, 50),
+    Validate = case os:type() of
+		   {win32, _} -> false;
+		   _ ->
+		       code:ensure_loaded(public_key),
+		       erlang:function_exported(
+			 public_key, short_name_hash, 1)
+	       end,
+    if Validate -> check_ca_dir();
+       true -> ok
+    end,
+    State = #state{validate = Validate},
+    {ok, add_certfiles(State)}.
 
--spec handle_call(term(), {pid(), term()}, state()) ->
-		  {reply, ok, state()} | {noreply, state()}.
-handle_call({add_certfile, Path}, _From, State) ->
-    case add_file(Path) of
-	ok ->
-	    Files = sets:add_element(Path, State#state.files),
-	    {reply, {ok, Path}, State#state{files = Files}};
-	{error, _} = Err ->
-	    {reply, Err, State}
-    end;
-handle_call(ejabberd_started, _From, State) ->
-    case commit() of
-	{ok, []} ->
-	    check_domain_certfiles(),
-	    {reply, ok, State};
-	_ ->
-	    stop_ejabberd()
-    end;
-handle_call(config_reloaded, _From, State) ->
-    Old = State#state.files,
-    New = get_certfiles_from_config_options(),
-    del_files(sets:subtract(Old, New)),
-    add_files(New),
-    case commit() of
-	{ok, _} ->
-	    check_domain_certfiles(),
-	    {reply, ok, State#state{files = New}};
+handle_call({add_certfile, Path}, _, State) ->
+    {Result, NewState} = add_certfile(Path, State),
+    {reply, Result, NewState};
+handle_call({route_registered, Host}, _, State) ->
+    NewState = add_certfiles(Host, State),
+    case get_certfile(Host) of
+	{ok, _} -> ok;
 	error ->
-	    {reply, ok, State}
-    end;
-handle_call(Request, _From, State) ->
-    ?WARNING_MSG("Unexpected call: ~p", [Request]),
+	    ?WARNING_MSG("No certificate found matching '~s': strictly "
+			 "configured clients or servers will reject "
+			 "connections with this host", [Host])
+    end,
+    {reply, ok, NewState};
+handle_call(_Request, _From, State) ->
+    Reply = ok,
+    {reply, Reply, State}.
+
+handle_cast(_Msg, State) ->
     {noreply, State}.
 
--spec handle_cast(term(), state()) -> {noreply, state()}.
-handle_cast(Request, State) ->
-    ?WARNING_MSG("Unexpected cast: ~p", [Request]),
+handle_info(_Info, State) ->
+    ?WARNING_MSG("unexpected info: ~p", [_Info]),
     {noreply, State}.
 
--spec handle_info(term(), state()) -> {noreply, state()}.
-handle_info(Info, State) ->
-    ?WARNING_MSG("Unexpected info: ~p", [Info]),
-    {noreply, State}.
+terminate(_Reason, _State) ->
+    ejabberd_hooks:delete(route_registered, ?MODULE, route_registered, 50).
 
--spec terminate(normal | shutdown | {shutdown, term()} | term(),
-		state()) -> any().
-terminate(_Reason, State) ->
-    ejabberd_hooks:delete(ejabberd_started, ?MODULE, ejabberd_started, 30),
-    ejabberd_hooks:delete(config_reloaded, ?MODULE, config_reloaded, 100),
-    del_files(State#state.files).
-
--spec code_change(term() | {down, term()}, state(), term()) -> {ok, state()}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
--spec format_status(normal | terminate, list()) -> term().
-format_status(_Opt, Status) ->
-    Status.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec add_files() -> {sets:set(filename()), [{filename(), pkix:error_reason()}]}.
-add_files() ->
-    Files = get_certfiles_from_config_options(),
-    add_files(sets:to_list(Files), sets:new(), []).
+add_certfiles(State) ->
+    lists:foldl(
+      fun(Host, AccState) ->
+	      add_certfiles(Host, AccState)
+      end, State, ejabberd_config:get_myhosts()).
 
--spec add_files(sets:set(filename())) ->
-		{sets:set(filename()), [{filename(), pkix:error_reason()}]}.
-add_files(Files) ->
-    add_files(sets:to_list(Files), sets:new(), []).
+add_certfiles(Host, State) ->
+    lists:foldl(
+      fun(Opt, AccState) ->
+	      case ejabberd_config:get_option({Opt, Host}) of
+		  undefined -> AccState;
+		  Path ->
+		      {_, NewAccState} = add_certfile(Path, AccState),
+		      NewAccState
+	      end
+      end, State, [c2s_certfile, s2s_certfile, domain_certfile]).
 
--spec add_files([filename()], sets:set(filename()),
-		[{filename(), pkix:error_reason()}]) ->
-		       {sets:set(filename()), [{filename(), pkix:error_reason()}]}.
-add_files([File|Files], Set, Errs) ->
-    case add_file(File) of
-	ok ->
-	    Set1 = sets:add_element(File, Set),
-	    add_files(Files, Set1, Errs);
-	{error, Reason} ->
-	    Errs1 = [{File, Reason}|Errs],
-	    add_files(Files, Set, Errs1)
-    end;
-add_files([], Set, Errs) ->
-    {Set, Errs}.
+add_certfile(Path, State) ->
+    case maps:get(Path, State#state.certs, undefined) of
+	#cert_state{} ->
+	    {ok, State};
+	undefined ->
+	    case mk_cert_state(Path, State#state.validate) of
+		{error, Reason} ->
+		    {{error, Reason}, State};
+		{ok, CertState} ->
+		    NewCerts = maps:put(Path, CertState, State#state.certs),
+		    lists:foreach(
+		      fun(Domain) ->
+			      ets:insert(?MODULE, {Domain, Path})
+		      end, CertState#cert_state.domains),
+		    {ok, State#state{certs = NewCerts}}
+	    end
+    end.
 
--spec add_file(filename()) -> ok | {error, pkix:error_reason()}.
-add_file(File) ->
-    case pkix:add_file(File) of
-	ok -> ok;
-	{error, Reason} = Err ->
-	    ?ERROR_MSG("Failed to read PEM file ~s: ~s",
-		       [File, pkix:format_error(Reason)]),
+mk_cert_state(Path, Validate) ->
+    case check_certfile(Path, Validate) of
+	{ok, Ds} ->
+	    {ok, #cert_state{domains = Ds}};
+	{invalid, Ds, {bad_cert, _} = Why} ->
+	    ?WARNING_MSG("certificate from ~s is invalid: ~s",
+			 [Path, format_error(Why)]),
+	    {ok, #cert_state{domains = Ds}};
+	{error, Why} = Err ->
+	    ?ERROR_MSG("failed to read certificate from ~s: ~s",
+		       [Path, format_error(Why)]),
 	    Err
     end.
 
--spec del_files(sets:set(filename())) -> ok.
-del_files(Files) ->
-    lists:foreach(fun pkix:del_file/1, sets:to_list(Files)).
-
--spec commit() -> {ok, [{filename(), pkix:error_reason()}]} | error.
-commit() ->
-    Opts = case ca_file() of
-	       undefined -> [];
-	       CAFile -> [{cafile, CAFile}]
-	   end,
-    case pkix:commit(certs_dir(), Opts) of
-	{ok, Errors, Warnings, CAError} ->
-	    log_errors(Errors),
-	    log_cafile_error(CAError),
-	    log_warnings(Warnings),
-	    fast_tls_add_certfiles(),
-	    {ok, Errors};
-	{error, File, Reason} ->
-	    ?CRITICAL_MSG("Failed to write to ~s: ~s",
-			  [File, file:format_error(Reason)]),
-	    error
+-spec check_certfile(filename:filename(), boolean())
+      -> {ok, [binary()]} | {invalid, [binary()], bad_cert()} |
+	 {error, cert_error() | file:posix()}.
+check_certfile(Path, Validate) ->
+    try
+	{ok, Data} = file:read_file(Path),
+	{ok, Certs, PrivKeys} = pem_decode(Data),
+	CertPaths = get_cert_paths(Certs),
+	Domains = get_domains(CertPaths),
+	case match_cert_keys(CertPaths, PrivKeys) of
+	    {ok, _} ->
+		case validate(CertPaths, Validate) of
+		    ok -> {ok, Domains};
+		    {error, Why} -> {invalid, Domains, Why}
+		end;
+	    {error, Why} ->
+		{invalid, Domains, Why}
+	end
+    catch _:{badmatch, {error, _} = Err} ->
+	    Err
     end.
 
--spec check_domain_certfiles() -> ok.
-check_domain_certfiles() ->
-    Hosts = ejabberd_config:get_myhosts(),
-    Routes = ejabberd_router:get_all_routes(),
-    check_domain_certfiles(Hosts ++ Routes).
+-spec pem_decode(binary()) -> {ok, [cert()], [priv_key()]} |
+			      {error, cert_error()}.
+pem_decode(Data) ->
+    try public_key:pem_decode(Data) of
+	PemEntries ->
+	    case decode_certs(PemEntries) of
+		{error, _} = Err ->
+		    Err;
+		Objects ->
+		    case lists:partition(
+			   fun(#'OTPCertificate'{}) -> true;
+			      (_) -> false
+			   end, Objects) of
+			{[], _} ->
+			    {error, not_cert};
+			{Certs, PrivKeys} ->
+			    {ok, Certs, PrivKeys}
+		    end
+	    end
+    catch _:_ ->
+	    {error, not_pem}
+    end.
 
--spec check_domain_certfiles([binary()]) -> ok.
-check_domain_certfiles(Hosts) ->
+-spec decode_certs([public_key:pem_entry()]) -> {[cert()], [priv_key()]} |
+						{error, not_der | encrypted}.
+decode_certs(PemEntries) ->
+    try lists:foldr(
+	  fun(_, {error, _} = Err) ->
+		  Err;
+	     ({_, _, Flag}, _) when Flag /= not_encrypted ->
+		  {error, encrypted};
+	     ({'Certificate', Der, _}, Acc) ->
+		  [public_key:pkix_decode_cert(Der, otp)|Acc];
+	     ({'PrivateKeyInfo', Der, not_encrypted}, Acc) ->
+		  #'PrivateKeyInfo'{privateKeyAlgorithm =
+					#'PrivateKeyInfo_privateKeyAlgorithm'{
+					   algorithm = Algo},
+				    privateKey = Key} =
+		      public_key:der_decode('PrivateKeyInfo', Der),
+		  case Algo of
+		      ?'rsaEncryption' ->
+			  [public_key:der_decode(
+			     'RSAPrivateKey', iolist_to_binary(Key))|Acc];
+		      ?'id-dsa' ->
+			  [public_key:der_decode(
+			     'DSAPrivateKey', iolist_to_binary(Key))|Acc];
+		      ?'id-ecPublicKey' ->
+			  [public_key:der_decode(
+			     'ECPrivateKey', iolist_to_binary(Key))|Acc];
+		      _ ->
+			  Acc
+		  end;
+	     ({Tag, Der, _}, Acc) when Tag == 'RSAPrivateKey';
+				       Tag == 'DSAPrivateKey';
+				       Tag == 'ECPrivateKey' ->
+		  [public_key:der_decode(Tag, Der)|Acc];
+	     (_, Acc) ->
+		  Acc
+	  end, [], PemEntries)
+    catch _:_ ->
+	    {error, not_der}
+    end.
+
+-spec validate([{path, [cert()]}], boolean()) -> ok | {error, bad_cert()}.
+validate([{path, Path}|Paths], true) ->
+    case validate_path(Path) of
+	ok ->
+	    validate(Paths, true);
+	Err ->
+	    Err
+    end;
+validate(_, _) ->
+    ok.
+
+-spec validate_path([cert()]) -> ok | {error, bad_cert()}.
+validate_path([Cert|_] = Certs) ->
+    case find_local_issuer(Cert) of
+	{ok, IssuerCert} ->
+	    try public_key:pkix_path_validation(IssuerCert, Certs, []) of
+		{ok, _} ->
+		    ok;
+		Err ->
+		    Err
+	    catch error:function_clause ->
+		    case erlang:get_stacktrace() of
+			[{public_key, pkix_sign_types, _, _}|_] ->
+			    {error, {bad_cert, unknown_sig_algo}};
+			ST ->
+			    %% Bug in public_key application
+			    erlang:raise(error, function_clause, ST)
+		    end
+	    end;
+	{error, _} = Err ->
+	    case public_key:pkix_is_self_signed(Cert) of
+		true ->
+		    {error, {bad_cert, selfsigned_peer}};
+		false ->
+		    Err
+	    end
+    end.
+
+-spec ca_dir() -> string().
+ca_dir() ->
+    ejabberd_config:get_option(ca_path, "/etc/ssl/certs").
+
+-spec check_ca_dir() -> ok.
+check_ca_dir() ->
+    case filelib:wildcard(filename:join(ca_dir(), "*.0")) of
+	[] ->
+	    Hint = "configuring 'ca_path' option might help",
+	    case file:list_dir(ca_dir()) of
+		{error, Why} ->
+		    ?WARNING_MSG("failed to read CA directory ~s: ~s; ~s",
+				 [ca_dir(), file:format_error(Why), Hint]);
+		{ok, _} ->
+		    ?WARNING_MSG("CA directory ~s doesn't contain "
+				 "hashed certificate files; ~s",
+				 [ca_dir(), Hint])
+	    end;
+	_ ->
+	    ok
+    end.
+
+-spec find_local_issuer(cert()) -> {ok, cert()} | {error, {bad_cert, unknown_ca}}.
+find_local_issuer(Cert) ->
+    {ok, {_, IssuerID}} = public_key:pkix_issuer_id(Cert, self),
+    Hash = short_name_hash(IssuerID),
+    filelib:fold_files(
+      ca_dir(), Hash ++ "\\.[0-9]+", false,
+      fun(_, {ok, IssuerCert}) ->
+	      {ok, IssuerCert};
+	 (CertFile, Acc) ->
+	      try
+		  {ok, Data} = file:read_file(CertFile),
+		  {ok, [IssuerCert|_], _} = pem_decode(Data),
+		  case public_key:pkix_is_issuer(Cert, IssuerCert) of
+		      true ->
+			  {ok, IssuerCert};
+		      false ->
+			  Acc
+		  end
+	      catch _:{badmatch, {error, Why}} ->
+		      ?ERROR_MSG("failed to read CA certificate from \"~s\": ~s",
+				 [CertFile, format_error(Why)]),
+		      Acc
+	      end
+      end, {error, {bad_cert, unknown_ca}}).
+
+-spec match_cert_keys([{path, [cert()]}], [priv_key()])
+      -> {ok, [{cert(), priv_key()}]} | {error, {bad_cert, missing_priv_key}}.
+match_cert_keys(CertPaths, PrivKeys) ->
+    KeyPairs = [{pubkey_from_privkey(PrivKey), PrivKey} || PrivKey <- PrivKeys],
+    match_cert_keys(CertPaths, KeyPairs, []).
+
+-spec match_cert_keys([{path, [cert()]}], [{pub_key(), priv_key()}],
+		      [{cert(), priv_key()}])
+      -> {ok, [{cert(), priv_key()}]} | {error, {bad_cert, missing_priv_key}}.
+match_cert_keys([{path, Certs}|CertPaths], KeyPairs, Result) ->
+    [Cert|_] = RevCerts = lists:reverse(Certs),
+    PubKey = pubkey_from_cert(Cert),
+    case lists:keyfind(PubKey, 1, KeyPairs) of
+	false ->
+	    {error, {bad_cert, missing_priv_key}};
+	{_, PrivKey} ->
+	    match_cert_keys(CertPaths, KeyPairs, [{RevCerts, PrivKey}|Result])
+    end;
+match_cert_keys([], _, Result) ->
+    {ok, Result}.
+
+-spec pubkey_from_cert(cert()) -> pub_key().
+pubkey_from_cert(Cert) ->
+    TBSCert = Cert#'OTPCertificate'.tbsCertificate,
+    PubKeyInfo = TBSCert#'OTPTBSCertificate'.subjectPublicKeyInfo,
+    SubjPubKey = PubKeyInfo#'OTPSubjectPublicKeyInfo'.subjectPublicKey,
+    case PubKeyInfo#'OTPSubjectPublicKeyInfo'.algorithm of
+	#'PublicKeyAlgorithm'{
+	   algorithm = ?rsaEncryption} ->
+	    SubjPubKey;
+	#'PublicKeyAlgorithm'{
+	   algorithm = ?'id-dsa',
+	   parameters = {params, DSSParams}} ->
+	    {SubjPubKey, DSSParams};
+	#'PublicKeyAlgorithm'{
+	   algorithm = ?'id-ecPublicKey'} ->
+	    SubjPubKey
+    end.
+
+-spec pubkey_from_privkey(priv_key()) -> pub_key().
+pubkey_from_privkey(#'RSAPrivateKey'{modulus = Modulus,
+				     publicExponent = Exp}) ->
+    #'RSAPublicKey'{modulus = Modulus,
+		    publicExponent = Exp};
+pubkey_from_privkey(#'DSAPrivateKey'{p = P, q = Q, g = G, y = Y}) ->
+    {Y, #'Dss-Parms'{p = P, q = Q, g = G}};
+pubkey_from_privkey(#'ECPrivateKey'{publicKey = Key}) ->
+    #'ECPoint'{point = Key}.
+
+-spec get_domains([{path, [cert()]}]) -> [binary()].
+get_domains(CertPaths) ->
+    lists:usort(
+      lists:flatmap(
+	fun({path, Certs}) ->
+		Cert = lists:last(Certs),
+		xmpp_stream_pkix:get_cert_domains(Cert)
+	end, CertPaths)).
+
+-spec get_cert_paths([cert()]) -> [{path, [cert()]}].
+get_cert_paths(Certs) ->
+    G = digraph:new([acyclic]),
     lists:foreach(
-      fun(Host) ->
-	      case get_certfile_no_default(Host) of
-		  error ->
-		      ?WARNING_MSG("No certificate found matching '~s': strictly "
-				   "configured clients or servers will reject "
-				   "connections with this host; obtain "
-				   "a certificate for this (sub)domain from any "
-				   "trusted CA such as Let's Encrypt "
-				   "(www.letsencrypt.org)",
-				   [Host]);
-		  _ ->
+      fun(Cert) ->
+    	      digraph:add_vertex(G, Cert)
+      end, Certs),
+    lists:foreach(
+      fun({Cert1, Cert2}) when Cert1 /= Cert2 ->
+	      case public_key:pkix_is_issuer(Cert1, Cert2) of
+		  true ->
+		      digraph:add_edge(G, Cert1, Cert2);
+		  false ->
 		      ok
-	      end
-      end, Hosts).
+	      end;
+	 (_) ->
+	      ok
+      end, [{Cert1, Cert2} || Cert1 <- Certs, Cert2 <- Certs]),
+    Paths = lists:flatmap(
+	      fun(Cert) ->
+		      case digraph:in_degree(G, Cert) of
+			  0 ->
+			      get_cert_path(G, [Cert]);
+			  _ ->
+			      []
+		      end
+	      end, Certs),
+    digraph:delete(G),
+    Paths.
 
--spec deprecated_options() -> [atom()].
-deprecated_options() ->
-    [c2s_certfile, s2s_certfile, domain_certfile].
-
--spec global_certfiles() -> sets:set(filename()).
-global_certfiles() ->
-    case ejabberd_config:get_option(certfiles) of
-	undefined ->
-	    sets:new();
-	Paths ->
-	    lists:foldl(
-	      fun(Path, Acc) ->
-		      Files = wildcard(Path),
-		      lists:foldl(fun sets:add_element/2, Acc, Files)
-	      end, sets:new(), Paths)
+get_cert_path(G, [Root|_] = Acc) ->
+    case digraph:out_edges(G, Root) of
+	[] ->
+	    [{path, Acc}];
+	Es ->
+	    lists:flatmap(
+	      fun(E) ->
+		      {_, _, V, _} = digraph:edge(G, E),
+		      get_cert_path(G, [V|Acc])
+	      end, Es)
     end.
 
--spec local_certfiles() -> sets:set(filename()).
-local_certfiles() ->
-    Opts = [{Opt, Host} || Opt <- deprecated_options(),
-			   Host <- ejabberd_config:get_myhosts()],
-    lists:foldl(
-      fun(OptHost, Acc) ->
-	      case ejabberd_config:get_option(OptHost) of
-		  undefined -> Acc;
-		  Path -> sets:add_element(Path, Acc)
-	      end
-      end, sets:new(), Opts).
-
--spec get_certfiles_from_config_options() -> sets:set(filename()).
-get_certfiles_from_config_options() ->
-    Global = global_certfiles(),
-    Local = local_certfiles(),
-    Listen = sets:from_list(ejabberd_listener:get_certfiles()),
-    sets:union([Global, Local, Listen]).
-
--spec prep_path(file:filename_all()) -> filename().
+-spec prep_path(filename:filename()) -> binary().
 prep_path(Path0) ->
     case filename:pathtype(Path0) of
 	relative ->
-	    case file:get_cwd() of
-		{ok, CWD} ->
-		    unicode:characters_to_binary(filename:join(CWD, Path0));
-		{error, Reason} ->
-		    ?WARNING_MSG("Failed to get current directory name: ~s",
-				 [file:format_error(Reason)]),
-		    unicode:characters_to_binary(Path0)
-	    end;
+	    {ok, CWD} = file:get_cwd(),
+	    iolist_to_binary(filename:join(CWD, Path0));
 	_ ->
-	    unicode:characters_to_binary(Path0)
+	    iolist_to_binary(Path0)
     end.
 
--spec stop_ejabberd() -> no_return().
-stop_ejabberd() ->
-    ?CRITICAL_MSG("ejabberd initialization was aborted due to "
-		  "invalid certificates configuration", []),
-    ejabberd:halt().
-
--spec wildcard(file:filename_all()) -> [filename()].
-wildcard(Path) when is_binary(Path) ->
-    wildcard(binary_to_list(Path));
-wildcard(Path) ->
-    case filelib:wildcard(Path) of
-	[] ->
-	    ?WARNING_MSG("Path ~s is empty, please make sure ejabberd has "
-			 "sufficient rights to read it", [Path]),
-	    [];
-	Files ->
-	    [prep_path(File) || File <- Files]
-    end.
-
--spec select_certfile({filename() | undefined,
-		       filename() | undefined,
-		       filename() | undefined}) -> filename().
-select_certfile({EC, _, _}) when EC /= undefined -> EC;
-select_certfile({_, RSA, _}) when RSA /= undefined -> RSA;
-select_certfile({_, _, DSA}) when DSA /= undefined -> DSA.
-
--spec fast_tls_add_certfiles() -> ok.
-fast_tls_add_certfiles() ->
-    lists:foreach(
-      fun({Domain, Files}) ->
-	      fast_tls:add_certfile(Domain, select_certfile(Files))
-      end, pkix:get_certfiles()),
-    fast_tls:clear_cache().
-
-reason_to_fmt({invalid_cert, _, _}) ->
-    "Invalid certificate in ~s: ~s";
-reason_to_fmt(_) ->
-    "Failed to read PEM file ~s: ~s".
-
--spec log_warnings([{filename(), pkix:error_reason()}]) -> ok.
-log_warnings(Warnings) ->
-    lists:foreach(
-      fun({File, Reason}) ->
-	      ?WARNING_MSG(reason_to_fmt(Reason),
-			   [File, pkix:format_error(Reason)])
-      end, Warnings).
-
--spec log_errors([{filename(), pkix:error_reason()}]) -> ok.
-log_errors(Errors) ->
-    lists:foreach(
-      fun({File, Reason}) ->
-	      ?ERROR_MSG(reason_to_fmt(Reason),
-			 [File, pkix:format_error(Reason)])
-      end, Errors).
-
--spec log_cafile_error({filename(), pkix:error_reason()} | undefined) -> ok.
-log_cafile_error({File, Reason}) ->
-    ?CRITICAL_MSG("Failed to read CA certitificates from ~s: ~s. "
-		  "Try to change/set option 'ca_file'",
-		  [File, pkix:format_error(Reason)]);
-log_cafile_error(_) ->
-    ok.
+-ifdef(SHORT_NAME_HASH).
+short_name_hash(IssuerID) ->
+    public_key:short_name_hash(IssuerID).
+-else.
+short_name_hash(_) ->
+    "".
+-endif.

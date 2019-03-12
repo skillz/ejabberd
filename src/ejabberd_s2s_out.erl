@@ -2,7 +2,7 @@
 %%% Created : 16 Dec 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -42,6 +42,7 @@
 -export([start/3, start_link/3, connect/1, close/1, close/2, stop/1, send/2,
 	 route/2, establish/1, update_state/2, host_up/1, host_down/1]).
 
+-include("ejabberd.hrl").
 -include("xmpp.hrl").
 -include("logger.hrl").
 
@@ -60,12 +61,12 @@ start(From, To, Opts) ->
 		Res -> Res
 	    end;
 	_ ->
-	    xmpp_stream_out:start(?MODULE, [From, To, Opts],
+	    xmpp_stream_out:start(?MODULE, [ejabberd_socket, From, To, Opts],
 				  ejabberd_config:fsm_limit_opts([]))
     end.
 
 start_link(From, To, Opts) ->
-    xmpp_stream_out:start_link(?MODULE, [From, To, Opts],
+    xmpp_stream_out:start_link(?MODULE, [ejabberd_socket, From, To, Opts],
 			       ejabberd_config:fsm_limit_opts([])).
 
 -spec connect(pid()) -> ok.
@@ -138,9 +139,9 @@ host_down(Host) ->
 process_auth_result(#{server := LServer, remote_server := RServer} = State,
 		    {false, Reason}) ->
     Delay = get_delay(),
-    ?WARNING_MSG("Failed to establish outbound s2s connection ~s -> ~s: "
-		 "authentication failed; bouncing for ~p seconds",
-		 [LServer, RServer, Delay]),
+    ?INFO_MSG("Failed to establish outbound s2s connection ~s -> ~s: "
+	      "authentication failed; bouncing for ~p seconds",
+	      [LServer, RServer, Delay]),
     State1 = State#{on_route => bounce, stop_reason => Reason},
     State2 = close(State1),
     State3 = bounce_queue(State2),
@@ -157,9 +158,9 @@ process_closed(#{server := LServer, remote_server := RServer,
 process_closed(#{server := LServer, remote_server := RServer} = State,
 	       Reason) ->
     Delay = get_delay(),
-    ?WARNING_MSG("Failed to establish outbound s2s connection ~s -> ~s: ~s; "
-		 "bouncing for ~p seconds",
-		 [LServer, RServer, format_error(Reason), Delay]),
+    ?INFO_MSG("Failed to establish outbound s2s connection ~s -> ~s: ~s; "
+	      "bouncing for ~p seconds",
+	      [LServer, RServer, format_error(Reason), Delay]),
     State1 = State#{on_route => bounce},
     State2 = bounce_queue(State1),
     xmpp_stream_out:set_timeout(State2, timer:seconds(Delay)).
@@ -209,24 +210,26 @@ dns_retries(#{server := LServer}) ->
 dns_timeout(#{server := LServer}) ->
     ejabberd_config:get_option({s2s_dns_timeout, LServer}, timer:seconds(10)).
 
-handle_auth_success(Mech, #{socket := Socket, ip := IP,
+handle_auth_success(Mech, #{sockmod := SockMod,
+			    socket := Socket, ip := IP,
 			    remote_server := RServer,
 			    server_host := ServerHost,
 			    server := LServer} = State) ->
     ?INFO_MSG("(~s) Accepted outbound s2s ~s authentication ~s -> ~s (~s)",
-	      [xmpp_socket:pp(Socket), Mech, LServer, RServer,
+	      [SockMod:pp(Socket), Mech, LServer, RServer,
 	       ejabberd_config:may_hide_data(misc:ip_to_list(IP))]),
     ejabberd_hooks:run_fold(s2s_out_auth_result, ServerHost, State, [true]).
 
 handle_auth_failure(Mech, Reason,
-		    #{socket := Socket, ip := IP,
+		    #{sockmod := SockMod,
+		      socket := Socket, ip := IP,
 		      remote_server := RServer,
 		      server_host := ServerHost,
 		      server := LServer} = State) ->
-    ?WARNING_MSG("(~s) Failed outbound s2s ~s authentication ~s -> ~s (~s): ~s",
-		 [xmpp_socket:pp(Socket), Mech, LServer, RServer,
-		  ejabberd_config:may_hide_data(misc:ip_to_list(IP)),
-		  xmpp_stream_out:format_error(Reason)]),
+    ?INFO_MSG("(~s) Failed outbound s2s ~s authentication ~s -> ~s (~s): ~s",
+	      [SockMod:pp(Socket), Mech, LServer, RServer,
+	       ejabberd_config:may_hide_data(misc:ip_to_list(IP)),
+	       xmpp_stream_out:format_error(Reason)]),
     ejabberd_hooks:run_fold(s2s_out_auth_result, ServerHost, State, [{false, Reason}]).
 
 handle_packet(Pkt, #{server_host := ServerHost} = State) ->
@@ -253,12 +256,10 @@ handle_recv(El, Pkt, #{server_host := ServerHost} = State) ->
 handle_send(El, Pkt, #{server_host := ServerHost} = State) ->
     ejabberd_hooks:run_fold(s2s_out_handle_send, ServerHost, State, [El, Pkt]).
 
-handle_timeout(#{on_route := Action, lang := Lang} = State) ->
+handle_timeout(#{on_route := Action} = State) ->
     case Action of
 	bounce -> stop(State);
-	_ ->
-	    Txt = <<"Idle connection">>,
-	    send(State, xmpp:serr_connection_timeout(Txt, Lang))
+	_ -> send(State, xmpp:serr_connection_timeout())
     end.
 
 init([#{server := LServer, remote_server := RServer} = State, Opts]) ->
@@ -269,17 +270,15 @@ init([#{server := LServer, remote_server := RServer} = State, Opts]) ->
 		     {_, N} -> N;
 		     false -> unlimited
 		 end,
-    Timeout = ejabberd_config:negotiation_timeout(),
     State1 = State#{on_route => queue,
 		    queue => p1_queue:new(QueueType, QueueLimit),
 		    xmlns => ?NS_SERVER,
-		    lang => ejabberd_config:get_mylang(),
+		    lang => ?MYLANG,
 		    server_host => ServerHost,
 		    shaper => none},
-    State2 = xmpp_stream_out:set_timeout(State1, Timeout),
     ?INFO_MSG("Outbound s2s connection started: ~s -> ~s",
 	      [LServer, RServer]),
-    ejabberd_hooks:run_fold(s2s_out_init, ServerHost, {ok, State2}, [Opts]).
+    ejabberd_hooks:run_fold(s2s_out_init, ServerHost, {ok, State1}, [Opts]).
 
 handle_call(Request, From, #{server_host := ServerHost} = State) ->
     ejabberd_hooks:run_fold(s2s_out_handle_call, ServerHost, State, [Request, From]).
@@ -375,7 +374,7 @@ mk_bounce_error(_Lang, _State) ->
 -spec get_delay() -> non_neg_integer().
 get_delay() ->
     MaxDelay = ejabberd_config:get_option(s2s_max_retry_delay, 300),
-    p1_rand:uniform(MaxDelay).
+    randoms:uniform(MaxDelay).
 
 -spec set_idle_timeout(state()) -> state().
 set_idle_timeout(#{on_route := send, server := LServer} = State) ->
@@ -443,7 +442,13 @@ maybe_report_huge_timeout(Opt, T) when is_integer(T), T >= 1000 ->
 maybe_report_huge_timeout(_, _) ->
     ok.
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-spec opt_type(outgoing_s2s_families) -> fun(([ipv4|ipv6]) -> [inet|inet6]);
+	      (outgoing_s2s_port) -> fun((0..65535) -> 0..65535);
+	      (outgoing_s2s_timeout) -> fun((timeout()) -> timeout());
+	      (s2s_dns_retries) -> fun((non_neg_integer()) -> non_neg_integer());
+	      (s2s_dns_timeout) -> fun((timeout()) -> timeout());
+	      (s2s_max_retry_delay) -> fun((pos_integer()) -> pos_integer());
+	      (atom()) -> [atom()].
 opt_type(outgoing_s2s_families) ->
     fun(Families) ->
 	    lists:map(

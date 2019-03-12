@@ -3,7 +3,7 @@
 %%% Created : 25 Dec 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,21 +26,19 @@
 -protocol({xep, 198, '1.5.2'}).
 
 %% gen_mod API
--export([start/2, stop/1, reload/3, depends/2, mod_opt_type/1, mod_options/1]).
+-export([start/2, stop/1, reload/3, depends/2, mod_opt_type/1]).
 %% hooks
 -export([c2s_stream_init/2, c2s_stream_started/2, c2s_stream_features/2,
 	 c2s_authenticated_packet/2, c2s_unauthenticated_packet/2,
 	 c2s_unbinded_packet/2, c2s_closed/2, c2s_terminated/2,
 	 c2s_handle_send/3, c2s_handle_info/2, c2s_handle_call/3,
 	 c2s_handle_recv/3]).
-%% adjust pending session timeout / access queue
--export([get_resume_timeout/1, set_resume_timeout/2, queue_find/2]).
+%% adjust pending session timeout
+-export([get_resume_timeout/1, set_resume_timeout/2]).
 
 -include("xmpp.hrl").
 -include("logger.hrl").
 -include("p1_queue.hrl").
-
--define(STREAM_MGMT_CACHE, stream_mgmt_cache).
 
 -define(is_sm_packet(Pkt),
 	is_record(Pkt, sm_enable) or
@@ -53,8 +51,7 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-start(Host, Opts) ->
-    init_cache(Opts),
+start(Host, _Opts) ->
     ejabberd_hooks:add(c2s_init, ?MODULE, c2s_stream_init, 50),
     ejabberd_hooks:add(c2s_stream_started, Host, ?MODULE,
 		       c2s_stream_started, 50),
@@ -97,8 +94,7 @@ stop(Host) ->
     ejabberd_hooks:delete(c2s_closed, Host, ?MODULE, c2s_closed, 50),
     ejabberd_hooks:delete(c2s_terminated, Host, ?MODULE, c2s_terminated, 50).
 
-reload(_Host, NewOpts, _OldOpts) ->
-    init_cache(NewOpts),
+reload(_Host, _NewOpts, _OldOpts) ->
     ?WARNING_MSG("module ~s is reloaded, but new configuration will take "
 		 "effect for newly created client connections only", [?MODULE]).
 
@@ -120,17 +116,18 @@ c2s_stream_init({ok, State}, Opts) ->
 c2s_stream_init(Acc, _Opts) ->
     Acc.
 
-c2s_stream_started(#{lserver := LServer} = State, _StreamStart) ->
+c2s_stream_started(#{lserver := LServer, mgmt_options := Opts} = State,
+		   _StreamStart) ->
     State1 = maps:remove(mgmt_options, State),
-    ResumeTimeout = get_configured_resume_timeout(LServer),
-    MaxResumeTimeout = get_max_resume_timeout(LServer, ResumeTimeout),
+    ResumeTimeout = get_resume_timeout(LServer, Opts),
+    MaxResumeTimeout = get_max_resume_timeout(LServer, Opts, ResumeTimeout),
     State1#{mgmt_state => inactive,
-	    mgmt_queue_type => get_queue_type(LServer),
-	    mgmt_max_queue => get_max_ack_queue(LServer),
+	    mgmt_queue_type => get_queue_type(LServer, Opts),
+	    mgmt_max_queue => get_max_ack_queue(LServer, Opts),
 	    mgmt_timeout => ResumeTimeout,
 	    mgmt_max_timeout => MaxResumeTimeout,
-	    mgmt_ack_timeout => get_ack_timeout(LServer),
-	    mgmt_resend => get_resend_on_timeout(LServer),
+	    mgmt_ack_timeout => get_ack_timeout(LServer, Opts),
+	    mgmt_resend => get_resend_on_timeout(LServer, Opts),
 	    mgmt_stanzas_in => 0,
 	    mgmt_stanzas_out => 0,
 	    mgmt_stanzas_req => 0};
@@ -146,15 +143,13 @@ c2s_stream_features(Acc, Host) ->
 	    Acc
     end.
 
-c2s_unauthenticated_packet(#{lang := Lang} = State, Pkt) when ?is_sm_packet(Pkt) ->
+c2s_unauthenticated_packet(State, Pkt) when ?is_sm_packet(Pkt) ->
     %% XEP-0198 says: "For client-to-server connections, the client MUST NOT
     %% attempt to enable stream management until after it has completed Resource
     %% Binding unless it is resuming a previous session".  However, it also
     %% says: "Stream management errors SHOULD be considered recoverable", so we
     %% won't bail out.
-    Err = #sm_failed{reason = 'not-authorized',
-		     text = xmpp:mk_text(<<"Unauthorized">>, Lang),
-		     xmlns = ?NS_STREAM_MGMT_3},
+    Err = #sm_failed{reason = 'unexpected-request', xmlns = ?NS_STREAM_MGMT_3},
     {stop, send(State, Err)};
 c2s_unauthenticated_packet(State, _Pkt) ->
     State.
@@ -181,24 +176,14 @@ c2s_authenticated_packet(#{mgmt_state := MgmtState} = State, Pkt)
 c2s_authenticated_packet(State, Pkt) ->
     update_num_stanzas_in(State, Pkt).
 
-c2s_handle_recv(#{mgmt_state := MgmtState,
-		  lang := Lang} = State, El, {error, Why}) ->
+c2s_handle_recv(#{lang := Lang} = State, El, {error, Why}) ->
     Xmlns = xmpp:get_ns(El),
-    IsStanza = xmpp:is_stanza(El),
     if Xmlns == ?NS_STREAM_MGMT_2; Xmlns == ?NS_STREAM_MGMT_3 ->
 	    Txt = xmpp:io_format_error(Why),
 	    Err = #sm_failed{reason = 'bad-request',
 			     text = xmpp:mk_text(Txt, Lang),
 			     xmlns = Xmlns},
 	    send(State, Err);
-       IsStanza andalso (MgmtState == pending orelse MgmtState == active) ->
-	    State1 = update_num_stanzas_in(State, El),
-	    case xmpp:get_type(El) of
-		<<"result">> -> State1;
-		<<"error">> -> State1;
-		_ ->
-		    State1#{mgmt_force_enqueue => true}
-	    end;
        true ->
 	    State
     end;
@@ -208,24 +193,24 @@ c2s_handle_recv(State, _, _) ->
 c2s_handle_send(#{mgmt_state := MgmtState, mod := Mod,
 		  lang := Lang} = State, Pkt, SendResult)
   when MgmtState == pending; MgmtState == active ->
-    IsStanza = xmpp:is_stanza(Pkt),
     case Pkt of
-	_ when IsStanza ->
-	    case need_to_enqueue(State, Pkt) of
-		{true, State1} ->
-		    case mgmt_queue_add(State1, Pkt) of
-			#{mgmt_max_queue := exceeded} = State2 ->
-			    State3 = State2#{mgmt_resend => false},
+	_ when ?is_stanza(Pkt) ->
+	    Meta = xmpp:get_meta(Pkt),
+	    case maps:get(mgmt_is_resent, Meta, false) of
+		false ->
+		    case mgmt_queue_add(State, Pkt) of
+			#{mgmt_max_queue := exceeded} = State1 ->
+			    State2 = State1#{mgmt_resend => false},
 			    Err = xmpp:serr_policy_violation(
 				    <<"Too many unacked stanzas">>, Lang),
-			    send(State3, Err);
-			State2 when SendResult == ok ->
-			    send_rack(State2);
-			State2 ->
-			    State2
+			    send(State2, Err);
+			State1 when SendResult == ok ->
+			    send_rack(State1);
+			State1 ->
+			    State1
 		    end;
-		{false, State1} ->
-		    State1
+		true ->
+		    State
 	    end;
 	#stream_error{} ->
 	    case MgmtState of
@@ -257,15 +242,12 @@ c2s_handle_info(#{mgmt_ack_timer := TRef, jid := JID, mod := Mod} = State,
 	   [jid:encode(JID)]),
     State1 = Mod:close(State),
     {stop, transition_to_pending(State1)};
-c2s_handle_info(#{mgmt_state := pending, lang := Lang,
+c2s_handle_info(#{mgmt_state := pending,
 		  mgmt_pending_timer := TRef, jid := JID, mod := Mod} = State,
 		{timeout, TRef, pending_timeout}) ->
     ?DEBUG("Timed out waiting for resumption of stream for ~s",
 	   [jid:encode(JID)]),
-    Txt = <<"Timed out waiting for stream resumption">>,
-    Err = xmpp:serr_connection_timeout(Txt, Lang),
-    Mod:stop(State#{mgmt_state => timeout,
-		    stop_reason => {stream, {out, Err}}});
+    Mod:stop(State#{mgmt_state => timeout});
 c2s_handle_info(#{jid := JID} = State, {_Ref, {resume, OldState}}) ->
     %% This happens if the resume_session/1 request timed out; the new session
     %% now receives the late response.
@@ -284,25 +266,32 @@ c2s_closed(State, _Reason) ->
     State.
 
 c2s_terminated(#{mgmt_state := resumed, jid := JID} = State, _Reason) ->
-    ?DEBUG("Closing former stream of resumed session for ~s",
-	   [jid:encode(JID)]),
+    ?INFO_MSG("Closing former stream of resumed session for ~s",
+	      [jid:encode(JID)]),
     bounce_message_queue(),
     {stop, State};
-c2s_terminated(#{mgmt_state := MgmtState, mgmt_stanzas_in := In,
-		 sid := {Time, _}, jid := JID} = State, _Reason) ->
-    case MgmtState of
-	timeout ->
-	    store_stanzas_in(jid:tolower(JID), Time, In);
-	_ ->
-	    ok
-    end,
+c2s_terminated(#{mgmt_state := MgmtState, mgmt_stanzas_in := In, sid := SID,
+		 user := U, server := S, resource := R} = State, Reason) ->
+    Result = case MgmtState of
+		 timeout ->
+		     Info = [{num_stanzas_in, In}],
+		     %% TODO: Usually, ejabberd_c2s:process_terminated/2 is
+		     %% called later in the hook chain.  We swap the order so
+		     %% that the offline info won't be purged after we stored
+		     %% it.  This should be fixed in a proper way.
+		     State1 = ejabberd_c2s:process_terminated(State, Reason),
+		     ejabberd_sm:set_offline_info(SID, U, S, R, Info),
+		     {stop, State1};
+		 _ ->
+		     State
+	     end,
     route_unacked_stanzas(State),
-    State;
+    Result;
 c2s_terminated(State, _Reason) ->
     State.
 
 %%%===================================================================
-%%% Adjust pending session timeout / access queue
+%%% Adjust pending session timeout
 %%%===================================================================
 -spec get_resume_timeout(state()) -> non_neg_integer().
 get_resume_timeout(#{mgmt_timeout := Timeout}) ->
@@ -315,26 +304,11 @@ set_resume_timeout(State, Timeout) ->
     State1 = restart_pending_timer(State, Timeout),
     State1#{mgmt_timeout => Timeout}.
 
--spec queue_find(fun((stanza()) -> boolean()), p1_queue:queue())
-      -> stanza() | none.
-queue_find(Pred, Queue) ->
-    case p1_queue:out(Queue) of
-	{{value, {_, _, Pkt}}, Queue1} ->
-	    case Pred(Pkt) of
-		true ->
-		    Pkt;
-		false ->
-		    queue_find(Pred, Queue1)
-	    end;
-	{empty, _Queue1} ->
-	    none
-    end.
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 -spec negotiate_stream_mgmt(xmpp_element(), state()) -> state().
-negotiate_stream_mgmt(Pkt, #{lang := Lang} = State) ->
+negotiate_stream_mgmt(Pkt, State) ->
     Xmlns = xmpp:get_ns(Pkt),
     case Pkt of
 	#sm_enable{} ->
@@ -342,15 +316,15 @@ negotiate_stream_mgmt(Pkt, #{lang := Lang} = State) ->
 	_ when is_record(Pkt, sm_a);
 	       is_record(Pkt, sm_r);
 	       is_record(Pkt, sm_resume) ->
-	    Txt = <<"Stream management is not enabled">>,
-	    Err = #sm_failed{reason = 'unexpected-request',
-			     text = xmpp:mk_text(Txt, Lang),
-			     xmlns = Xmlns},
+	    Err = #sm_failed{reason = 'unexpected-request', xmlns = Xmlns},
+	    send(State, Err);
+	_ ->
+	    Err = #sm_failed{reason = 'bad-request', xmlns = Xmlns},
 	    send(State, Err)
     end.
 
 -spec perform_stream_mgmt(xmpp_element(), state()) -> state().
-perform_stream_mgmt(Pkt, #{mgmt_xmlns := Xmlns, lang := Lang} = State) ->
+perform_stream_mgmt(Pkt, #{mgmt_xmlns := Xmlns} = State) ->
     case xmpp:get_ns(Pkt) of
 	Xmlns ->
 	    case Pkt of
@@ -360,16 +334,14 @@ perform_stream_mgmt(Pkt, #{mgmt_xmlns := Xmlns, lang := Lang} = State) ->
 		    handle_a(State, Pkt);
 		_ when is_record(Pkt, sm_enable);
 		       is_record(Pkt, sm_resume) ->
-		    Txt = <<"Stream management is already enabled">>,
 		    send(State, #sm_failed{reason = 'unexpected-request',
-					   text = xmpp:mk_text(Txt, Lang),
+					   xmlns = Xmlns});
+		_ ->
+		    send(State, #sm_failed{reason = 'bad-request',
 					   xmlns = Xmlns})
 	    end;
 	_ ->
-	    Txt = <<"Unsupported version">>,
-	    send(State, #sm_failed{reason = 'unexpected-request',
-				   text = xmpp:mk_text(Txt, Lang),
-				   xmlns = Xmlns})
+	    send(State, #sm_failed{reason = 'unsupported-version', xmlns = Xmlns})
     end.
 
 -spec handle_enable(state(), sm_enable()) -> state().
@@ -386,15 +358,15 @@ handle_enable(#{mgmt_timeout := DefaultTimeout,
 		      DefaultTimeout
 	      end,
     Res = if Timeout > 0 ->
-		  ?DEBUG("Stream management with resumption enabled for ~s",
-			 [jid:encode(JID)]),
+		  ?INFO_MSG("Stream management with resumption enabled for ~s",
+			    [jid:encode(JID)]),
 		  #sm_enabled{xmlns = Xmlns,
 			      id = make_resume_id(State),
 			      resume = true,
 			      max = Timeout};
 	     true ->
-		  ?DEBUG("Stream management without resumption enabled for ~s",
-			 [jid:encode(JID)]),
+		  ?INFO_MSG("Stream management without resumption enabled for ~s",
+			    [jid:encode(JID)]),
 		  #sm_enabled{xmlns = Xmlns}
 	  end,
     State1 = State#{mgmt_state => active,
@@ -413,7 +385,7 @@ handle_a(State, #sm_a{h = H}) ->
     resend_rack(State1).
 
 -spec handle_resume(state(), sm_resume()) -> {ok, state()} | {error, state()}.
-handle_resume(#{user := User, lserver := LServer,
+handle_resume(#{user := User, lserver := LServer, sockmod := SockMod,
 		lang := Lang, socket := Socket} = State,
 	      #sm_resume{h = H, previd = PrevID, xmlns = Xmlns}) ->
     R = case inherit_session_state(State, PrevID) of
@@ -440,11 +412,11 @@ handle_resume(#{user := User, lserver := LServer,
 	    State4 = send(State3, #sm_r{xmlns = AttrXmlns}),
 	    State5 = ejabberd_hooks:run_fold(c2s_session_resumed, LServer, State4, []),
 	    ?INFO_MSG("(~s) Resumed session for ~s",
-		      [xmpp_socket:pp(Socket), jid:encode(JID)]),
+		      [SockMod:pp(Socket), jid:encode(JID)]),
 	    {ok, State5};
 	{error, El, Msg} ->
-	    ?WARNING_MSG("Cannot resume session for ~s@~s: ~s",
-			 [User, LServer, Msg]),
+	    ?INFO_MSG("Cannot resume session for ~s@~s: ~s",
+		      [User, LServer, Msg]),
 	    {error, send(State, El)}
     end.
 
@@ -463,15 +435,11 @@ transition_to_pending(State) ->
     State.
 
 -spec check_h_attribute(state(), non_neg_integer()) -> state().
-check_h_attribute(#{mgmt_stanzas_out := NumStanzasOut, jid := JID,
-		    lang := Lang} = State, H)
+check_h_attribute(#{mgmt_stanzas_out := NumStanzasOut, jid := JID} = State, H)
   when H > NumStanzasOut ->
-    ?WARNING_MSG("~s acknowledged ~B stanzas, but only ~B were sent",
-		 [jid:encode(JID), H, NumStanzasOut]),
-    State1 = State#{mgmt_resend => false},
-    Err = xmpp:serr_undefined_condition(
-	    <<"Client acknowledged more stanzas than sent by server">>, Lang),
-    send(State1, Err);
+    ?DEBUG("~s acknowledged ~B stanzas, but only ~B were sent",
+	   [jid:encode(JID), H, NumStanzasOut]),
+    mgmt_queue_drop(State#{mgmt_stanzas_out => H}, NumStanzasOut);
 check_h_attribute(#{mgmt_stanzas_out := NumStanzasOut, jid := JID} = State, H) ->
     ?DEBUG("~s acknowledged ~B of ~B stanzas",
 	   [jid:encode(JID), H, NumStanzasOut]),
@@ -516,7 +484,7 @@ resend_rack(#{mgmt_ack_timer := _,
 resend_rack(State) ->
     State.
 
--spec mgmt_queue_add(state(), xmlel() | xmpp_element()) -> state().
+-spec mgmt_queue_add(state(), xmpp_element()) -> state().
 mgmt_queue_add(#{mgmt_stanzas_out := NumStanzasOut,
 		 mgmt_queue := Queue} = State, Pkt) ->
     NewNum = case NumStanzasOut of
@@ -556,13 +524,8 @@ resend_unacked_stanzas(#{mgmt_state := MgmtState,
 	   [p1_queue:len(Queue), jid:encode(JID)]),
     p1_queue:foldl(
       fun({_, Time, Pkt}, AccState) ->
-	      Pkt1 = add_resent_delay_info(AccState, Pkt, Time),
-	      Pkt2 = if ?is_stanza(Pkt1) ->
-			     xmpp:put_meta(Pkt1, mgmt_is_resent, true);
-			true ->
-			     Pkt1
-		     end,
-	      send(AccState, Pkt2)
+	      NewPkt = add_resent_delay_info(AccState, Pkt, Time),
+	      send(AccState, xmpp:put_meta(NewPkt, mgmt_is_resent, true))
       end, State, Queue);
 resend_unacked_stanzas(State) ->
     State.
@@ -638,11 +601,16 @@ inherit_session_state(#{user := U, server := S,
 	{term, {R, Time}} ->
 	    case ejabberd_sm:get_session_pid(U, S, R) of
 		none ->
-		    case pop_stanzas_in({U, S, R}, Time) of
-			error ->
+		    case ejabberd_sm:get_offline_info(Time, U, S, R) of
+			none ->
 			    {error, <<"Previous session PID not found">>};
-			{ok, H} ->
-			    {error, <<"Previous session timed out">>, H}
+			Info ->
+			    case proplists:get_value(num_stanzas_in, Info) of
+				undefined ->
+				    {error, <<"Previous session timed out">>};
+				H ->
+				    {error, <<"Previous session timed out">>, H}
+			    end
 		    end;
 		OldPID ->
 		    OldSID = {Time, OldPID},
@@ -671,13 +639,7 @@ inherit_session_state(#{user := U, server := S,
 			    {error, Msg}
 		    catch exit:{noproc, _} ->
 			    {error, <<"Previous session PID is dead">>};
-			  exit:{normal, _} ->
-			    {error, <<"Previous session PID has exited">>};
-			  exit:{killed, _} ->
-			    {error, <<"Previous session PID has been killed">>};
 			  exit:{timeout, _} ->
-			    ejabberd_sm:close_session(OldSID, U, S, R),
-			    ejabberd_c2s:stop(OldPID),
 			    {error, <<"Session state copying timed out">>}
 		    end
 	    end;
@@ -698,9 +660,8 @@ make_resume_id(#{sid := {Time, _}, resource := Resource}) ->
 			   (state(), xmlel(), erlang:timestamp()) -> xmlel().
 add_resent_delay_info(#{lserver := LServer}, El, Time)
   when is_record(El, message); is_record(El, presence) ->
-    misc:add_delay_info(El, jid:make(LServer), Time, <<"Resent">>);
+    xmpp_util:add_delay_info(El, jid:make(LServer), Time, <<"Resent">>);
 add_resent_delay_info(_State, El, _Time) ->
-    %% TODO
     El.
 
 -spec send(state(), xmpp_element()) -> state().
@@ -709,7 +670,7 @@ send(#{mod := Mod} = State, Pkt) ->
 
 -spec restart_pending_timer(state(), non_neg_integer()) -> state().
 restart_pending_timer(#{mgmt_pending_timer := TRef} = State, NewTimeout) ->
-    misc:cancel_timer(TRef),
+    cancel_timer(TRef),
     NewTRef = erlang:start_timer(timer:seconds(NewTimeout), self(),
 				 pending_timeout),
     State#{mgmt_pending_timer => NewTRef};
@@ -718,10 +679,21 @@ restart_pending_timer(State, _NewTimeout) ->
 
 -spec cancel_ack_timer(state()) -> state().
 cancel_ack_timer(#{mgmt_ack_timer := TRef} = State) ->
-    misc:cancel_timer(TRef),
+    cancel_timer(TRef),
     maps:remove(mgmt_ack_timer, State);
 cancel_ack_timer(State) ->
     State.
+
+-spec cancel_timer(reference()) -> ok.
+cancel_timer(TRef) ->
+    case erlang:cancel_timer(TRef) of
+	false ->
+	    receive {timeout, TRef, _} -> ok
+	    after 0 -> ok
+	    end;
+	_ ->
+	    ok
+    end.
 
 -spec bounce_message_queue() -> ok.
 bounce_message_queue() ->
@@ -732,69 +704,42 @@ bounce_message_queue() ->
 	    ok
     end.
 
--spec need_to_enqueue(state(), xmlel() | stanza()) -> {boolean(), state()}.
-need_to_enqueue(State, Pkt) when ?is_stanza(Pkt) ->
-    {not xmpp:get_meta(Pkt, mgmt_is_resent, false), State};
-need_to_enqueue(#{mgmt_force_enqueue := true} = State, #xmlel{}) ->
-    State1 = maps:remove(mgmt_force_enqueue, State),
-    State2 = maps:remove(mgmt_is_resent, State1),
-    {true, State2};
-need_to_enqueue(State, _) ->
-    {false, State}.
-
-%%%===================================================================
-%%% Cache-like storage for last handled stanzas
-%%%===================================================================
-init_cache(Opts) ->
-    ets_cache:new(?STREAM_MGMT_CACHE, cache_opts(Opts)).
-
-cache_opts(Opts) ->
-    [{max_size, gen_mod:get_opt(cache_size, Opts)},
-     {life_time, infinity}].
-
--spec store_stanzas_in(ljid(), erlang:timestamp(), non_neg_integer()) -> boolean().
-store_stanzas_in(LJID, Time, Num) ->
-    ets_cache:insert(?STREAM_MGMT_CACHE, {LJID, Time}, Num,
-		     ejabberd_cluster:get_nodes()).
-
--spec pop_stanzas_in(ljid(), erlang:timestamp()) -> {ok, non_neg_integer()} | error.
-pop_stanzas_in(LJID, Time) ->
-    case ets_cache:lookup(?STREAM_MGMT_CACHE, {LJID, Time}) of
-	{ok, Val} ->
-	    ets_cache:delete(?STREAM_MGMT_CACHE, {LJID, Time},
-			     ejabberd_cluster:get_nodes()),
-	    {ok, Val};
-	error ->
-	    error
-    end.
-
 %%%===================================================================
 %%% Configuration processing
 %%%===================================================================
-get_max_ack_queue(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, max_ack_queue).
+get_max_ack_queue(Host, Opts) ->
+    gen_mod:get_module_opt(Host, ?MODULE, max_ack_queue,
+			   gen_mod:get_opt(max_ack_queue, Opts, 1000)).
 
-get_configured_resume_timeout(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, resume_timeout).
+get_resume_timeout(Host, Opts) ->
+    gen_mod:get_module_opt(Host, ?MODULE, resume_timeout,
+			   gen_mod:get_opt(resume_timeout, Opts, 300)).
 
-get_max_resume_timeout(Host, ResumeTimeout) ->
-    case gen_mod:get_module_opt(Host, ?MODULE, max_resume_timeout) of
+get_max_resume_timeout(Host, Opts, ResumeTimeout) ->
+    case gen_mod:get_module_opt(Host, ?MODULE, max_resume_timeout,
+				gen_mod:get_opt(max_resume_timeout, Opts)) of
 	undefined -> ResumeTimeout;
 	Max when Max >= ResumeTimeout -> Max;
 	_ -> ResumeTimeout
     end.
 
-get_ack_timeout(Host) ->
-    case gen_mod:get_module_opt(Host, ?MODULE, ack_timeout) of
+get_ack_timeout(Host, Opts) ->
+    case gen_mod:get_module_opt(Host, ?MODULE, ack_timeout,
+				gen_mod:get_opt(ack_timeout, Opts, 60)) of
 	infinity -> infinity;
 	T -> timer:seconds(T)
     end.
 
-get_resend_on_timeout(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, resend_on_timeout).
+get_resend_on_timeout(Host, Opts) ->
+    gen_mod:get_module_opt(Host, ?MODULE, resend_on_timeout,
+			   gen_mod:get_opt(resend_on_timeout, Opts, false)).
 
-get_queue_type(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, queue_type).
+get_queue_type(Host, Opts) ->
+    case gen_mod:get_module_opt(Host, ?MODULE, queue_type,
+				gen_mod:get_opt(queue_type, Opts)) of
+	undefined -> ejabberd_config:default_queue_type(Host);
+	Type -> Type
+    end.
 
 mod_opt_type(max_ack_queue) ->
     fun(I) when is_integer(I), I > 0 -> I;
@@ -803,9 +748,7 @@ mod_opt_type(max_ack_queue) ->
 mod_opt_type(resume_timeout) ->
     fun(I) when is_integer(I), I >= 0 -> I end;
 mod_opt_type(max_resume_timeout) ->
-    fun(I) when is_integer(I), I >= 0 -> I;
-       (undefined) -> undefined
-    end;
+    fun(I) when is_integer(I), I >= 0 -> I end;
 mod_opt_type(ack_timeout) ->
     fun(I) when is_integer(I), I > 0 -> I;
        (infinity) -> infinity
@@ -814,19 +757,8 @@ mod_opt_type(resend_on_timeout) ->
     fun(B) when is_boolean(B) -> B;
        (if_offline) -> if_offline
     end;
-mod_opt_type(cache_size) ->
-    fun(I) when is_integer(I), I>0 -> I;
-       (unlimited) -> infinity;
-       (infinity) -> infinity
-    end;
 mod_opt_type(queue_type) ->
-    fun(ram) -> ram; (file) -> file end.
-
-mod_options(Host) ->
-    [{max_ack_queue, 5000},
-     {resume_timeout, 300},
-     {max_resume_timeout, undefined},
-     {ack_timeout, 60},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {resend_on_timeout, false},
-     {queue_type, ejabberd_config:default_queue_type(Host)}].
+    fun(ram) -> ram; (file) -> file end;
+mod_opt_type(_) ->
+    [max_ack_queue, resume_timeout, max_resume_timeout, ack_timeout,
+     resend_on_timeout, queue_type].

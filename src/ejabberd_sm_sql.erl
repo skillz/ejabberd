@@ -4,7 +4,7 @@
 %%% Created :  9 Mar 2015 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -36,6 +36,7 @@
 	 get_sessions/1,
 	 get_sessions/2]).
 
+-include("ejabberd.hrl").
 -include("ejabberd_sm.hrl").
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -55,7 +56,7 @@ init() ->
 		      ok;
 		  Err ->
 		      ?ERROR_MSG("failed to clean 'sm' table: ~p", [Err]),
-		      {error, db_failure}
+		      Err
 	      end;
 	 (_, Err) ->
 	      Err
@@ -73,13 +74,13 @@ set_session(#session{sid = {Now, Pid}, usr = {U, LServer, R},
                       "!pid=%(PidS)s",
                       "node=%(Node)s",
                       "username=%(U)s",
-                      "server_host=%(LServer)s",
                       "resource=%(R)s",
                       "priority=%(PrioS)s",
                       "info=%(InfoS)s"]) of
 	ok ->
 	    ok;
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to update 'sm' table: ~p", [Err]),
 	    {error, db_failure}
     end.
 
@@ -91,7 +92,8 @@ delete_session(#session{usr = {_, LServer, _}, sid = {Now, Pid}}) ->
 	   ?SQL("delete from sm where usec=%(TS)d and pid=%(PidS)s")) of
 	{updated, _} ->
 	    ok;
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to delete from 'sm' table: ~p", [Err]),
 	    {error, db_failure}
     end.
 
@@ -105,8 +107,7 @@ get_sessions(LServer) ->
     case ejabberd_sql:sql_query(
 	   LServer,
            ?SQL("select @(usec)d, @(pid)s, @(node)s, @(username)s,"
-                " @(resource)s, @(priority)s, @(info)s from sm"
-                " where %(LServer)H")) of
+                " @(resource)s, @(priority)s, @(info)s from sm")) of
 	{selected, Rows} ->
 	    lists:flatmap(
 	      fun(Row) ->
@@ -114,7 +115,8 @@ get_sessions(LServer) ->
 		      catch _:{bad_node, _} -> []
 		      end
 	      end, Rows);
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to select from 'sm' table: ~p", [Err]),
 	    []
     end.
 
@@ -123,7 +125,7 @@ get_sessions(LUser, LServer) ->
 	   LServer,
            ?SQL("select @(usec)d, @(pid)s, @(node)s, @(username)s,"
                 " @(resource)s, @(priority)s, @(info)s from sm"
-                " where username=%(LUser)s and %(LServer)H")) of
+                " where username=%(LUser)s")) of
 	{selected, Rows} ->
 	    {ok, lists:flatmap(
 		   fun(Row) ->
@@ -131,7 +133,8 @@ get_sessions(LUser, LServer) ->
 			   catch _:{bad_node, _} -> []
 			   end
 		   end, Rows)};
-	_Err ->
+	Err ->
+	    ?ERROR_MSG("failed to select from 'sm' table: ~p", [Err]),
 	    {error, db_failure}
     end.
 

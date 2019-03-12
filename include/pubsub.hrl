@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -18,6 +18,8 @@
 %%%
 %%%----------------------------------------------------------------------
 
+-include("ejabberd.hrl").
+
 %% -------------------------------
 %% Pubsub constants
 -define(ERR_EXTENDED(E, C), mod_pubsub:extended_error(E, C)).
@@ -27,7 +29,7 @@
 
 %% this is currently a hard limit.
 %% Would be nice to have it configurable. 
--define(MAX_PAYLOAD_SIZE, 250000).
+-define(MAX_PAYLOAD_SIZE, 60000).
 
 %% -------------------------------
 %% Pubsub types
@@ -129,13 +131,13 @@
     id                  ,% :: mod_pubsub:nodeIdx(),
     parents = []        ,% :: [mod_pubsub:nodeId(),...],
     type    = <<"flat">>,% :: binary(),
-    owners  = []        ,% :: [jid:ljid(),...],
+    owners  = []        ,% :: [jlib:ljid(),...],
     options = []        % :: mod_pubsub:nodeOptions()
 }).
 
 -record(pubsub_state,
 {
-    stateid               ,% :: {jid:ljid(), mod_pubsub:nodeIdx()},
+    stateid               ,% :: {jlib:ljid(), mod_pubsub:nodeIdx()},
     nodeidx               ,% :: mod_pubsub:nodeIdx(),
     items         = []    ,% :: [mod_pubsub:itemId(),...],
     affiliation   = 'none',% :: mod_pubsub:affiliation(),
@@ -146,8 +148,8 @@
 {
     itemid                           ,% :: {mod_pubsub:itemId(), mod_pubsub:nodeIdx()},
     nodeidx                          ,% :: mod_pubsub:nodeIdx(),
-    creation     = {unknown, unknown},% :: {erlang:timestamp(), jid:ljid()},
-    modification = {unknown, unknown},% :: {erlang:timestamp(), jid:ljid()},
+    creation     = {unknown, unknown},% :: {erlang:timestamp(), jlib:ljid()},
+    modification = {unknown, unknown},% :: {erlang:timestamp(), jlib:ljid()},
     payload      = []                % :: mod_pubsub:payload()
 }).
 
@@ -161,7 +163,7 @@
 {
     nodeid   ,% :: {binary(), mod_pubsub:nodeIdx()},
     itemid   ,% :: mod_pubsub:itemId(),
-    creation ,% :: {erlang:timestamp(), jid:ljid()},
+    creation ,% :: {erlang:timestamp(), jlib:ljid()},
     payload  % :: mod_pubsub:payload()
 }).
 

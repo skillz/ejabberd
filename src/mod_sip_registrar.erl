@@ -5,7 +5,7 @@
 %%% Created : 23 Apr 2014 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2014-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2014-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -20,9 +20,8 @@
 %%% You should have received a copy of the GNU General Public License along
 %%% with this program; if not, write to the Free Software Foundation, Inc.,
 %%% 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-%%%
-%%%-------------------------------------------------------------------
 
+%%%-------------------------------------------------------------------
 -module(mod_sip_registrar).
 
 -ifndef(SIP).
@@ -40,11 +39,14 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include_lib("esip/include/esip.hrl").
 
 -define(CALL_TIMEOUT, timer:seconds(30)).
 -define(DEFAULT_EXPIRES, 3600).
+-define(FLOW_TIMEOUT_UDP, 29).
+-define(FLOW_TIMEOUT_TCP, 120).
 
 -record(sip_session, {us = {<<"">>, <<"">>} :: {binary(), binary()},
 		      socket = #sip_socket{} :: #sip_socket{},
@@ -494,10 +496,12 @@ get_flow_timeout(LServer, #sip_socket{type = Type}) ->
     case Type of
 	udp ->
 	    gen_mod:get_module_opt(
-	      LServer, mod_sip, flow_timeout_udp);
+	      LServer, mod_sip, flow_timeout_udp,
+	      ?FLOW_TIMEOUT_UDP);
 	_ ->
 	    gen_mod:get_module_opt(
-	      LServer, mod_sip, flow_timeout_tcp)
+	      LServer, mod_sip, flow_timeout_tcp,
+	      ?FLOW_TIMEOUT_TCP)
     end.
 
 update_table() ->
@@ -550,8 +554,8 @@ close_socket(#sip_session{socket = SIPSocket}) ->
 delete_session(#sip_session{reg_tref = RegTRef,
 			    flow_tref = FlowTRef,
 			    conn_mref = MRef} = Session) ->
-    misc:cancel_timer(RegTRef),
-    misc:cancel_timer(FlowTRef),
+    erlang:cancel_timer(RegTRef),
+    catch erlang:cancel_timer(FlowTRef),
     catch erlang:demonitor(MRef, [flush]),
     mnesia:dirty_delete_object(Session).
 

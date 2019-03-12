@@ -5,7 +5,7 @@
 %%% Created : 17 Nov 2016 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -43,7 +43,6 @@
 -define(NEED_RESET, [local_content, type]).
 
 -include("logger.hrl").
--include("ejabberd_stacktrace.hrl").
 
 -record(state, {tables = #{} :: map(),
 		schema = [] :: [{atom(), [{atom(), any()}]}]}).
@@ -69,8 +68,6 @@ init([]) ->
 		_ -> ok
 	    end,
 	    ejabberd:start_app(mnesia, permanent),
-	    ?DEBUG("Waiting for Mnesia tables synchronization...", []),
-	    mnesia:wait_for_tables(mnesia:system_info(local_tables), infinity),
 	    Schema = read_schema_file(),
 	    {ok, #state{schema = Schema}};
 	false ->
@@ -386,8 +383,8 @@ do_transform(OldAttrs, Attrs, Old) ->
 transform_fun(Module, Name) ->
     fun(Obj) ->
 	    try Module:transform(Obj)
-	    catch ?EX_RULE(E, R, St) ->
-		    StackTrace = ?EX_STACK(St),
+	    catch E:R ->
+		    StackTrace = erlang:get_stacktrace(),
 		    ?ERROR_MSG("Failed to transform Mnesia table ~s:~n"
 			       "** Record: ~p~n"
 			       "** Reason: ~p~n"

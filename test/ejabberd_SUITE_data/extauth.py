@@ -13,10 +13,6 @@ def read():
             write(True)
     elif cmd == 'isuser':
         u, s = pkt.split(':', 2)[1:]
-        if u == "wrong":
-            write(False)
-        else:
-            write(True)
     elif cmd == 'setpass':
         u, s, p = pkt.split(':', 3)[1:]
         write(True)

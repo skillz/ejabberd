@@ -5,7 +5,7 @@
 %%% Created : 6 Mar 2010 by Karim Gemayel <karim.gemayel@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -32,20 +32,22 @@
 -behaviour(gen_mod).
 
 -export([start/2, stop/1, reload/3, process_local_iq/1,
-	 process_sm_iq/1, mod_options/1, depends/2]).
+	 process_sm_iq/1, mod_opt_type/1, depends/2]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 
-start(Host, _Opts) ->
+start(Host, Opts) ->
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, gen_iq_handler:iqdisc(Host)),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_SIC_0,
-				  ?MODULE, process_local_iq),
+				  ?MODULE, process_local_iq, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_SIC_0,
-				  ?MODULE, process_sm_iq),    
+				  ?MODULE, process_sm_iq, IQDisc),    
     gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_SIC_1,
-				  ?MODULE, process_local_iq),
+				  ?MODULE, process_local_iq, IQDisc),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_SIC_1,
-				  ?MODULE, process_sm_iq).
+				  ?MODULE, process_sm_iq, IQDisc).
 
 stop(Host) ->
     gen_iq_handler:remove_iq_handler(ejabberd_local, Host, ?NS_SIC_0),
@@ -53,8 +55,20 @@ stop(Host) ->
     gen_iq_handler:remove_iq_handler(ejabberd_local, Host, ?NS_SIC_1),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_SIC_1).
 
-reload(_Host, _NewOpts, _OldOpts) ->
-    ok.
+reload(Host, NewOpts, OldOpts) ->
+    case gen_mod:is_equal_opt(iqdisc, NewOpts, OldOpts, gen_iq_handler:iqdisc(Host)) of
+	{false, IQDisc, _} ->
+	    gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_SIC_0,
+					  ?MODULE, process_local_iq, IQDisc),
+	    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_SIC_0,
+					  ?MODULE, process_sm_iq, IQDisc),
+	    gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_SIC_1,
+					  ?MODULE, process_local_iq, IQDisc),
+	    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_SIC_1,
+					  ?MODULE, process_sm_iq, IQDisc);
+	true ->
+	    ok
+    end.
 
 depends(_Host, _Opts) ->
     [].
@@ -93,5 +107,5 @@ get_ip({User, Server, Resource},
 	    xmpp:make_error(IQ, xmpp:err_item_not_found(Txt, Lang))
     end.
 
-mod_options(_Host) ->
-    [].
+mod_opt_type(iqdisc) -> fun gen_iq_handler:check_type/1;
+mod_opt_type(_) -> [iqdisc].

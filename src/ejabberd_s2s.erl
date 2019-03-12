@@ -5,7 +5,7 @@
 %%% Created :  7 Dec 2002 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -54,11 +54,14 @@
 -export([get_info_s2s_connections/1,
 	 transform_options/1, opt_type/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
+
 -include("xmpp.hrl").
+
 -include("ejabberd_commands.hrl").
+
 -include_lib("public_key/include/public_key.hrl").
--include("ejabberd_stacktrace.hrl").
 
 -define(PKIXEXPLICIT, 'OTP-PUB-KEY').
 
@@ -92,9 +95,9 @@ start_link() ->
 
 route(Packet) ->
     try do_route(Packet)
-    catch ?EX_RULE(E, R, St) ->
+    catch E:R ->
             ?ERROR_MSG("failed to route packet:~n~s~nReason = ~p",
-                       [xmpp:pp(Packet), {E, {R, ?EX_STACK(St)}}])
+                       [xmpp:pp(Packet), {E, {R, erlang:get_stacktrace()}}])
     end.
 
 clean_temporarily_blocked_table() ->
@@ -195,11 +198,13 @@ dirty_get_connections() ->
 
 -spec tls_options(binary(), [proplists:property()]) -> [proplists:property()].
 tls_options(LServer, DefaultOpts) ->
-    TLSOpts1 = case get_certfile(LServer) of
+    TLSOpts1 = case ejabberd_config:get_option(
+		      {domain_certfile, LServer},
+		      ejabberd_config:get_option(
+			{s2s_certfile, LServer})) of
 		   undefined -> DefaultOpts;
-		   CertFile ->
-		       lists:keystore(certfile, 1, DefaultOpts,
-				      {certfile, CertFile})
+		   CertFile -> lists:keystore(certfile, 1, DefaultOpts,
+					      {certfile, CertFile})
 	       end,
     TLSOpts2 = case ejabberd_config:get_option(
 		      {s2s_ciphers, LServer}) of
@@ -219,7 +224,8 @@ tls_options(LServer, DefaultOpts) ->
                    DHFile -> lists:keystore(dhfile, 1, TLSOpts3,
 					    {dhfile, DHFile})
                end,
-    TLSOpts5 = case get_cafile(LServer) of
+    TLSOpts5 = case ejabberd_config:get_option(
+		      {s2s_cafile, LServer}) of
 		   undefined -> TLSOpts4;
 		   CAFile -> lists:keystore(cafile, 1, TLSOpts4,
 					    {cafile, CAFile})
@@ -263,26 +269,6 @@ queue_type(LServer) ->
       {s2s_queue_type, LServer},
       ejabberd_config:default_queue_type(LServer)).
 
--spec get_certfile(binary()) -> file:filename_all() | undefined.
-get_certfile(LServer) ->
-    case ejabberd_pkix:get_certfile(LServer) of
-	{ok, CertFile} ->
-	    CertFile;
-	error ->
-	    ejabberd_config:get_option(
-	      {domain_certfile, LServer},
-	      ejabberd_config:get_option({s2s_certfile, LServer}))
-    end.
-
--spec get_cafile(binary()) -> file:filename_all() | undefined.
-get_cafile(LServer) ->
-    case ejabberd_config:get_option({s2s_cafile, LServer}) of
-	undefined ->
-	    ejabberd_pkix:ca_file();
-	File ->
-	    File
-    end.
-
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -300,7 +286,7 @@ init([]) ->
 			 {attributes, record_info(fields, temporarily_blocked)}]),
     ejabberd_hooks:add(host_up, ?MODULE, host_up, 50),
     ejabberd_hooks:add(host_down, ?MODULE, host_down, 60),
-    lists:foreach(fun host_up/1, ejabberd_config:get_myhosts()),
+    lists:foreach(fun host_up/1, ?MYHOSTS),
     {ok, #state{}}.
 
 handle_call(_Request, _From, State) ->
@@ -319,7 +305,7 @@ handle_info(_Info, State) -> {noreply, State}.
 
 terminate(_Reason, _State) ->
     ejabberd_commands:unregister_commands(get_commands_spec()),
-    lists:foreach(fun host_down/1, ejabberd_config:get_myhosts()),
+    lists:foreach(fun host_down/1, ?MYHOSTS),
     ejabberd_hooks:delete(host_up, ?MODULE, host_up, 50),
     ejabberd_hooks:delete(host_down, ?MODULE, host_down, 60),
     ok.
@@ -383,7 +369,7 @@ do_route(Packet) ->
 			    <<"Server connections to local "
 			      "subdomains are forbidden">>, Lang);
 		      forbidden ->
-			  xmpp:err_forbidden(<<"Access denied by service policy">>, Lang);
+			  xmpp:err_forbidden(<<"Denied by ACL">>, Lang);
 		      internal_server_error ->
 			  xmpp:err_internal_server_error()
 		  end,
@@ -541,7 +527,7 @@ is_service(From, To) ->
       s2s -> % bypass RFC 3920 10.3
 	  false;
       local ->
-	  Hosts = ejabberd_config:get_myhosts(),
+	  Hosts = (?MYHOSTS),
 	  P = fun (ParentDomain) ->
 		      lists:member(ParentDomain, Hosts)
 	      end,
@@ -705,13 +691,27 @@ get_s2s_state(S2sPid) ->
 	    end,
     [{s2s_pid, S2sPid} | Infos].
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-type use_starttls() :: boolean() | optional | required | required_trusted.
+-spec opt_type(route_subdomains) -> fun((s2s | local) -> s2s | local);
+	      (s2s_access) -> fun((any()) -> any());
+	      (s2s_certfile) -> fun((binary()) -> binary());
+	      (s2s_ciphers) -> fun((binary()) -> binary());
+	      (s2s_dhfile) -> fun((binary()) -> binary());
+	      (s2s_cafile) -> fun((binary()) -> binary());
+	      (s2s_protocol_options) -> fun(([binary()]) -> binary());
+	      (s2s_tls_compression) -> fun((boolean()) -> boolean());
+	      (s2s_use_starttls) -> fun((use_starttls()) -> use_starttls());
+	      (s2s_zlib) -> fun((boolean()) -> boolean());
+	      (s2s_timeout) -> fun((timeout()) -> timeout());
+	      (s2s_queue_type) -> fun((ram | file) -> ram | file);
+	      (atom()) -> [atom()].
 opt_type(route_subdomains) ->
     fun (s2s) -> s2s;
 	(local) -> local
     end;
 opt_type(s2s_access) ->
     fun acl:access_rules_validator/1;
+opt_type(s2s_certfile) -> fun misc:try_read_file/1;
 opt_type(s2s_ciphers) -> fun iolist_to_binary/1;
 opt_type(s2s_dhfile) -> fun misc:try_read_file/1;
 opt_type(s2s_cafile) -> fun misc:try_read_file/1;
@@ -726,21 +726,10 @@ opt_type(s2s_use_starttls) ->
 	(false) -> false;
 	(optional) -> optional;
 	(required) -> required;
-	(required_trusted) ->
-	    ?WARNING_MSG("The value 'required_trusted' of option "
-			 "'s2s_use_starttls' is deprected and will be "
-			 "unsupported in future releases. Instead, "
-			 "set it to 'required' and make sure "
-			 "mod_s2s_dialback is *NOT* loaded", []),
-	    required_trusted
+	(required_trusted) -> required_trusted
     end;
 opt_type(s2s_zlib) ->
-    fun(true) ->
-	    ejabberd:start_app(ezlib),
-	    true;
-       (false) ->
-	    false
-    end;
+    fun(B) when is_boolean(B) -> B end;
 opt_type(s2s_timeout) ->
     fun(I) when is_integer(I), I >= 0 -> timer:seconds(I);
        (infinity) -> infinity;
@@ -749,6 +738,6 @@ opt_type(s2s_timeout) ->
 opt_type(s2s_queue_type) ->
     fun(ram) -> ram; (file) -> file end;
 opt_type(_) ->
-    [route_subdomains, s2s_access, s2s_zlib,
+    [route_subdomains, s2s_access,  s2s_certfile, s2s_zlib,
      s2s_ciphers, s2s_dhfile, s2s_cafile, s2s_protocol_options,
      s2s_tls_compression, s2s_use_starttls, s2s_timeout, s2s_queue_type].

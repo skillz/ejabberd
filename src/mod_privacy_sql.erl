@@ -4,7 +4,7 @@
 %%% Created : 14 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -56,13 +56,13 @@ unset_default(LUser, LServer) ->
 
 set_default(LUser, LServer, Name) ->
     F = fun () ->
-		case get_privacy_list_names_t(LUser, LServer) of
+		case get_privacy_list_names_t(LUser) of
 		    {selected, []} ->
 			{error, notfound};
 		    {selected, Names} ->
 			case lists:member({Name}, Names) of
 			    true ->
-				set_default_privacy_list(LUser, LServer, Name);
+				set_default_privacy_list(LUser, Name);
 			    false ->
 				{error, notfound}
 			end
@@ -72,14 +72,14 @@ set_default(LUser, LServer, Name) ->
 
 remove_list(LUser, LServer, Name) ->
     F = fun () ->
-		case get_default_privacy_list_t(LUser, LServer) of
+		case get_default_privacy_list_t(LUser) of
 		    {selected, []} ->
-			remove_privacy_list_t(LUser, LServer, Name);
+			remove_privacy_list_t(LUser, Name);
 		    {selected, [{Default}]} ->
 			if Name == Default ->
 				{error, conflict};
 			   true ->
-				remove_privacy_list_t(LUser, LServer, Name)
+				remove_privacy_list_t(LUser, Name)
 			end
 		end
 	end,
@@ -91,14 +91,13 @@ set_lists(#privacy{us = {LUser, LServer},
     F = fun() ->
 		lists:foreach(
 		  fun({Name, List}) ->
-			  add_privacy_list(LUser, LServer, Name),
+			  add_privacy_list(LUser, Name),
 			  {selected, [<<"id">>], [[I]]} =
-			      get_privacy_list_id_t(LUser, LServer, Name),
+			      get_privacy_list_id_t(LUser, Name),
 			  RItems = lists:map(fun item_to_raw/1, List),
 			  set_privacy_list(I, RItems),
 			  if is_binary(Default) ->
-				  set_default_privacy_list(
-                                    LUser, LServer, Default);
+				  set_default_privacy_list(LUser, Default);
 			     true ->
 				  ok
 			  end
@@ -109,11 +108,11 @@ set_lists(#privacy{us = {LUser, LServer},
 set_list(LUser, LServer, Name, List) ->
     RItems = lists:map(fun item_to_raw/1, List),
     F = fun () ->
-		ID = case get_privacy_list_id_t(LUser, LServer, Name) of
+		ID = case get_privacy_list_id_t(LUser, Name) of
                          {selected, []} ->
-			     add_privacy_list(LUser, LServer, Name),
+			     add_privacy_list(LUser, Name),
 			     {selected, [{I}]} =
-				 get_privacy_list_id_t(LUser, LServer, Name),
+				 get_privacy_list_id_t(LUser, Name),
 			     I;
 			 {selected, [{I}]} -> I
 		     end,
@@ -200,12 +199,9 @@ export(Server) ->
             when LServer == Host ->
               if Default /= none ->
                       [?SQL("delete from privacy_default_list where"
-                            " username=%(LUser)s and %(LServer)H;"),
-                       ?SQL_INSERT(
-                          "privacy_default_list",
-                          ["username=%(LUser)s",
-                           "server_host=%(LServer)s",
-                           "name=%(Default)s"])];
+                            " username=%(LUser)s;"),
+                       ?SQL("insert into privacy_default_list(username, name) "
+                            "values (%(LUser)s, %(Default)s);")];
                  true ->
                       []
               end ++
@@ -214,14 +210,11 @@ export(Server) ->
                             RItems = lists:map(fun item_to_raw/1, List),
                             ID = get_id(),
                             [?SQL("delete from privacy_list where"
-                                  " username=%(LUser)s and %(LServer)H and"
+                                  " username=%(LUser)s and"
                                   " name=%(Name)s;"),
-                             ?SQL_INSERT(
-                                "privacy_list",
-                                ["username=%(LUser)s",
-                                 "server_host=%(LServer)s",
-                                 "name=%(Name)s",
-                                 "id=%(ID)d"]),
+                             ?SQL("insert into privacy_list(username, "
+                                  "name, id) values ("
+                                  "%(LUser)s, %(Name)s, %(ID)d);"),
                              ?SQL("delete from privacy_list_data where"
                                   " id=%(ID)d;")] ++
                                 [?SQL("insert into privacy_list_data(id, t, "
@@ -319,28 +312,28 @@ get_default_privacy_list(LUser, LServer) ->
     ejabberd_sql:sql_query(
       LServer,
       ?SQL("select @(name)s from privacy_default_list "
-           "where username=%(LUser)s and %(LServer)H")).
+           "where username=%(LUser)s")).
 
-get_default_privacy_list_t(LUser, LServer) ->
+get_default_privacy_list_t(LUser) ->
     ejabberd_sql:sql_query_t(
       ?SQL("select @(name)s from privacy_default_list "
-           "where username=%(LUser)s and %(LServer)H")).
+           "where username=%(LUser)s")).
 
 get_privacy_list_names(LUser, LServer) ->
     ejabberd_sql:sql_query(
       LServer,
       ?SQL("select @(name)s from privacy_list"
-           " where username=%(LUser)s and %(LServer)H")).
+           " where username=%(LUser)s")).
 
-get_privacy_list_names_t(LUser, LServer) ->
+get_privacy_list_names_t(LUser) ->
     ejabberd_sql:sql_query_t(
       ?SQL("select @(name)s from privacy_list"
-           " where username=%(LUser)s and %(LServer)H")).
+           " where username=%(LUser)s")).
 
-get_privacy_list_id_t(LUser, LServer, Name) ->
+get_privacy_list_id_t(LUser, Name) ->
     ejabberd_sql:sql_query_t(
       ?SQL("select @(id)d from privacy_list"
-           " where username=%(LUser)s and %(LServer)H and name=%(Name)s")).
+           " where username=%(LUser)s and name=%(Name)s")).
 
 get_privacy_list_data(LUser, LServer, Name) ->
     ejabberd_sql:sql_query(
@@ -350,41 +343,37 @@ get_privacy_list_data(LUser, LServer, Name) ->
            "@(match_presence_out)b from privacy_list_data "
            "where id ="
            " (select id from privacy_list"
-           " where username=%(LUser)s and %(LServer)H and name=%(Name)s) "
+           " where username=%(LUser)s and name=%(Name)s) "
            "order by ord")).
 
-set_default_privacy_list(LUser, LServer, Name) ->
+set_default_privacy_list(LUser, Name) ->
     ?SQL_UPSERT_T(
        "privacy_default_list",
        ["!username=%(LUser)s",
-        "!server_host=%(LServer)s",
         "name=%(Name)s"]).
 
 unset_default_privacy_list(LUser, LServer) ->
     case ejabberd_sql:sql_query(
 	   LServer,
 	   ?SQL("delete from privacy_default_list"
-		" where username=%(LUser)s and %(LServer)H")) of
+		" where username=%(LUser)s")) of
 	{updated, _} -> ok;
 	Err -> Err
     end.
 
-remove_privacy_list_t(LUser, LServer, Name) ->
+remove_privacy_list_t(LUser, Name) ->
     case ejabberd_sql:sql_query_t(
 	   ?SQL("delete from privacy_list where"
-		" username=%(LUser)s and %(LServer)H and name=%(Name)s")) of
+		" username=%(LUser)s and name=%(Name)s")) of
 	{updated, 0} -> {error, notfound};
 	{updated, _} -> ok;
 	Err -> Err
     end.
 
-add_privacy_list(LUser, LServer, Name) ->
+add_privacy_list(LUser, Name) ->
     ejabberd_sql:sql_query_t(
-      ?SQL_INSERT(
-         "privacy_list",
-         ["username=%(LUser)s",
-          "server_host=%(LServer)s",
-          "name=%(Name)s"])).
+      ?SQL("insert into privacy_list(username, name) "
+           "values (%(LUser)s, %(Name)s)")).
 
 set_privacy_list(ID, RItems) ->
     ejabberd_sql:sql_query_t(
@@ -406,12 +395,12 @@ set_privacy_list(ID, RItems) ->
 del_privacy_lists(LUser, LServer) ->
     case ejabberd_sql:sql_query(
 	   LServer,
-	   ?SQL("delete from privacy_list where username=%(LUser)s and %(LServer)H")) of
+	   ?SQL("delete from privacy_list where username=%(LUser)s")) of
 	{updated, _} ->
 	    case ejabberd_sql:sql_query(
 		   LServer,
 		   ?SQL("delete from privacy_default_list "
-			"where username=%(LUser)s and %(LServer)H")) of
+			"where username=%(LUser)s")) of
 		{updated, _} -> ok;
 		Err -> Err
 	    end;

@@ -5,7 +5,7 @@
 %%% Created : 24 Aug 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -29,9 +29,10 @@
 
 -behaviour(gen_mod).
 
--export([start/2, stop/1, log_user_send/1, mod_options/1,
+-export([start/2, stop/1, log_user_send/1,
 	 log_user_receive/1, mod_opt_type/1, depends/2]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 
 -include("xmpp.hrl").
@@ -67,11 +68,11 @@ log_user_receive({Packet, C2SState}) ->
 
 -spec log_packet(stanza(), binary()) -> ok.
 log_packet(Packet, Host) ->
-    Loggers = gen_mod:get_module_opt(Host, ?MODULE, loggers),
+    Loggers = gen_mod:get_module_opt(Host, ?MODULE, loggers, []),
     ForwardedMsg = #message{from = jid:make(Host),
-			    id = p1_rand:get_string(),
+			    id = randoms:get_string(),
 			    sub_els = [#forwarded{
-					  sub_els = [Packet]}]},
+					  xml_els = [xmpp:encode(Packet)]}]},
     lists:foreach(
       fun(Logger) ->
 	      ejabberd_router:route(xmpp:set_to(ForwardedMsg, jid:make(Logger)))
@@ -85,7 +86,5 @@ mod_opt_type(loggers) ->
 			      if N /= error -> N end
 		      end,
 		      L)
-    end.
-
-mod_options(_) ->
-    [{loggers, []}].
+    end;
+mod_opt_type(_) -> [loggers].

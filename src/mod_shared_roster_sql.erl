@@ -4,7 +4,7 @@
 %%% Created : 14 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -50,7 +50,7 @@ init(_Host, _Opts) ->
 list_groups(Host) ->
     case ejabberd_sql:sql_query(
 	   Host,
-           ?SQL("select @(name)s from sr_group where %(Host)H")) of
+           ?SQL("select @(name)s from sr_group")) of
 	{selected, Rs} -> [G || {G} <- Rs];
 	_ -> []
     end.
@@ -58,7 +58,7 @@ list_groups(Host) ->
 groups_with_opts(Host) ->
     case ejabberd_sql:sql_query(
            Host,
-           ?SQL("select @(name)s, @(opts)s from sr_group where %(Host)H"))
+           ?SQL("select @(name)s, @(opts)s from sr_group"))
 	of
       {selected, Rs} ->
 	  [{G, mod_shared_roster:opts_to_binary(ejabberd_sql:decode_term(Opts))}
@@ -72,7 +72,6 @@ create_group(Host, Group, Opts) ->
 		?SQL_UPSERT_T(
                    "sr_group",
                    ["!name=%(Group)s",
-                    "!server_host=%(Host)s",
                     "opts=%(SOpts)s"])
 	end,
     ejabberd_sql:sql_transaction(Host, F).
@@ -80,9 +79,9 @@ create_group(Host, Group, Opts) ->
 delete_group(Host, Group) ->
     F = fun () ->
 		ejabberd_sql:sql_query_t(
-                  ?SQL("delete from sr_group where name=%(Group)s and %(Host)H")),
+                  ?SQL("delete from sr_group where name=%(Group)s")),
 		ejabberd_sql:sql_query_t(
-                  ?SQL("delete from sr_user where grp=%(Group)s and %(Host)H"))
+                  ?SQL("delete from sr_user where grp=%(Group)s"))
 	end,
     case ejabberd_sql:sql_transaction(Host, F) of
         {atomic,{updated,_}} -> {atomic, ok};
@@ -92,8 +91,7 @@ delete_group(Host, Group) ->
 get_group_opts(Host, Group) ->
     case catch ejabberd_sql:sql_query(
 		 Host,
-		 ?SQL("select @(opts)s from sr_group"
-                      " where name=%(Group)s and %(Host)H")) of
+		 ?SQL("select @(opts)s from sr_group where name=%(Group)s")) of
 	{selected, [{SOpts}]} ->
 	    mod_shared_roster:opts_to_binary(ejabberd_sql:decode_term(SOpts));
 	_ -> error
@@ -105,7 +103,6 @@ set_group_opts(Host, Group, Opts) ->
 		?SQL_UPSERT_T(
                    "sr_group",
                    ["!name=%(Group)s",
-                    "!server_host=%(Host)s",
                     "opts=%(SOpts)s"])
 	end,
     ejabberd_sql:sql_transaction(Host, F).
@@ -114,8 +111,7 @@ get_user_groups(US, Host) ->
     SJID = make_jid_s(US),
     case catch ejabberd_sql:sql_query(
 		 Host,
-		 ?SQL("select @(grp)s from sr_user"
-                      " where jid=%(SJID)s and %(Host)H")) of
+		 ?SQL("select @(grp)s from sr_user where jid=%(SJID)s")) of
 	{selected, Rs} -> [G || {G} <- Rs];
 	_ -> []
     end.
@@ -123,8 +119,7 @@ get_user_groups(US, Host) ->
 get_group_explicit_users(Host, Group) ->
     case catch ejabberd_sql:sql_query(
 		 Host,
-		 ?SQL("select @(jid)s from sr_user"
-                      " where grp=%(Group)s and %(Host)H")) of
+		 ?SQL("select @(jid)s from sr_user where grp=%(Group)s")) of
 	{selected, Rs} ->
 	    lists:map(
 	      fun({JID}) ->
@@ -139,8 +134,7 @@ get_user_displayed_groups(LUser, LServer, GroupsOpts) ->
     SJID = make_jid_s(LUser, LServer),
     case catch ejabberd_sql:sql_query(
 		 LServer,
-		 ?SQL("select @(grp)s from sr_user"
-                      " where jid=%(SJID)s and %(LServer)H")) of
+		 ?SQL("select @(grp)s from sr_user where jid=%(SJID)s")) of
 	{selected, Rs} ->
 	    [{Group, proplists:get_value(Group, GroupsOpts, [])}
 	     || {Group} <- Rs];
@@ -152,7 +146,7 @@ is_user_in_group(US, Group, Host) ->
     case catch ejabberd_sql:sql_query(
                  Host,
                  ?SQL("select @(jid)s from sr_user where jid=%(SJID)s"
-                      " and %(Host)H and grp=%(Group)s")) of
+                      " and grp=%(Group)s")) of
 	{selected, []} -> false;
 	_ -> true
     end.
@@ -161,18 +155,15 @@ add_user_to_group(Host, US, Group) ->
     SJID = make_jid_s(US),
     ejabberd_sql:sql_query(
       Host,
-      ?SQL_INSERT(
-         "sr_user",
-         ["jid=%(SJID)s",
-          "server_host=%(Host)s",
-          "grp=%(Group)s"])).
+      ?SQL("insert into sr_user(jid, grp) values ("
+           "%(SJID)s, %(Group)s)")).
 
 remove_user_from_group(Host, US, Group) ->
     SJID = make_jid_s(US),
     F = fun () ->
 		ejabberd_sql:sql_query_t(
-                  ?SQL("delete from sr_user where jid=%(SJID)s and %(Host)H"
-                       " and grp=%(Group)s")),
+                  ?SQL("delete from sr_user where jid=%(SJID)s and"
+                       " grp=%(Group)s")),
 		ok
 	end,
     ejabberd_sql:sql_transaction(Host, F).
@@ -182,12 +173,9 @@ export(_Server) ->
       fun(Host, #sr_group{group_host = {Group, LServer}, opts = Opts})
             when LServer == Host ->
               SOpts = misc:term_to_expr(Opts),
-              [?SQL("delete from sr_group where name=%(Group)s and %(Host)H;"),
-               ?SQL_INSERT(
-                  "sr_group",
-                  ["name=%(Group)s",
-                   "server_host=%(Host)s",
-                   "opts=%(SOpts)s"])];
+              [?SQL("delete from sr_group where name=%(Group)s;"),
+               ?SQL("insert into sr_group(name, opts) values ("
+                    "%(Group)s, %(SOpts)s);")];
          (_Host, _R) ->
               []
       end},
@@ -196,12 +184,9 @@ export(_Server) ->
             when LServer == Host ->
               SJID = make_jid_s(U, S),
               [?SQL("select @(jid)s from sr_user where jid=%(SJID)s"
-                    " and %(Host)H and grp=%(Group)s;"),
-               ?SQL_INSERT(
-                  "sr_user",
-                  ["jid=%(SJID)s",
-                   "server_host=%(Host)s",
-                   "grp=%(Group)s"])];
+                    " and grp=%(Group)s;"),
+               ?SQL("insert into sr_user(jid, grp) values ("
+                    "%(SJID)s, %(Group)s);")];
          (_Host, _R) ->
               []
       end}].

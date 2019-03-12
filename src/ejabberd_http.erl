@@ -5,7 +5,7 @@
 %%% Created : 27 Feb 2004 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,23 +24,24 @@
 %%%----------------------------------------------------------------------
 
 -module(ejabberd_http).
--behaviour(ejabberd_listener).
+
 -behaviour(ejabberd_config).
 
 -author('alexey@process-one.net').
 
 %% External exports
--export([start/2, start_link/2,
-	 accept/1, receive_headers/1, recv_file/2,
-         transform_listen_option/2, listen_opt_type/1,
-	 listen_options/0]).
+-export([start/2, start_link/2, become_controller/1,
+	 socket_type/0, receive_headers/1, url_encode/1,
+         transform_listen_option/2, listen_opt_type/1]).
 
 -export([init/2, opt_type/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
+
 -include("xmpp.hrl").
+
 -include("ejabberd_http.hrl").
--include_lib("kernel/include/file.hrl").
 
 -record(state, {sockmod,
 		socket,
@@ -49,7 +50,7 @@
 		request_path,
 		request_auth,
 		request_keepalive,
-		request_content_length = 0,
+		request_content_length,
 		request_lang = <<"en">>,
 		%% XXX bard: request handlers are configured in
 		%% ejabberd.cfg under the HTTP service.	 For example,
@@ -69,8 +70,7 @@
 		default_host,
 		custom_headers,
 		trail = <<>>,
-		addr_re,
-		sock_peer_name = none
+		addr_re
 	       }).
 
 -define(XHTML_DOCTYPE,
@@ -85,10 +85,6 @@
 	  "org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n"
 	  "">>).
 
--define(RECV_BUF, 65536).
--define(SEND_BUF, 65536).
--define(MAX_POST_SIZE, 20971520). %% 20Mb
-
 start(SockData, Opts) ->
     {ok,
      proc_lib:spawn(ejabberd_http, init,
@@ -101,9 +97,9 @@ start_link(SockData, Opts) ->
 
 init({SockMod, Socket}, Opts) ->
     TLSEnabled = proplists:get_bool(tls, Opts),
-    TLSOpts1 = lists:filter(fun ({ciphers, _}) -> true;
+    TLSOpts1 = lists:filter(fun ({certfile, _}) -> true;
+				({ciphers, _}) -> true;
 				({dhfile, _}) -> true;
-				({cafile, _}) -> true;
 				({protocol_options, _}) -> true;
 				(_) -> false
 			    end,
@@ -112,13 +108,9 @@ init({SockMod, Socket}, Opts) ->
                    false -> [compression_none | TLSOpts1];
                    true -> TLSOpts1
                end,
-    TLSOpts3 = case get_certfile(Opts) of
-		   undefined -> TLSOpts2;
-		   CertFile -> [{certfile, CertFile}|TLSOpts2]
-	       end,
-    TLSOpts = [verify_none | TLSOpts3],
+    TLSOpts = [verify_none | TLSOpts2],
     {SockMod1, Socket1} = if TLSEnabled ->
-				 inet:setopts(Socket, [{recbuf, ?RECV_BUF}]),
+				 inet:setopts(Socket, [{recbuf, 8192}]),
 				 {ok, TLSSocket} = fast_tls:tcp_to_tls(Socket,
 								  TLSOpts),
 				 {fast_tls, TLSSocket};
@@ -144,7 +136,6 @@ init({SockMod, Socket}, Opts) ->
 		 true -> [{[], ejabberd_xmlrpc}];
 		 false -> []
 	     end,
-    SockPeer =  proplists:get_value(sock_peer_name, Opts, none),
     DefinedHandlers = proplists:get_value(request_handlers, Opts, []),
     RequestHandlers = DefinedHandlers ++ Captcha ++ Register ++
         Admin ++ Bind ++ XMLRPC,
@@ -155,13 +146,13 @@ init({SockMod, Socket}, Opts) ->
 
     CustomHeaders = proplists:get_value(custom_headers, Opts, []),
 
+    ?INFO_MSG("started: ~p", [{SockMod1, Socket1}]),
     State = #state{sockmod = SockMod1,
                    socket = Socket1,
                    default_host = DefaultHost,
 		   custom_headers = CustomHeaders,
 		   options = Opts,
 		   request_handlers = RequestHandlers,
-		   sock_peer_name = SockPeer,
 		   addr_re = RE},
     try receive_headers(State) of
         V -> V
@@ -169,47 +160,24 @@ init({SockMod, Socket}, Opts) ->
         {error, _} -> State
     end.
 
-accept(_Pid) ->
+become_controller(_Pid) ->
     ok.
 
-send_text(_State, none) ->
-    ok;
-send_text(State, Text) ->
-    case (State#state.sockmod):send(State#state.socket, Text) of
-	ok -> ok;
-	{error, timeout} ->
-	    ?INFO_MSG("Timeout on ~p:send", [State#state.sockmod]),
-	    exit(normal);
-	Error ->
-	    ?DEBUG("Error in ~p:send: ~p",
-		   [State#state.sockmod, Error]),
-	    exit(normal)
-    end.
+socket_type() ->
+    raw.
 
-send_file(State, Fd, Size, FileName) ->
-    try
-	case State#state.sockmod of
-	    gen_tcp ->
-		case file:sendfile(Fd, State#state.socket, 0, Size, []) of
-		    {ok, _} -> ok
-		end;
-	    _ ->
-		case file:read(Fd, ?SEND_BUF) of
-		    {ok, Data} ->
-			send_text(State, Data),
-			send_file(State, Fd, Size, FileName);
-		    eof ->
-			ok
-		end
-	end
-    catch _:{case_clause, {error, Why}} ->
-	    if Why /= closed ->
-		    ?WARNING_MSG("Failed to read ~s: ~s",
-				 [FileName, file_format_error(Why)]),
-		    exit(normal);
-	       true ->
-		    ok
-	    end
+send_text(State, Text) ->
+    case catch
+	   (State#state.sockmod):send(State#state.socket, Text)
+	of
+      ok -> ok;
+      {error, timeout} ->
+	  ?INFO_MSG("Timeout on ~p:send", [State#state.sockmod]),
+	  exit(normal);
+      Error ->
+	  ?DEBUG("Error in ~p:send: ~p",
+		 [State#state.sockmod, Error]),
+	  exit(normal)
     end.
 
 receive_headers(#state{trail = Trail} = State) ->
@@ -298,11 +266,10 @@ process_header(State, Data) ->
 			  add_header(Name, Value, State)};
       {ok, http_eoh}
 	  when State#state.request_host == undefined ->
-	    ?DEBUG("An HTTP request without 'Host' HTTP "
-		   "header was received.", []),
-	    {State1, Out} = process_request(State),
-	    send_text(State1, Out),
-	    process_header(State, {ok, {http_error, <<>>}});
+	  ?WARNING_MSG("An HTTP request without 'Host' HTTP "
+		       "header was received.",
+		       []),
+	  throw(http_request_no_host_header);
       {ok, http_eoh} ->
 	  ?DEBUG("(~w) http query: ~w ~p~n",
 		 [State#state.socket, State#state.request_method,
@@ -378,8 +345,8 @@ get_transfer_protocol(RE, SockMod, HostPort) ->
 %% matches the requested URL path, and pass control to it.  If none is
 %% found, answer with HTTP 404.
 
-process([], _) -> ejabberd_web:error(not_found);
-process(Handlers, Request) ->
+process([], _, _, _, _) -> ejabberd_web:error(not_found);
+process(Handlers, Request, Socket, SockMod, Trail) ->
     {HandlerPathPrefix, HandlerModule, HandlerOpts, HandlersLeft} =
         case Handlers of
             [{Pfx, Mod} | Tail] ->
@@ -399,14 +366,14 @@ process(Handlers, Request) ->
             LocalPath = lists:nthtail(length(HandlerPathPrefix), Request#request.path),
 	    R = try
 		    HandlerModule:socket_handoff(
-		      LocalPath, Request, HandlerOpts)
+		      LocalPath, Request, Socket, SockMod, Trail, HandlerOpts)
 		catch error:undef ->
 			HandlerModule:process(LocalPath, Request)
 		end,
             ejabberd_hooks:run(http_request_debug, [{LocalPath, Request}]),
             R;
         false ->
-	    process(HandlersLeft, Request)
+	    process(HandlersLeft, Request, Socket, SockMod, Trail)
     end.
 
 extract_path_query(#state{request_method = Method,
@@ -414,11 +381,11 @@ extract_path_query(#state{request_method = Method,
     when Method =:= 'GET' orelse
 	   Method =:= 'HEAD' orelse
 	     Method =:= 'DELETE' orelse Method =:= 'OPTIONS' ->
-    case catch url_decode_q_split_normalize(Path) of
-	{'EXIT', Error} ->
-	    ?DEBUG("Error decoding URL '~p': ~p", [Path, Error]),
-	    {State, false};
-	{LPath, Query} ->
+    case catch url_decode_q_split(Path) of
+	{'EXIT', _} -> {State, false};
+	{NPath, Query} ->
+	    LPath = normalize_path([NPE
+				    || NPE <- str:tokens(path_decode(NPath), <<"/">>)]),
 	    LQuery = case catch parse_urlencoded(Query) of
 			 {'EXIT', _Reason} -> [];
 			 LQ -> LQ
@@ -428,74 +395,53 @@ extract_path_query(#state{request_method = Method,
 extract_path_query(#state{request_method = Method,
 			  request_path = {abs_path, Path},
 			  request_content_length = Len,
-			  trail = Trail,
 			  sockmod = _SockMod,
 			  socket = _Socket} = State)
-  when (Method =:= 'POST' orelse Method =:= 'PUT') andalso Len>0 ->
-    case catch url_decode_q_split_normalize(Path) of
-	{'EXIT', Error} ->
-	    ?DEBUG("Error decoding URL '~p': ~p", [Path, Error]),
-	    {State, false};
-        {LPath, _Query} ->
-	    case Method of
-		'PUT' ->
-		    {State, {LPath, [], Trail}};
-		'POST' ->
-		    case recv_data(State) of
-			{ok, Data} ->
-			    LQuery = case catch parse_urlencoded(Data) of
-					 {'EXIT', _Reason} -> [];
-					 LQ -> LQ
-				     end,
-			    {State, {LPath, LQuery, Data}};
-			error ->
-			    {State, false}
-		    end
+    when (Method =:= 'POST' orelse Method =:= 'PUT') andalso
+	   is_integer(Len) ->
+    case recv_data(State, Len) of
+	error -> {State, false};
+	{NewState, Data} ->
+    ?DEBUG("client data: ~p~n", [Data]),
+    case catch url_decode_q_split(Path) of
+        {'EXIT', _} -> {NewState, false};
+        {NPath, _Query} ->
+            LPath = normalize_path([NPE
+                                    || NPE <- str:tokens(path_decode(NPath), <<"/">>)]),
+            LQuery = case catch parse_urlencoded(Data) of
+                         {'EXIT', _Reason} -> [];
+                         LQ -> LQ
+                     end,
+            {NewState, {LPath, LQuery, Data}}
 	    end
     end;
 extract_path_query(State) ->
     {State, false}.
 
-process_request(#state{request_host = undefined,
-		       custom_headers = CustomHeaders} = State) ->
-    {State, make_text_output(State, 400, CustomHeaders,
-			     <<"Missing Host header">>)};
 process_request(#state{request_method = Method,
 		       request_auth = Auth,
 		       request_lang = Lang,
-		       request_version = Version,
 		       sockmod = SockMod,
 		       socket = Socket,
-		       sock_peer_name = SockPeer,
 		       options = Options,
 		       request_host = Host,
 		       request_port = Port,
 		       request_tp = TP,
-		       request_content_length = Length,
 		       request_headers = RequestHeaders,
 		       request_handlers = RequestHandlers,
-		       custom_headers = CustomHeaders} = State) ->
-    case proplists:get_value(<<"Expect">>, RequestHeaders, <<>>) of
-	<<"100-", _/binary>> when Version == {1, 1} ->
-	    send_text(State, <<"HTTP/1.1 100 Continue\r\n\r\n">>);
-	_ ->
-	    ok
-    end,
+		       custom_headers = CustomHeaders,
+		       trail = Trail} = State) ->
     case extract_path_query(State) of
 	{State2, false} ->
 	    {State2, make_bad_request(State)};
 	{State2, {LPath, LQuery, Data}} ->
-	    PeerName = case SockPeer of
-			   none ->
-			       case SockMod of
-				   gen_tcp ->
-				       inet:peername(Socket);
-				   _ ->
-				       SockMod:peername(Socket)
-			       end;
-			   {_, Peer} ->
-			       {ok, Peer}
-		       end,
+	    PeerName =
+		case SockMod of
+		    gen_tcp ->
+			inet:peername(Socket);
+		    _ ->
+			SockMod:peername(Socket)
+		end,
             IPHere = case PeerName of
                          {ok, V} -> V;
                          {error, _} = E -> throw(E)
@@ -506,10 +452,7 @@ process_request(#state{request_method = Method,
                                path = LPath,
                                q = LQuery,
                                auth = Auth,
-			       length = Length,
-			       sockmod = SockMod,
-			       socket = Socket,
-			       data = Data,
+                               data = Data,
                                lang = Lang,
                                host = Host,
                                port = Port,
@@ -517,9 +460,7 @@ process_request(#state{request_method = Method,
 			       opts = Options,
                                headers = RequestHeaders,
                                ip = IP},
-	    RequestHandlers1 = ejabberd_hooks:run_fold(
-				http_request_handlers, RequestHandlers, [Host, Request]),
-	    Res = case process(RequestHandlers1, Request) of
+	    Res = case process(RequestHandlers, Request, Socket, SockMod, Trail) of
 		      El when is_record(El, xmlel) ->
 			  make_xhtml_output(State, 200, CustomHeaders, El);
 		      {Status, Headers, El}
@@ -532,8 +473,6 @@ process_request(#state{request_method = Method,
 			when is_binary(Output) or is_list(Output) ->
 			  make_text_output(State, Status,
 					   Headers ++ CustomHeaders, Output);
-		      {Status, Headers, {file, FileName}} ->
-			  make_file_output(State, Status, Headers, FileName);
 		      {Status, Reason, Headers, Output}
 			when is_binary(Output) or is_list(Output) ->
 			  make_text_output(State, Status, Reason,
@@ -541,7 +480,7 @@ process_request(#state{request_method = Method,
 		      _ ->
 			  none
 		  end,
-	    {State2#state{trail = <<>>}, Res}
+	    {State2, Res}
     end.
 
 make_bad_request(State) ->
@@ -571,98 +510,118 @@ analyze_ip_xff({IPLast, Port}, XFF, Host) ->
 	       end,
     {IPClient, Port}.
 
-is_ipchain_trusted([], _) -> false;
 is_ipchain_trusted(_UserIPs, all) -> true;
-is_ipchain_trusted(UserIPs, Masks) ->
-    lists:all(
-	fun(IP) ->
-	    case inet:parse_address(binary_to_list(IP)) of
-		{ok, IP2} ->
-		    lists:any(
-			fun({Mask, MaskLen}) ->
-			    acl:ip_matches_mask(IP2, Mask, MaskLen)
-			end, Masks);
-		_ ->
-		    false
-	    end
-	end, UserIPs).
+is_ipchain_trusted(UserIPs, TrustedIPs) ->
+    [] == UserIPs -- [<<"127.0.0.1">> | TrustedIPs].
 
-recv_data(#state{request_content_length = Len}) when Len >= ?MAX_POST_SIZE ->
-    error;
-recv_data(#state{request_content_length = Len, trail = Trail,
-		 sockmod = SockMod, socket = Socket}) ->
-    NewLen = Len - byte_size(Trail),
-    if NewLen > 0 ->
-	    case SockMod:recv(Socket, NewLen, 60000) of
-		{ok, Data} -> {ok, <<Trail/binary, Data/binary>>};
-		{error, _} -> error
+recv_data(State, Len) -> recv_data(State, Len, <<>>).
+
+recv_data(State, 0, Acc) -> {State, Acc};
+recv_data(#state{trail = Trail} = State, Len, <<>>) when byte_size(Trail) > Len ->
+    <<Data:Len/binary, Rest/binary>> = Trail,
+    {State#state{trail = Rest}, Data};
+recv_data(State, Len, Acc) ->
+    case State#state.trail of
+	<<>> ->
+	    case (State#state.sockmod):recv(State#state.socket,
+					    min(Len, 16#4000000), 300000)
+	    of
+		{ok, Data} ->
+		    recv_data(State, Len - byte_size(Data), <<Acc/binary, Data/binary>>);
+		Err ->
+		    ?DEBUG("Cannot receive HTTP data: ~p", [Err]),
+		    error
 	    end;
-       true ->
-	    {ok, Trail}
+	_ ->
+	    Trail = (State#state.trail),
+	    recv_data(State#state{trail = <<>>},
+		      Len - byte_size(Trail), <<Acc/binary, Trail/binary>>)
     end.
 
-recv_file(#request{length = Len, data = Trail,
-		   sockmod = SockMod, socket = Socket}, Path) ->
-    case file:open(Path, [write, exclusive, raw]) of
-	{ok, Fd} ->
-	    Res = case file:write(Fd, Trail) of
-		      ok ->
-			  NewLen = max(0, Len - byte_size(Trail)),
-			  do_recv_file(NewLen, SockMod, Socket, Fd);
-		      {error, _} = Err ->
-			  Err
-		  end,
-	    file:close(Fd),
-	    case Res of
-		ok -> ok;
-		{error, _} -> file:delete(Path)
-	    end,
-	    Res;
-	{error, _} = Err ->
-	    Err
-    end.
-
-do_recv_file(0, _SockMod, _Socket, _Fd) ->
-    ok;
-do_recv_file(Len, SockMod, Socket, Fd) ->
-    ChunkLen = min(Len, ?RECV_BUF),
-    case SockMod:recv(Socket, ChunkLen, timer:seconds(30)) of
-	{ok, Data} ->
-	    case file:write(Fd, Data) of
-		ok ->
-		    do_recv_file(Len-size(Data), SockMod, Socket, Fd);
-		{error, _} = Err ->
-		    Err
-	    end;
-	{error, _} ->
-	    {error, closed}
-    end.
-
-make_headers(State, Status, Reason, Headers, Data) ->
-    Len = if is_integer(Data) -> Data;
-	     true -> iolist_size(Data)
-	  end,
-    Headers1 = [{<<"Content-Length">>, integer_to_binary(Len)} | Headers],
-    Headers2 = case lists:keyfind(<<"Content-Type">>, 1, Headers) of
-		   {_, _} ->
-		       Headers1;
-		   false ->
-		       [{<<"Content-Type">>, <<"text/html; charset=utf-8">>}
-			| Headers1]
+make_xhtml_output(State, Status, Headers, XHTML) ->
+    Data = case lists:member(html, Headers) of
+	true ->
+	    iolist_to_binary([?HTML_DOCTYPE,
+		    fxml:element_to_binary(XHTML)]);
+	_ ->
+	    iolist_to_binary([?XHTML_DOCTYPE,
+		    fxml:element_to_binary(XHTML)])
+    end,
+    Headers1 = case lists:keysearch(<<"Content-Type">>, 1,
+				    Headers)
+		   of
+		 {value, _} ->
+		     [{<<"Content-Length">>,
+		       integer_to_binary(byte_size(Data))}
+		      | Headers];
+		 _ ->
+		     [{<<"Content-Type">>, <<"text/html; charset=utf-8">>},
+		      {<<"Content-Length">>,
+		       integer_to_binary(byte_size(Data))}
+		      | Headers]
 	       end,
     HeadersOut = case {State#state.request_version,
-		       State#state.request_keepalive} of
-		     {{1, 1}, true} -> Headers2;
-		     {_, true} ->
-			 [{<<"Connection">>, <<"keep-alive">>} | Headers2];
-		     {_, false} ->
-			 [{<<"Connection">>, <<"close">>} | Headers2]
+		       State#state.request_keepalive}
+		     of
+		   {{1, 1}, true} -> Headers1;
+		   {_, true} ->
+		       [{<<"Connection">>, <<"keep-alive">>} | Headers1];
+		   {_, false} ->
+		       [{<<"Connection">>, <<"close">>} | Headers1]
 		 end,
     Version = case State#state.request_version of
-		  {1, 1} -> <<"HTTP/1.1 ">>;
-		  _ -> <<"HTTP/1.0 ">>
+		{1, 1} -> <<"HTTP/1.1 ">>;
+		_ -> <<"HTTP/1.0 ">>
 	      end,
-    H = [[Attr, <<": ">>, Val, <<"\r\n">>] || {Attr, Val} <- HeadersOut],
+    H = lists:map(fun ({Attr, Val}) ->
+			  [Attr, <<": ">>, Val, <<"\r\n">>];
+		      (_) -> []
+		  end,
+		  HeadersOut),
+    SL = [Version,
+	  integer_to_binary(Status), <<" ">>,
+	  code_to_phrase(Status), <<"\r\n">>],
+    Data2 = case State#state.request_method of
+	      'HEAD' -> <<"">>;
+	      _ -> Data
+	    end,
+    [SL, H, <<"\r\n">>, Data2].
+
+make_text_output(State, Status, Headers, Text) ->
+    make_text_output(State, Status, <<"">>, Headers, Text).
+
+make_text_output(State, Status, Reason, Headers, Text) ->
+    Data = iolist_to_binary(Text),
+    Headers1 = case lists:keysearch(<<"Content-Type">>, 1,
+				    Headers)
+		   of
+		 {value, _} ->
+		     [{<<"Content-Length">>,
+		       integer_to_binary(byte_size(Data))}
+		      | Headers];
+		 _ ->
+		     [{<<"Content-Type">>, <<"text/html; charset=utf-8">>},
+		      {<<"Content-Length">>,
+		       integer_to_binary(byte_size(Data))}
+		      | Headers]
+	       end,
+    HeadersOut = case {State#state.request_version,
+		       State#state.request_keepalive}
+		     of
+		   {{1, 1}, true} -> Headers1;
+		   {_, true} ->
+		       [{<<"Connection">>, <<"keep-alive">>} | Headers1];
+		   {_, false} ->
+		       [{<<"Connection">>, <<"close">>} | Headers1]
+		 end,
+    Version = case State#state.request_version of
+		{1, 1} -> <<"HTTP/1.1 ">>;
+		_ -> <<"HTTP/1.0 ">>
+	      end,
+    H = lists:map(fun ({Attr, Val}) ->
+			  [Attr, <<": ">>, Val, <<"\r\n">>]
+		  end,
+		  HeadersOut),
     NewReason = case Reason of
 		  <<"">> -> code_to_phrase(Status);
 		  _ -> Reason
@@ -670,55 +629,11 @@ make_headers(State, Status, Reason, Headers, Data) ->
     SL = [Version,
 	  integer_to_binary(Status), <<" ">>,
 	  NewReason, <<"\r\n">>],
-    [SL, H, <<"\r\n">>].
-
-make_xhtml_output(State, Status, Headers, XHTML) ->
-    Data = case State#state.request_method of
-	       'HEAD' -> <<"">>;
-	       _ ->
-		   DocType = case lists:member(html, Headers) of
-				 true -> ?HTML_DOCTYPE;
-				 false -> ?XHTML_DOCTYPE
-			     end,
-		   iolist_to_binary([DocType, fxml:element_to_binary(XHTML)])
-	   end,
-    EncodedHdrs = make_headers(State, Status, <<"">>, Headers, Data),
-    [EncodedHdrs, Data].
-
-make_text_output(State, Status, Headers, Text) ->
-    make_text_output(State, Status, <<"">>, Headers, Text).
-
-make_text_output(State, Status, Reason, Headers, Text) ->
-    Data = iolist_to_binary(Text),
     Data2 = case State#state.request_method of
-		'HEAD' -> <<"">>;
-		_ -> Data
+	      'HEAD' -> <<"">>;
+	      _ -> Data
 	    end,
-    EncodedHdrs = make_headers(State, Status, Reason, Headers, Data2),
-    [EncodedHdrs, Data2].
-
-make_file_output(State, Status, Headers, FileName) ->
-    case file:read_file_info(FileName) of
-	{ok, #file_info{size = Size}} when State#state.request_method == 'HEAD' ->
-	    make_headers(State, Status, <<"">>, Headers, Size);
-	{ok, #file_info{size = Size}} ->
-	    case file:open(FileName, [raw, read]) of
-		{ok, Fd} ->
-		    EncodedHdrs = make_headers(State, Status, <<"">>, Headers, Size),
-		    send_text(State, EncodedHdrs),
-		    send_file(State, Fd, Size, FileName),
-		    file:close(Fd),
-		    none;
-		{error, Why} ->
-		    Reason = file_format_error(Why),
-		    ?ERROR_MSG("Failed to open ~s: ~s", [FileName, Reason]),
-		    make_text_output(State, 404, Reason, [], <<>>)
-	    end;
-	{error, Why} ->
-	    Reason = file_format_error(Why),
-	    ?ERROR_MSG("Failed to read info of ~s: ~s", [FileName, Reason]),
-	    make_text_output(State, 404, Reason, [], <<>>)
-    end.
+    [SL, H, <<"\r\n">>, Data2].
 
 parse_lang(Langs) ->
     case str:tokens(Langs, <<",; ">>) of
@@ -726,20 +641,8 @@ parse_lang(Langs) ->
       [] -> <<"en">>
     end.
 
-file_format_error(Reason) ->
-    case file:format_error(Reason) of
-	"unknown POSIX error" -> atom_to_list(Reason);
-	Text -> Text
-    end.
-
-url_decode_q_split_normalize(Path) ->
-    {NPath, Query} = url_decode_q_split(Path),
-    LPath = normalize_path([NPE
-		    || NPE <- str:tokens(path_decode(NPath), <<"/">>)]),
-    {LPath, Query}.
-
 % Code below is taken (with some modifications) from the yaws webserver, which
-% is distributed under the following license:
+% is distributed under the folowing license:
 %
 % This software (the yaws webserver) is free software.
 % Parts of this software is Copyright (c) Claes Wikstrom <klacke@hyber.org>
@@ -767,7 +670,7 @@ url_decode_q_split(<<>>, Ack) ->
 path_decode(Path) -> path_decode(Path, <<>>).
 
 path_decode(<<$%, Hi, Lo, Tail/binary>>, Acc) ->
-    Hex = list_to_integer([Hi, Lo], 16),
+    Hex = hex_to_integer([Hi, Lo]),
     if Hex == 0 -> exit(badurl);
        true -> ok
     end,
@@ -801,9 +704,24 @@ rest_dir(N, Path, <<_H, T/binary>>) -> rest_dir(N, Path, T).
 
 expand_custom_headers(Headers) ->
     lists:map(fun({K, V}) ->
-		      {K, misc:expand_keyword(<<"@VERSION@">>, V,
-					      ejabberd_config:get_version())}
+		      {K, misc:expand_keyword(<<"@VERSION@">>, V, ?VERSION)}
 	      end, Headers).
+
+%% hex_to_integer
+
+hex_to_integer(Hex) ->
+    case catch list_to_integer(Hex, 16) of
+      {'EXIT', _} -> old_hex_to_integer(Hex);
+      X -> X
+    end.
+
+old_hex_to_integer(Hex) ->
+    DEHEX = fun (H) when H >= $a, H =< $f -> H - $a + 10;
+		(H) when H >= $A, H =< $F -> H - $A + 10;
+		(H) when H >= $0, H =< $9 -> H - $0
+	    end,
+    lists:foldl(fun (E, Acc) -> Acc * 16 + DEHEX(E) end, 0,
+		Hex).
 
 code_to_phrase(100) -> <<"Continue">>;
 code_to_phrase(101) -> <<"Switching Protocols ">>;
@@ -852,30 +770,30 @@ code_to_phrase(505) -> <<"HTTP Version Not Supported">>.
 
 -spec parse_auth(binary()) -> {binary(), binary()} | {oauth, binary(), []} | undefined.
 parse_auth(<<"Basic ", Auth64/binary>>) ->
-    try base64:decode(Auth64) of
-	Auth ->
-	    case binary:split(Auth, <<":">>) of
-		[User, Pass] ->
-		    PassUtf8 = unicode:characters_to_binary(Pass, utf8),
-		    {User, PassUtf8};
-		_ ->
-		    invalid
-	    end
-    catch _:_ ->
-	invalid
+    Auth = try base64:decode(Auth64)
+	   catch _:badarg -> <<>>
+	   end,
+    %% Auth should be a string with the format: user@server:password
+    %% Note that password can contain additional characters '@' and ':'
+    case str:chr(Auth, $:) of
+        0 ->
+            undefined;
+        Pos ->
+            {User, <<$:, Pass/binary>>} = erlang:split_binary(Auth, Pos-1),
+            PassUtf8 = unicode:characters_to_binary(binary_to_list(Pass), utf8),
+            {User, PassUtf8}
     end;
 parse_auth(<<"Bearer ", SToken/binary>>) ->
     Token = str:strip(SToken),
     {oauth, Token, []};
-parse_auth(<<_/binary>>) ->
-    invalid.
+parse_auth(<<_/binary>>) -> undefined.
 
 parse_urlencoded(S) ->
     parse_urlencoded(S, nokey, <<>>, key).
 
 parse_urlencoded(<<$%, Hi, Lo, Tail/binary>>, Last, Cur,
 		 State) ->
-    Hex = list_to_integer([Hi, Lo], 16),
+    Hex = hex_to_integer([Hi, Lo]),
     parse_urlencoded(Tail, Last, <<Cur/binary, Hex>>, State);
 parse_urlencoded(<<$&, Tail/binary>>, _Last, Cur, key) ->
     [{Cur, <<"">>} | parse_urlencoded(Tail,
@@ -894,6 +812,41 @@ parse_urlencoded(<<H, Tail/binary>>, Last, Cur, State) ->
 parse_urlencoded(<<>>, Last, Cur, _State) ->
     [{Last, Cur}];
 parse_urlencoded(undefined, _, _, _) -> [].
+
+
+url_encode(A) ->
+    url_encode(A, <<>>).
+
+url_encode(<<H:8, T/binary>>, Acc) when
+      (H >= $a andalso H =< $z) orelse
+      (H >= $A andalso H =< $Z) orelse
+      (H >= $0 andalso H =< $9) orelse
+      H == $_ orelse
+      H == $. orelse
+      H == $- orelse
+      H == $/ orelse
+      H == $: ->
+    url_encode(T, <<Acc/binary, H>>);
+url_encode(<<H:8, T/binary>>, Acc) ->
+    case integer_to_hex(H) of
+        [X, Y] -> url_encode(T, <<Acc/binary, $%, X, Y>>);
+        [X] -> url_encode(T, <<Acc/binary, $%, $0, X>>)
+    end;
+url_encode(<<>>, Acc) ->
+    Acc.
+
+
+integer_to_hex(I) ->
+    case catch erlang:integer_to_list(I, 16) of
+      {'EXIT', _} -> old_integer_to_hex(I);
+      Int -> Int
+    end.
+
+old_integer_to_hex(I) when I < 10 -> integer_to_list(I);
+old_integer_to_hex(I) when I < 16 -> [I - 10 + $A];
+old_integer_to_hex(I) when I >= 16 ->
+    N = trunc(I / 16),
+    old_integer_to_hex(N) ++ old_integer_to_hex(I rem 16).
 
 % The following code is mostly taken from yaws_ssl.erl
 
@@ -926,20 +879,6 @@ normalize_path([_Parent, <<"..">>|Path], Norm) ->
 normalize_path([Part | Path], Norm) ->
     normalize_path(Path, [Part|Norm]).
 
--spec get_certfile([proplists:property()]) -> binary() | undefined.
-get_certfile(Opts) ->
-    case lists:keyfind(certfile, 1, Opts) of
-	{_, CertFile} ->
-	    CertFile;
-	false ->
-	    case ejabberd_pkix:get_certfile(ejabberd_config:get_myname()) of
-		{ok, CertFile} ->
-		    CertFile;
-		error ->
-		    ejabberd_config:get_option({domain_certfile, ejabberd_config:get_myname()})
-	    end
-    end.
-
 transform_listen_option(captcha, Opts) ->
     [{captcha, true}|Opts];
 transform_listen_option(register, Opts) ->
@@ -962,26 +901,45 @@ transform_listen_option({request_handlers, Hs}, Opts) ->
 transform_listen_option(Opt, Opts) ->
     [Opt|Opts].
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-spec opt_type(trusted_proxies) -> fun((all | [binary()]) -> all | [binary()]);
+	      (atom()) -> [atom()].
 opt_type(trusted_proxies) ->
     fun (all) -> all;
-        (TPs) -> lists:filtermap(
-	    fun(TP) ->
-		case acl:parse_ip_netmask(iolist_to_binary(TP)) of
-		    {ok, Ip, Mask} -> {true, {Ip, Mask}};
-		    _ -> false
-		end
-	    end, TPs)
-    end;
+        (TPs) -> [iolist_to_binary(TP) || TP <- TPs] end;
 opt_type(_) -> [trusted_proxies].
 
-listen_opt_type(certfile = Opt) ->
+-spec listen_opt_type(tls) -> fun((boolean()) -> boolean());
+		     (certfile) -> fun((binary()) -> binary());
+		     (ciphers) -> fun((binary()) -> binary());
+		     (dhfile) -> fun((binary()) -> binary());
+		     (protocol_options) -> fun(([binary()]) -> binary());
+		     (tls_compression) -> fun((boolean()) -> boolean());
+		     (captcha) -> fun((boolean()) -> boolean());
+		     (register) -> fun((boolean()) -> boolean());
+		     (web_admin) -> fun((boolean()) -> boolean());
+		     (http_bind) -> fun((boolean()) -> boolean());
+		     (xmlrpc) -> fun((boolean()) -> boolean());
+		     (request_handlers) -> fun(([{binary(), atom()}]) ->
+						[{binary(), atom()}]);
+		     (default_host) -> fun((binary()) -> binary());
+		     (custom_headers) -> fun(([{binary(), binary()}]) ->
+					      [{binary(), binary()}]);
+		     (atom()) -> [atom()].
+listen_opt_type(tls) ->
+    fun(B) when is_boolean(B) -> B end;
+listen_opt_type(certfile) ->
     fun(S) ->
-	    ?WARNING_MSG("Listening option '~s' for ~s is deprecated, use "
-			 "'certfiles' global option instead", [Opt, ?MODULE]),
-	    {ok, File} = ejabberd_pkix:add_certfile(S),
-	    File
+	    ejabberd_pkix:add_certfile(S),
+	    iolist_to_binary(S)
     end;
+listen_opt_type(ciphers) ->
+    fun iolist_to_binary/1;
+listen_opt_type(dhfile) ->
+    fun misc:try_read_file/1;
+listen_opt_type(protocol_options) ->
+    fun(Options) -> str:join(Options, <<"|">>) end;
+listen_opt_type(tls_compression) ->
+    fun(B) when is_boolean(B) -> B end;
 listen_opt_type(captcha) ->
     fun(B) when is_boolean(B) -> B end;
 listen_opt_type(register) ->
@@ -992,8 +950,6 @@ listen_opt_type(http_bind) ->
     fun(B) when is_boolean(B) -> B end;
 listen_opt_type(xmlrpc) ->
     fun(B) when is_boolean(B) -> B end;
-listen_opt_type(tag) ->
-    fun(B) when is_binary(B) -> B end;
 listen_opt_type(request_handlers) ->
     fun(Hs) ->
 	    Hs1 = lists:map(fun
@@ -1010,24 +966,9 @@ listen_opt_type(request_handlers) ->
 	      end} || {Path, Mod} <- Hs2]
     end;
 listen_opt_type(default_host) ->
-    fun iolist_to_binary/1;
+    fun(A) -> A end;
 listen_opt_type(custom_headers) ->
-    fun expand_custom_headers/1.
-
-listen_options() ->
-    [{certfile, undefined},
-     {ciphers, undefined},
-     {dhfile, undefined},
-     {cafile, undefined},
-     {protocol_options, undefined},
-     {tls, false},
-     {tls_compression, false},
-     {captcha, false},
-     {register, false},
-     {web_admin, false},
-     {http_bind, false},
-     {xmlrpc, false},
-     {request_handlers, []},
-     {tag, <<>>},
-     {default_host, undefined},
-     {custom_headers, []}].
+    fun expand_custom_headers/1;
+listen_opt_type(_) ->
+    %% TODO
+    fun(A) -> A end.

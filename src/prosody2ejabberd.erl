@@ -4,7 +4,7 @@
 %%% Created : 20 Jan 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,7 +27,7 @@
 %% API
 -export([from_dir/1]).
 
--include("scram.hrl").
+-include("ejabberd.hrl").
 -include("xmpp.hrl").
 -include("logger.hrl").
 -include("mod_roster.hrl").
@@ -38,30 +38,23 @@
 %%% API
 %%%===================================================================
 from_dir(ProsodyDir) ->
-    case code:ensure_loaded(luerl) of
-	{module, _} ->
-	    case file:list_dir(ProsodyDir) of
-		{ok, HostDirs} ->
-		    lists:foreach(
-		      fun(HostDir) ->
-			      Host = list_to_binary(HostDir),
-			      lists:foreach(
-				fun(SubDir) ->
-					Path = filename:join(
-						 [ProsodyDir, HostDir, SubDir]),
-					convert_dir(Path, Host, SubDir)
-				end, ["vcard", "accounts", "roster",
-				      "private", "config", "offline",
-				      "privacy", "pep", "pubsub"])
-		      end, HostDirs);
-		{error, Why} = Err ->
-		    ?ERROR_MSG("failed to list ~s: ~s",
-			       [ProsodyDir, file:format_error(Why)]),
-		    Err
-	    end;
-	{error, _} = Err ->
-	    ?ERROR_MSG("The file 'luerl.beam' is not found: maybe "
-		       "ejabberd is not compiled with Lua support", []),
+    case file:list_dir(ProsodyDir) of
+	{ok, HostDirs} ->
+	    lists:foreach(
+	      fun(HostDir) ->
+		      Host = list_to_binary(HostDir),
+		      lists:foreach(
+			fun(SubDir) ->
+				Path = filename:join(
+					 [ProsodyDir, HostDir, SubDir]),
+				convert_dir(Path, Host, SubDir)
+			end, ["vcard", "accounts", "roster",
+			      "private", "config", "offline",
+			      "privacy", "pep", "pubsub"])
+	      end, HostDirs);
+	{error, Why} = Err ->
+	    ?ERROR_MSG("failed to list ~s: ~s",
+		       [ProsodyDir, file:format_error(Why)]),
 	    Err
     end.
 
@@ -169,6 +162,8 @@ convert_data(Host, "roster", User, [Data]) ->
 	  end, Data),
     lists:foreach(fun mod_roster:set_roster/1, Rosters);
 convert_data(Host, "private", User, [Data]) ->
+    LUser = jid:nodeprep(User),
+    LServer = jid:nameprep(Host),
     PrivData = lists:flatmap(
 		 fun({_TagXMLNS, Raw}) ->
 			 case deserialize(Raw) of
@@ -179,7 +174,7 @@ convert_data(Host, "private", User, [Data]) ->
 				 []
 			 end
 		 end, Data),
-    mod_private:set_data(jid:make(User, Host), PrivData);
+    mod_private:set_data(LUser, LServer, PrivData);
 convert_data(Host, "vcard", User, [Data]) ->
     LServer = jid:nameprep(Host),
     case deserialize(Data) of
@@ -189,16 +184,12 @@ convert_data(Host, "vcard", User, [Data]) ->
 	    ok
     end;
 convert_data(_Host, "config", _User, [Data]) ->
-    RoomJID1 = case proplists:get_value(<<"jid">>, Data, not_found) of
-	not_found -> proplists:get_value(<<"_jid">>, Data, room_jid_not_found);
-	A when is_binary(A) -> A
-    end,
-    RoomJID = jid:decode(RoomJID1),
+    RoomJID = jid:decode(proplists:get_value(<<"jid">>, Data, <<"">>)),
     Config = proplists:get_value(<<"_data">>, Data, []),
     RoomCfg = convert_room_config(Data),
     case proplists:get_bool(<<"persistent">>, Config) of
 	true when RoomJID /= error ->
-	    mod_muc:store_room(ejabberd_config:get_myname(), RoomJID#jid.lserver,
+	    mod_muc:store_room(?MYNAME, RoomJID#jid.lserver,
 			       RoomJID#jid.luser, RoomCfg);
 	_ ->
 	    ok
@@ -210,10 +201,8 @@ convert_data(Host, "offline", User, [Data]) ->
       fun({_, RawXML}) ->
 	      case deserialize(RawXML) of
 		  [El] ->
-		      case el_to_offline_msg(LUser, LServer, El) of
-			  [Msg] -> ok = mod_offline:store_offline_msg(Msg);
-			  [] -> ok
-		      end;
+		      Msg = el_to_offline_msg(LUser, LServer, El),
+		      ok = mod_offline:store_offline_msg(Msg);
 		  _ ->
 		      ok
 	      end
@@ -307,24 +296,22 @@ convert_roster_item(LUser, LServer, JIDstring, LuaList) ->
 	    InitR = #roster{usj = {LUser, LServer, LJID},
 			    us = {LUser, LServer},
 			    jid = LJID},
-	    lists:foldl(
-		  fun({<<"groups">>, Val}, [R]) ->
+	    Roster =
+		lists:foldl(
+		  fun({<<"groups">>, Val}, R) ->
 			  Gs = lists:flatmap(
 				 fun({G, true}) -> [G];
 				    (_) -> []
 				 end, Val),
-			  [R#roster{groups = Gs}];
-		     ({<<"subscription">>, Sub}, [R]) ->
-			  [R#roster{subscription = misc:binary_to_atom(Sub)}];
-		     ({<<"ask">>, <<"subscribe">>}, [R]) ->
-			  [R#roster{ask = out}];
-		     ({<<"name">>, Name}, [R]) ->
-			  [R#roster{name = Name}];
-		     ({<<"persist">>, false}, _) ->
-			  [];
-		     (_, []) ->
-			  []
-		  end, [InitR], LuaList)
+			  R#roster{groups = Gs};
+		     ({<<"subscription">>, Sub}, R) ->
+			  R#roster{subscription = misc:binary_to_atom(Sub)};
+		     ({<<"ask">>, <<"subscribe">>}, R) ->
+			  R#roster{ask = out};
+		     ({<<"name">>, Name}, R) ->
+			  R#roster{name = Name}
+		  end, InitR, LuaList),
+	    [Roster]
     catch _:{bad_jid, _} ->
 	    []
     end.
@@ -364,11 +351,9 @@ convert_room_config(Data) ->
 		end,
     [{affiliations, convert_room_affiliations(Data)},
      {allow_change_subj, proplists:get_bool(<<"changesubject">>, Config)},
-     {mam, proplists:get_bool(<<"archiving">>, Config)},
      {description, proplists:get_value(<<"description">>, Config, <<"">>)},
      {members_only,	proplists:get_bool(<<"members_only">>, Config)},
      {moderated, proplists:get_bool(<<"moderated">>, Config)},
-     {persistent, proplists:get_bool(<<"persistent">>, Config)},
      {anonymous, Anonymous}] ++ Pass ++ Subj.
 
 convert_privacy_item({_, Item}) ->
@@ -525,11 +510,6 @@ el_to_offline_msg(LUser, LServer, #xmlel{attrs = Attrs} = El) ->
 deserialize(L) ->
     deserialize(L, #xmlel{}, []).
 
-deserialize([{Other, _}|T], El, Acc)
-  when (Other == <<"key">>)
-       or (Other == <<"when">>)
-       or (Other == <<"with">>) ->
-    deserialize(T, El, Acc);
 deserialize([{<<"attr">>, Attrs}|T], El, Acc) ->
     deserialize(T, El#xmlel{attrs = Attrs ++ El#xmlel.attrs}, Acc);
 deserialize([{<<"name">>, Name}|T], El, Acc) ->

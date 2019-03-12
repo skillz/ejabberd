@@ -5,7 +5,7 @@
 %%% Created : 20 May 2008 by Badlop <badlop@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -240,6 +240,7 @@
 	 terminate/2, code_change/3]).
 
 -include("ejabberd_commands.hrl").
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
@@ -258,9 +259,9 @@ get_commands_spec() ->
                                         "documentation should be stored",
                                         "Regexp matching names of commands or modules "
                                         "that will be included inside generated document",
-                                        "Comma separated list of languages (chosen from java, perl, xmlrpc, json)"
+                                        "Comma separated list of languages (choosen from java, perl, xmlrpc, json)"
                                         "that will have example invocation include in markdown document"],
-                           result_desc = "0 if command failed, 1 when succeeded",
+                           result_desc = "0 if command failed, 1 when succedded",
                            args_example = ["/home/me/docs/api.html", "mod_admin", "java,json"],
                            result_example = ok},
         #ejabberd_commands{name = gen_markdown_doc_for_commands, tags = [documentation],
@@ -272,9 +273,9 @@ get_commands_spec() ->
                                         "documentation should be stored",
                                         "Regexp matching names of commands or modules "
                                         "that will be included inside generated document",
-                                        "Comma separated list of languages (chosen from java, perl, xmlrpc, json)"
+                                        "Comma separated list of languages (choosen from java, perl, xmlrpc, json)"
                                         "that will have example invocation include in markdown document"],
-                           result_desc = "0 if command failed, 1 when succeeded",
+                           result_desc = "0 if command failed, 1 when succedded",
                            args_example = ["/home/me/docs/api.html", "mod_admin", "java,json"],
                            result_example = ok}].
 
@@ -492,7 +493,6 @@ do_execute_command(Command, Arguments) ->
     Module = Command#ejabberd_commands.module,
     Function = Command#ejabberd_commands.function,
     ?DEBUG("Executing command ~p:~p with Args=~p", [Module, Function, Arguments]),
-    ejabberd_hooks:run(api_call, [Module, Function, Arguments]),
     apply(Module, Function, Arguments).
 
 -spec get_tags_commands() -> [{string(), [string()]}].
@@ -620,7 +620,9 @@ permission_addon() ->
       [{access, ejabberd_config:get_option(commands_admin_access, none)}],
       {get_exposed_commands(), []}}}].
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-spec opt_type(commands_admin_access) -> fun((any()) -> any());
+	      (commands) -> fun((list()) -> list());
+	      (atom()) -> [atom()].
 opt_type(commands_admin_access) -> fun acl:access_rules_validator/1;
 opt_type(commands) ->
     fun(V) when is_list(V) -> V end;

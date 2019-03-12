@@ -5,7 +5,7 @@
 %%% Created : 12 Nov 2012 by Evgeniy Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -38,9 +38,11 @@
 	 plain_password_required/1]).
 -export([passwd_schema/0]).
 
+-include("ejabberd.hrl").
 -include("ejabberd_sql_pt.hrl").
--include("scram.hrl").
--include("ejabberd_auth.hrl").
+
+-record(passwd, {us = {<<"">>, <<"">>} :: {binary(), binary()} | '$1',
+                 password = <<"">> :: binary() | scram() | '_'}).
 
 start(_Host) ->
     ok.
@@ -106,12 +108,9 @@ export(_Server) ->
     [{passwd,
       fun(Host, #passwd{us = {LUser, LServer}, password = Password})
          when LServer == Host ->
-              [?SQL("delete from users where username=%(LUser)s and %(LServer)H;"),
-               ?SQL_INSERT(
-                  "users",
-                  ["username=%(LUser)s",
-                   "server_host=%(LServer)s",
-                   "password=%(Password)s"])];
+              [?SQL("delete from users where username=%(LUser)s;"),
+               ?SQL("insert into users(username, password) "
+                    "values (%(LUser)s, %(Password)s);")];
          (_Host, _R) ->
               []
       end}].

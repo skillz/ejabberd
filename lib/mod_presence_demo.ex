@@ -17,13 +17,4 @@ defmodule ModPresenceDemo do
     info('Receive presence for #{user}')
     :none
   end
-
-  def depends(_host, _opts) do
-    []
-  end
-
-  def mod_options(_host) do
-    []
-  end
-  
 end

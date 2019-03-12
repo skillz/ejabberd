@@ -5,7 +5,7 @@
 %%% Created : 22 Aug 2005 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -51,6 +51,7 @@ modules() ->
     [ejabberd_auth,
      mod_announce,
      mod_caps,
+     mod_irc,
      mod_last,
      mod_mam,
      mod_muc,
@@ -58,7 +59,6 @@ modules() ->
      mod_privacy,
      mod_private,
      mod_pubsub,
-     mod_push,
      mod_roster,
      mod_shared_roster,
      mod_vcard].
@@ -73,28 +73,18 @@ export(Server, Output) ->
       end, Modules),
     close_output(Output, IO).
 
-export(Server, Output, Module1) ->
-    Module = case Module1 of
-		 mod_pubsub -> pubsub_db;
-		 _ -> Module1
-	     end,
-    SQLMod = gen_mod:db_mod(sql, Module),
+export(Server, Output, Module) ->
     LServer = jid:nameprep(iolist_to_binary(Server)),
     IO = prepare_output(Output),
     lists:foreach(
       fun({Table, ConvertFun}) ->
               case export(LServer, Table, IO, ConvertFun) of
                   {atomic, ok} -> ok;
-		  {aborted, {no_exists, _}} ->
-		      ?WARNING_MSG("Ignoring export for module ~s: "
-				   "Mnesia table ~s doesn't exist (most likely "
-				   "because the module is unused)",
-				   [Module1, Table]);
                   {aborted, Reason} ->
                       ?ERROR_MSG("Failed export for module ~p and table ~p: ~p",
                                  [Module, Table, Reason])
               end
-      end, SQLMod:export(Server)),
+      end, Module:export(Server)),
     close_output(Output, IO).
 
 delete(Server) ->
@@ -216,10 +206,6 @@ prepare_output(FileName, normal) when is_list(FileName) ->
     case file:open(FileName, [write, raw]) of
         {ok, Fd} ->
             Fd;
-        {error, eacces} ->
-            exit({"Not enough permission to the file or path", FileName});
-        {error, enoent} ->
-            exit({"Path does not exist", FileName});
         Err ->
             exit(Err)
     end;

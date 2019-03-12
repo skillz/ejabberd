@@ -5,7 +5,7 @@
 %%% Created :  1 Dec 2007 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -71,13 +71,13 @@ get_node(Host, Node, _From) ->
 get_node(Host, Node) ->
     case mnesia:read({pubsub_node, {Host, Node}}) of
 	[Record] when is_record(Record, pubsub_node) -> Record;
-	_ -> {error, xmpp:err_item_not_found(<<"Node not found">>, ejabberd_config:get_mylang())}
+	_ -> {error, xmpp:err_item_not_found(<<"Node not found">>, ?MYLANG)}
     end.
 
 get_node(Nidx) ->
     case mnesia:index_read(pubsub_node, Nidx, #pubsub_node.id) of
 	[Record] when is_record(Record, pubsub_node) -> Record;
-	_ -> {error, xmpp:err_item_not_found(<<"Node not found">>, ejabberd_config:get_mylang())}
+	_ -> {error, xmpp:err_item_not_found(<<"Node not found">>, ?MYLANG)}
     end.
 
 get_nodes(Host, _From) ->
@@ -86,26 +86,15 @@ get_nodes(Host, _From) ->
 get_nodes(Host) ->
     mnesia:match_object(#pubsub_node{nodeid = {Host, '_'}, _ = '_'}).
 
-get_parentnodes(Host, Node, _From) ->
-    case catch mnesia:read({pubsub_node, {Host, Node}}) of
-	[Record] when is_record(Record, pubsub_node) ->
-	    Record#pubsub_node.parents;
-	_ ->
-	    []
-    end.
+get_parentnodes(_Host, _Node, _From) ->
+    [].
 
+%% @doc <p>Default node tree does not handle parents, return a list
+%% containing just this node.</p>
 get_parentnodes_tree(Host, Node, _From) ->
-    get_parentnodes_tree(Host, Node, 0, []).
-get_parentnodes_tree(Host, Node, Level, Acc) ->
     case catch mnesia:read({pubsub_node, {Host, Node}}) of
-	[Record] when is_record(Record, pubsub_node) ->
-	    Tree = [{Level, [Record]}|Acc],
-	    case Record#pubsub_node.parents of
-		[Parent] -> get_parentnodes_tree(Host, Parent, Level+1, Tree);
-		_ -> Tree
-	    end;
-	_ ->
-	    Acc
+	[Record] when is_record(Record, pubsub_node) -> [{0, [Record]}];
+	_ -> []
     end.
 
 get_subnodes(Host, Node, _From) ->
@@ -189,7 +178,7 @@ create_node(Host, Node, Type, Owner, Options, Parents) ->
 		    {error, xmpp:err_forbidden()}
 	    end;
 	_ ->
-	    {error, xmpp:err_conflict(<<"Node already exists">>, ejabberd_config:get_mylang())}
+	    {error, xmpp:err_conflict(<<"Node already exists">>, ?MYLANG)}
     end.
 
 delete_node(Host, Node) ->

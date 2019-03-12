@@ -3,7 +3,7 @@
 %%% Created : 15 Jul 2017 by Holger Weiss <holger@zedat.fu-berlin.de>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -220,7 +220,7 @@ recv_test_message(Config) ->
 
 handle_notification(Config) ->
     From = server_jid(Config),
-    Item = #ps_item{sub_els = [xmpp:encode(#push_notification{})]},
+    Item = #ps_item{xml_els = [xmpp:encode(#push_notification{})]},
     Publish = #ps_publish{node = ?PUSH_NODE, items = [Item]},
     XData = #xdata{type = submit, fields = ?PUSH_XDATA_FIELDS},
     PubSub = #pubsub{publish = Publish, publish_options = XData},

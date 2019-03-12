@@ -5,7 +5,7 @@
 %%% Created : 16 Oct 2014 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -28,19 +28,17 @@
 -behaviour(ejabberd_config).
 
 -export([start/1, stop/1, get/2, get/3, post/4, delete/2,
-         put/4, patch/4, request/6, with_retry/4,
-         encode_json/1, opt_type/1]).
+	 put/4, patch/4, request/6, with_retry/4, opt_type/1]).
 
 -include("logger.hrl").
 
 -define(HTTP_TIMEOUT, 10000).
 -define(CONNECT_TIMEOUT, 8000).
--define(CONTENT_TYPE, "application/json").
 
 start(Host) ->
-    application:start(inets),
-    Size = ejabberd_config:get_option({ext_api_http_pool_size, Host}, 100),
-    httpc:set_options([{max_sessions, Size}]).
+    p1_http:start(),
+    Pool_size = ejabberd_config:get_option({ext_api_http_pool_size, Host}, 100),
+    p1_http:set_pool_size(Pool_size).
 
 stop(_Host) ->
     ok.
@@ -60,48 +58,41 @@ with_retry(Method, Args, Retries, MaxRetries, Backoff) ->
     end.
 
 get(Server, Path) ->
-    request(Server, get, Path, [], ?CONTENT_TYPE, <<>>).
+    request(Server, get, Path, [], "application/json", <<>>).
 get(Server, Path, Params) ->
-    request(Server, get, Path, Params, ?CONTENT_TYPE, <<>>).
+    request(Server, get, Path, Params, "application/json", <<>>).
 
 delete(Server, Path) ->
-    request(Server, delete, Path, [], ?CONTENT_TYPE, <<>>).
+    request(Server, delete, Path, [], "application/json", <<>>).
 
 post(Server, Path, Params, Content) ->
     Data = encode_json(Content),
-    request(Server, post, Path, Params, ?CONTENT_TYPE, Data).
+    request(Server, post, Path, Params, "application/json", Data).
 
 put(Server, Path, Params, Content) ->
     Data = encode_json(Content),
-    request(Server, put, Path, Params, ?CONTENT_TYPE, Data).
+    request(Server, put, Path, Params, "application/json", Data).
 
 patch(Server, Path, Params, Content) ->
     Data = encode_json(Content),
-    request(Server, patch, Path, Params, ?CONTENT_TYPE, Data).
+    request(Server, patch, Path, Params, "application/json", Data).
 
 request(Server, Method, Path, Params, Mime, Data) ->
-    URI = to_list(url(Server, Path, Params)),
+    URI = url(Server, Path, Params),
     Opts = [{connect_timeout, ?CONNECT_TIMEOUT},
             {timeout, ?HTTP_TIMEOUT}],
     Hdrs = [{"connection", "keep-alive"},
-            {"Accept", "application/json"},
-	    {"User-Agent", "ejabberd"}]
-	   ++ custom_headers(Server),
-    Req = if
-              (Method =:= post) orelse (Method =:= patch) orelse (Method =:= put) orelse (Method =:= delete) ->
-                  {URI, Hdrs, to_list(Mime), Data};
-              true ->
-                  {URI, Hdrs}
-          end,
+            {"content-type", Mime},
+            {"User-Agent", "ejabberd"}],
     Begin = os:timestamp(),
-    Result = try httpc:request(Method, Req, Opts, [{body_format, binary}]) of
-        {ok, {{_, Code, _}, _, <<>>}} ->
+    Result = case catch p1_http:request(Method, URI, Hdrs, Data, Opts) of
+        {ok, Code, _, <<>>} ->
             {ok, Code, []};
-        {ok, {{_, Code, _}, _, <<" ">>}} ->
+        {ok, Code, _, <<" ">>} ->
             {ok, Code, []};
-        {ok, {{_, Code, _}, _, <<"\r\n">>}} ->
+        {ok, Code, _, <<"\r\n">>} ->
             {ok, Code, []};
-        {ok, {{_, Code, _}, _, Body}} ->
+        {ok, Code, _, Body} ->
             try jiffy:decode(Body) of
                 JSon ->
                     {ok, Code, JSon}
@@ -119,9 +110,8 @@ request(Server, Method, Path, Params, Mime, Data) ->
                        "** URI = ~s~n"
                        "** Err = ~p",
                        [URI, Reason]),
-            {error, {http_error, {error, Reason}}}
-        catch
-        exit:Reason ->
+            {error, {http_error, {error, Reason}}};
+        {'EXIT', Reason} ->
             ?ERROR_MSG("HTTP request failed:~n"
                        "** URI = ~s~n"
                        "** Err = ~p",
@@ -134,27 +124,22 @@ request(Server, Method, Path, Params, Mime, Data) ->
             End = os:timestamp(),
             Elapsed = timer:now_diff(End, Begin) div 1000, %% time in ms
             ejabberd_hooks:run(backend_api_response_time, Server,
-                               [Server, Method, Path, Elapsed]);
+			       [Server, Method, Path, Elapsed]);
         {error, {http_error,{error,timeout}}} ->
             ejabberd_hooks:run(backend_api_timeout, Server,
-                               [Server, Method, Path]);
+			       [Server, Method, Path]);
         {error, {http_error,{error,connect_timeout}}} ->
             ejabberd_hooks:run(backend_api_timeout, Server,
-                               [Server, Method, Path]);
+			       [Server, Method, Path]);
         {error, _} ->
             ejabberd_hooks:run(backend_api_error, Server,
-                               [Server, Method, Path])
+			       [Server, Method, Path])
     end,
     Result.
 
 %%%----------------------------------------------------------------------
 %%% HTTP helpers
 %%%----------------------------------------------------------------------
-
-to_list(V) when is_binary(V) ->
-    binary_to_list(V);
-to_list(V) when is_list(V) ->
-    V.
 
 encode_json(Content) ->
     case catch jiffy:encode(Content) of
@@ -168,63 +153,35 @@ encode_json(Content) ->
             Encoded
     end.
 
-custom_headers(Server) ->
-  case ejabberd_config:get_option({ext_api_headers, Server},
-                                  <<>>) of
-        <<>> ->
-            [];
-        Hdrs ->
-            lists:foldr(fun(Hdr, Acc) ->
-                case binary:split(Hdr, <<":">>) of
-                    [K, V] -> [{binary_to_list(K), binary_to_list(V)}|Acc];
-                    _ -> Acc
-                end
-            end, [], binary:split(Hdrs, <<",">>))
-    end.
-
 base_url(Server, Path) ->
-    BPath = case iolist_to_binary(Path) of
+    Tail = case iolist_to_binary(Path) of
         <<$/, Ok/binary>> -> Ok;
         Ok -> Ok
     end,
-    Url = case BPath of
-        <<"http", _/binary>> -> BPath;
+    case Tail of
+        <<"http", _Url/binary>> -> Tail;
         _ ->
             Base = ejabberd_config:get_option({ext_api_url, Server},
                                               <<"http://localhost/api">>),
-            case binary:last(Base) of
-                $/ -> <<Base/binary, BPath/binary>>;
-                _ -> <<Base/binary, "/", BPath/binary>>
-            end
-    end,
-    case binary:last(Url) of
-        47 -> binary_part(Url, 0, size(Url)-1);
-        _ -> Url
+            <<Base/binary, "/", Tail/binary>>
     end.
 
-url(Url, []) ->
-    Url;
-url(Url, Params) ->
-    L = [<<"&", (iolist_to_binary(Key))/binary, "=",
-          (misc:url_encode(Value))/binary>>
-            || {Key, Value} <- Params],
-    <<$&, Encoded/binary>> = iolist_to_binary(L),
-    <<Url/binary, $?, Encoded/binary>>.
+url(Server, Path, []) ->
+    binary_to_list(base_url(Server, Path));
 url(Server, Path, Params) ->
-    case binary:split(base_url(Server, Path), <<"?">>) of
-        [Url] ->
-            url(Url, Params);
-        [Url, Extra] ->
-            Custom = [list_to_tuple(binary:split(P, <<"=">>))
-                      || P <- binary:split(Extra, <<"&">>, [global])],
-            url(Url, Custom++Params)
-    end.
+    Base = base_url(Server, Path),
+    [<<$&, ParHead/binary>> | ParTail] =
+        [<<"&", (iolist_to_binary(Key))/binary, "=",
+	  (ejabberd_http:url_encode(Value))/binary>>
+            || {Key, Value} <- Params],
+    Tail = iolist_to_binary([ParHead | ParTail]),
+    binary_to_list(<<Base/binary, $?, Tail/binary>>).
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-spec opt_type(ext_api_http_pool_size) -> fun((pos_integer()) -> pos_integer());
+	      (ext_api_url) -> fun((binary()) -> binary());
+	      (atom()) -> [atom()].
 opt_type(ext_api_http_pool_size) ->
     fun (X) when is_integer(X), X > 0 -> X end;
 opt_type(ext_api_url) ->
     fun (X) -> iolist_to_binary(X) end;
-opt_type(ext_api_headers) ->
-    fun (X) -> iolist_to_binary(X) end;
-opt_type(_) -> [ext_api_http_pool_size, ext_api_url, ext_api_headers].
+opt_type(_) -> [ext_api_http_pool_size, ext_api_url].

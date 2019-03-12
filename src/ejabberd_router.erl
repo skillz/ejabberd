@@ -5,7 +5,7 @@
 %%% Created : 27 Nov 2002 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -37,9 +37,6 @@
 %% API
 -export([route/1,
 	 route_error/2,
-	 route_iq/2,
-	 route_iq/3,
-	 route_iq/4,
 	 register_route/2,
 	 register_route/3,
 	 register_route/4,
@@ -65,13 +62,10 @@
 -export([route/3, route_error/4]).
 -deprecated([{route, 3}, {route_error, 4}]).
 
-%% This value is used in SIP and Megaco for a transaction lifetime.
--define(IQ_TIMEOUT, 32000).
-
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("ejabberd_router.hrl").
 -include("xmpp.hrl").
--include("ejabberd_stacktrace.hrl").
 
 -callback init() -> any().
 -callback register_route(binary(), binary(), local_hint(),
@@ -91,9 +85,9 @@ start_link() ->
 -spec route(stanza()) -> ok.
 route(Packet) ->
     try do_route(Packet)
-    catch ?EX_RULE(E, R, St) ->
+    catch E:R ->
 	    ?ERROR_MSG("failed to route packet:~n~s~nReason = ~p",
-		       [xmpp:pp(Packet), {E, {R, ?EX_STACK(St)}}])
+		       [xmpp:pp(Packet), {E, {R, erlang:get_stacktrace()}}])
     end.
 
 -spec route(jid(), jid(), xmlel() | stanza()) -> ok.
@@ -141,20 +135,6 @@ route_error(From, To, Packet, #stanza_error{} = Err) ->
        true ->
 	    route(From, To, xmpp:make_error(Packet, Err))
     end.
-
--spec route_iq(iq(), fun((iq() | timeout) -> any())) -> ok.
-route_iq(IQ, Fun) ->
-    route_iq(IQ, Fun, undefined, ?IQ_TIMEOUT).
-
--spec route_iq(iq(), term(), pid() | atom()) -> ok.
-route_iq(IQ, State, Proc) ->
-    route_iq(IQ, State, Proc, ?IQ_TIMEOUT).
-
--spec route_iq(iq(), term(), pid() | atom(), undefined | non_neg_integer()) -> ok.
-route_iq(IQ, State, Proc, undefined) ->
-    route_iq(IQ, State, Proc, ?IQ_TIMEOUT);
-route_iq(IQ, State, Proc, Timeout) ->
-    ejabberd_iq:route(IQ, Proc, State, Timeout).
 
 -spec register_route(binary(), binary()) -> ok.
 register_route(Domain, ServerHost) ->
@@ -306,8 +286,12 @@ is_my_host(Domain) ->
     end.
 
 -spec process_iq(iq()) -> any().
-process_iq(IQ) ->
-    gen_iq_handler:handle(IQ).
+process_iq(#iq{to = To} = IQ) ->
+    if To#jid.luser == <<"">> ->
+	    ejabberd_local:process_iq(IQ);
+       true ->
+	    ejabberd_sm:process_iq(IQ)
+    end.
 
 -spec config_reloaded() -> ok.
 config_reloaded() ->
@@ -355,23 +339,18 @@ do_route(OrigPacket) ->
 	drop ->
 	    ok;
 	Packet ->
-	    case ejabberd_iq:dispatch(Packet) of
-		true ->
-		    ok;
-		false ->
-		    To = xmpp:get_to(Packet),
-		    LDstDomain = To#jid.lserver,
-		    case find_routes(LDstDomain) of
-			[] ->
-			    ejabberd_s2s:route(Packet);
-			[Route] ->
-			    do_route(Packet, Route);
-			Routes ->
-			    From = xmpp:get_from(Packet),
-			    balancing_route(From, To, Packet, Routes)
-		    end,
-		    ok
-	    end
+	    To = xmpp:get_to(Packet),
+	    LDstDomain = To#jid.lserver,
+	    case find_routes(LDstDomain) of
+		[] ->
+		    ejabberd_s2s:route(Packet);
+		[Route] ->
+		    do_route(Packet, Route);
+		Routes ->
+		    From = xmpp:get_from(Packet),
+		    balancing_route(From, To, Packet, Routes)
+	    end,
+	    ok
     end.
 
 -spec do_route(stanza(), #route{}) -> any().
@@ -480,7 +459,7 @@ cache_opts() ->
 	       end,
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
--spec clean_cache(node()) -> non_neg_integer().
+-spec clean_cache(node()) -> ok.
 clean_cache(Node) ->
     ets_cache:filter(
       ?ROUTES_CACHE,
@@ -499,7 +478,16 @@ clean_cache(Node) ->
 clean_cache() ->
     ejabberd_cluster:eval_everywhere(?MODULE, clean_cache, [node()]).
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-type domain_balancing() :: random | source | destination |
+			    bare_source | bare_destination.
+-spec opt_type(domain_balancing) -> fun((domain_balancing()) -> domain_balancing());
+	      (domain_balancing_component_number) -> fun((pos_integer()) -> pos_integer());
+	      (router_db_type) -> fun((atom()) -> atom());
+	      (router_use_cache) -> fun((boolean()) -> boolean());
+	      (router_cache_missed) -> fun((boolean()) -> boolean());
+	      (router_cache_size) -> fun((timeout()) -> timeout());
+	      (router_cache_life_time) -> fun((timeout()) -> timeout());
+	      (atom()) -> [atom()].
 opt_type(domain_balancing) ->
     fun (random) -> random;
 	(source) -> source;

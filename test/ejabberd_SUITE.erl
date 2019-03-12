@@ -3,7 +3,7 @@
 %%% Created :  2 Jun 2013 by Evgeniy Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -55,9 +55,8 @@ init_per_suite(Config) ->
     {ok, _} = file:copy(ExtAuthScript, filename:join([CWD, "extauth.py"])),
     {ok, _} = ldap_srv:start(LDIFFile),
     inet_db:add_host({127,0,0,1}, [binary_to_list(?S2S_VHOST),
-				   binary_to_list(?MNESIA_VHOST),
-				   binary_to_list(?UPLOAD_VHOST)]),
-    inet_db:set_domain(binary_to_list(p1_rand:get_string())),
+				   binary_to_list(?MNESIA_VHOST)]),
+    inet_db:set_domain(binary_to_list(randoms:get_string())),
     inet_db:set_lookup([file, native]),
     start_ejabberd(NewConfig),
     NewConfig.
@@ -65,13 +64,13 @@ init_per_suite(Config) ->
 start_ejabberd(Config) ->
     case proplists:get_value(backends, Config) of
         all ->
-            {ok, _} = application:ensure_all_started(ejabberd, transient);
+            ok = application:start(ejabberd, transient);
         Backends when is_list(Backends) ->
             Hosts = lists:map(fun(Backend) -> Backend ++ ".localhost" end, Backends),
             application:load(ejabberd),
             AllHosts = Hosts ++ ["localhost"],    %% We always need localhost for the generic no_db tests
             application:set_env(ejabberd, hosts, AllHosts),
-            {ok, _} = application:ensure_all_started(ejabberd, transient)
+            ok = application:start(ejabberd, transient)
     end.
 
 end_per_suite(_Config) ->
@@ -211,7 +210,6 @@ init_per_testcase(stop_ejabberd, Config) ->
 			set_opt(anonymous, true, Config)),
     open_session(bind(auth(connect(NewConfig))));
 init_per_testcase(TestCase, OrigConfig) ->
-    ct:print(80, "Testcase '~p' starting", [TestCase]),
     Test = atom_to_list(TestCase),
     IsMaster = lists:suffix("_master", Test),
     IsSlave = lists:suffix("_slave", Test),
@@ -227,7 +225,7 @@ init_per_testcase(TestCase, OrigConfig) ->
 		   anonymous ->
 		       <<"">>;
 		   legacy_auth ->
-		       p1_rand:get_string();
+		       randoms:get_string();
 		   _ ->
 		       ?config(resource, OrigConfig)
 	       end,
@@ -363,6 +361,7 @@ no_db_tests() ->
        unsupported_query,
        bad_nonza,
        invalid_from,
+       legacy_iq,
        ping,
        version,
        time,
@@ -388,8 +387,7 @@ no_db_tests() ->
      muc_tests:master_slave_cases(),
      proxy65_tests:single_cases(),
      proxy65_tests:master_slave_cases(),
-     replaced_tests:master_slave_cases(),
-     upload_tests:single_cases()].
+     replaced_tests:master_slave_cases()].
 
 db_tests(riak) ->
     %% No support for mod_pubsub
@@ -401,7 +399,7 @@ db_tests(riak) ->
        presence_broadcast,
        last,
        roster_tests:single_cases(),
-       %%private_tests:single_cases(),
+       private,
        privacy_tests:single_cases(),
        vcard_tests:single_cases(),
        muc_tests:single_cases(),
@@ -424,7 +422,7 @@ db_tests(DB) when DB == mnesia; DB == redis ->
        presence_broadcast,
        last,
        roster_tests:single_cases(),
-       private_tests:single_cases(),
+       private,
        privacy_tests:single_cases(),
        vcard_tests:single_cases(),
        pubsub_tests:single_cases(),
@@ -455,14 +453,13 @@ db_tests(_) ->
        presence_broadcast,
        last,
        roster_tests:single_cases(),
-       private_tests:single_cases(),
+       private,
        privacy_tests:single_cases(),
        vcard_tests:single_cases(),
        pubsub_tests:single_cases(),
        muc_tests:single_cases(),
        offline_tests:single_cases(),
        mam_tests:single_cases(),
-       push_tests:single_cases(),
        test_unregister]},
      muc_tests:master_slave_cases(),
      privacy_tests:master_slave_cases(),
@@ -472,8 +469,7 @@ db_tests(_) ->
      mam_tests:master_slave_cases(),
      vcard_tests:master_slave_cases(),
      announce_tests:master_slave_cases(),
-     carbons_tests:master_slave_cases(),
-     push_tests:master_slave_cases()].
+     carbons_tests:master_slave_cases()].
 
 ldap_tests() ->
     [{ldap_tests, [sequence],
@@ -602,7 +598,7 @@ test_connect_bad_ns_stream(Config) ->
 test_connect_bad_lang(Config) ->
     Lang = iolist_to_binary(lists:duplicate(36, $x)),
     Config0 = init_stream(set_opt(lang, Lang, Config)),
-    ?recv1(#stream_error{reason = 'invalid-xml'}),
+    ?recv1(#stream_error{reason = 'policy-violation'}),
     ?recv1({xmlstreamend, <<"stream:stream">>}),
     close_socket(Config0).
 
@@ -718,7 +714,7 @@ bad_nonza(Config) ->
     disconnect(Config).
 
 invalid_from(Config) ->
-    send(Config, #message{from = jid:make(p1_rand:get_string())}),
+    send(Config, #message{from = jid:make(randoms:get_string())}),
     ?recv1(#stream_error{reason = 'invalid-from'}),
     ?recv1({xmlstreamend, <<"stream:stream">>}),
     close_socket(Config).
@@ -738,8 +734,8 @@ test_missing_to(Config) ->
     close_socket(Config).
 
 test_invalid_from(Config) ->
-    From = jid:make(p1_rand:get_string()),
-    To = jid:make(p1_rand:get_string()),
+    From = jid:make(randoms:get_string()),
+    To = jid:make(randoms:get_string()),
     send(Config, #message{from = From, to = To}),
     ?recv1(#stream_error{reason = 'invalid-from'}),
     ?recv1({xmlstreamend, <<"stream:stream">>}),
@@ -780,7 +776,7 @@ s2s_required_trusted(Config) ->
 s2s_ping(Config) ->
     From = my_jid(Config),
     To = jid:make(?MNESIA_VHOST),
-    ID = p1_rand:get_string(),
+    ID = randoms:get_string(),
     ejabberd_s2s:route(#iq{from = From, to = To, id = ID,
 			   type = get, sub_els = [#ping{}]}),
     #iq{type = result, id = ID, sub_els = []} = recv_iq(Config),
@@ -901,12 +897,13 @@ presence(Config) ->
     disconnect(Config).
 
 presence_broadcast(Config) ->
-    Feature = <<"p1:tmp:", (p1_rand:get_string())/binary>>,
+    Feature = <<"p1:tmp:", (randoms:get_string())/binary>>,
     Ver = crypto:hash(sha, ["client", $/, "bot", $/, "en", $/,
                             "ejabberd_ct", $<, Feature, $<]),
     B64Ver = base64:encode(Ver),
     Node = <<(?EJABBERD_CT_URI)/binary, $#, B64Ver/binary>>,
     Server = ?config(server, Config),
+    ServerJID = server_jid(Config),
     Info = #disco_info{identities =
 			   [#identity{category = <<"client">>,
 				      type = <<"bot">>,
@@ -921,12 +918,12 @@ presence_broadcast(Config) ->
     %% 2) welcome message
     %% 3) presence broadcast
     IQ = #iq{type = get,
-	     from = JID,
+	     from = ServerJID,
 	     sub_els = [#disco_info{node = Node}]} = recv_iq(Config),
     #message{type = normal} = recv_message(Config),
     #presence{from = JID, to = JID} = recv_presence(Config),
     send(Config, #iq{type = result, id = IQ#iq.id,
-		     to = JID, sub_els = [Info]}),
+		     to = ServerJID, sub_els = [Info]}),
     %% We're trying to read our feature from ejabberd database
     %% with exponential back-off as our IQ response may be delayed.
     [Feature] =
@@ -937,6 +934,14 @@ presence_broadcast(Config) ->
 	     (_, Acc) ->
 		  Acc
 	  end, [], [0, 100, 200, 2000, 5000, 10000]),
+    disconnect(Config).
+
+legacy_iq(Config) ->
+    true = is_feature_advertised(Config, ?NS_EVENT),
+    ServerJID = server_jid(Config),
+    #iq{type = result, sub_els = []} =
+	send_recv(Config, #iq{to = ServerJID, type = get,
+			      sub_els = [#xevent{}]}),
     disconnect(Config).
 
 ping(Config) ->
@@ -976,6 +981,33 @@ disco(Config) ->
                             #iq{type = get, to = JID,
                                 sub_els = [#disco_info{node = Node}]})
       end, Items),
+    disconnect(Config).
+
+private(Config) ->
+    Conference = #bookmark_conference{name = <<"Some name">>,
+                                      autojoin = true,
+                                      jid = jid:make(
+                                              <<"some">>,
+                                              <<"some.conference.org">>,
+                                              <<>>)},
+    Storage = #bookmark_storage{conference = [Conference]},
+    StorageXMLOut = xmpp:encode(Storage),
+    WrongEl = #xmlel{name = <<"wrong">>},
+    #iq{type = error} =
+        send_recv(Config, #iq{type = get,
+			      sub_els = [#private{xml_els = [WrongEl]}]}),
+    #iq{type = result, sub_els = []} =
+        send_recv(
+          Config, #iq{type = set,
+                      sub_els = [#private{xml_els = [WrongEl, StorageXMLOut]}]}),
+    #iq{type = result,
+        sub_els = [#private{xml_els = [StorageXMLIn]}]} =
+        send_recv(
+          Config,
+          #iq{type = get,
+              sub_els = [#private{xml_els = [xmpp:encode(
+                                               #bookmark_storage{})]}]}),
+    Storage = xmpp:decode(StorageXMLIn),
     disconnect(Config).
 
 last(Config) ->
@@ -1048,21 +1080,9 @@ create_sql_tables(sqlite, _BaseDir) ->
 create_sql_tables(Type, BaseDir) ->
     {VHost, File} = case Type of
                         mysql ->
-                            Path = case ejabberd_sql:use_new_schema() of
-                                true ->
-                                    "mysql.new.sql";
-                                false ->
-                                    "mysql.sql"
-                            end,
-                            {?MYSQL_VHOST, Path};
+                            {?MYSQL_VHOST, "mysql.sql"};
                         pgsql ->
-                            Path = case ejabberd_sql:use_new_schema() of
-                                true ->
-                                    "pg.new.sql";
-                                false ->
-                                    "pg.sql"
-                            end,
-                            {?PGSQL_VHOST, Path}
+                            {?PGSQL_VHOST, "pg.sql"}
                     end,
     SQLFile = filename:join([BaseDir, "sql", File]),
     CreationQueries = read_sql_queries(SQLFile),

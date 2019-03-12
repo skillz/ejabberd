@@ -5,7 +5,7 @@
 %%% Created :  5 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -63,10 +63,11 @@
 	 webadmin_user/4,
 	 webadmin_user_parse_query/5]).
 
--export([mod_opt_type/1, mod_options/1, depends/2]).
+-export([mod_opt_type/1, depends/2]).
 
 -deprecated({get_queue_length,2}).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 
 -include("xmpp.hrl").
@@ -101,14 +102,13 @@
 -callback remove_all_messages(binary(), binary()) -> {atomic, any()}.
 -callback count_messages(binary(), binary()) -> non_neg_integer().
 
--optional_callbacks([remove_expired_messages/1, remove_old_messages/2]).
-
 depends(_Host, _Opts) ->
     [].
 
 start(Host, Opts) ->
     Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
     Mod:init(Host, Opts),
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, gen_iq_handler:iqdisc(Host)),
     ejabberd_hooks:add(offline_message_hook, Host, ?MODULE,
 		       store_packet, 50),
     ejabberd_hooks:add(c2s_self_presence, Host, ?MODULE, c2s_self_presence, 50),
@@ -132,7 +132,7 @@ start(Host, Opts) ->
     ejabberd_hooks:add(webadmin_user_parse_query, Host,
 		       ?MODULE, webadmin_user_parse_query, 50),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_FLEX_OFFLINE,
-				  ?MODULE, handle_offline_query).
+				  ?MODULE, handle_offline_query, IQDisc).
 
 stop(Host) ->
     ejabberd_hooks:delete(offline_message_hook, Host,
@@ -162,6 +162,13 @@ reload(Host, NewOpts, OldOpts) ->
 	    NewMod:init(Host, NewOpts);
        true ->
 	    ok
+    end,
+    case gen_mod:is_equal_opt(iqdisc, NewOpts, OldOpts, gen_iq_handler:iqdisc(Host)) of
+	{false, IQDisc, _} ->
+	    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_FLEX_OFFLINE,
+					  ?MODULE, handle_offline_query, IQDisc);
+	true ->
+	    ok
     end.
 
 -spec store_offline_msg(#offline_msg{}) -> ok | {error, full | any()}.
@@ -180,7 +187,8 @@ store_offline_msg(#offline_msg{us = {User, Server}} = Msg) ->
     end.
 
 get_max_user_messages(User, Server) ->
-    Access = gen_mod:get_module_opt(Server, ?MODULE, access_max_user_messages),
+    Access = gen_mod:get_module_opt(Server, ?MODULE, access_max_user_messages,
+				    max_user_offline_messages),
     case acl:match_rule(Server, Access, jid:make(User, Server)) of
 	Max when is_integer(Max) -> Max;
 	infinity -> infinity;
@@ -375,26 +383,18 @@ need_to_store(LServer, #message{type = Type} = Packet) ->
 		    true;
 		no_store ->
 		    false;
+		none when Type == headline; Type == groupchat ->
+		    false;
 		none ->
-		    Store = case Type of
-				groupchat ->
-				    gen_mod:get_module_opt(
-				      LServer, ?MODULE, store_groupchat);
-				headline ->
-				    false;
-				_ ->
-				    true
-			    end,
-		    case {Store, gen_mod:get_module_opt(
-				   LServer, ?MODULE, store_empty_body)} of
-			{false, _} ->
-			    false;
-			{_, true} ->
+		    case gen_mod:get_module_opt(
+			   LServer, ?MODULE, store_empty_body,
+			   unless_chat_state) of
+			true ->
 			    true;
-			{_, false} ->
+			false ->
 			    Packet#message.body /= [];
-			{_, unless_chat_state} ->
-			    not misc:is_standalone_chat_state(Packet)
+			unless_chat_state ->
+			    not xmpp_util:is_standalone_chat_state(Packet)
 		    end
 	    end;
 	true ->
@@ -492,8 +492,8 @@ c2s_self_presence({_Pres, #{resend_offline := false}} = Acc) ->
     Acc;
 c2s_self_presence({#presence{type = available} = NewPres, State} = Acc) ->
     NewPrio = get_priority_from_presence(NewPres),
-    LastPrio = case maps:get(pres_last, State, undefined) of
-		   undefined -> -1;
+    LastPrio = case maps:get(pres_last, State, error) of
+		   error -> -1;
 		   LastPres -> get_priority_from_presence(LastPres)
 	       end,
     if LastPrio < 0 andalso NewPrio >= 0 ->
@@ -553,18 +553,12 @@ privacy_check_packet(#{lserver := LServer} = State, Pkt, Dir) ->
 remove_expired_messages(Server) ->
     LServer = jid:nameprep(Server),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
-    case erlang:function_exported(Mod, remove_expired_messages, 1) of
-	true -> Mod:remove_expired_messages(LServer);
-	false -> erlang:error(not_implemented)
-    end.
+    Mod:remove_expired_messages(LServer).
 
 remove_old_messages(Days, Server) ->
     LServer = jid:nameprep(Server),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
-    case erlang:function_exported(Mod, remove_old_messages, 2) of
-	true -> Mod:remove_old_messages(Days, LServer);
-	false -> erlang:error(not_implemented)
-    end.
+    Mod:remove_old_messages(Days, LServer).
 
 -spec remove_user(binary(), binary()) -> ok.
 remove_user(User, Server) ->
@@ -603,8 +597,7 @@ get_offline_els(LUser, LServer) ->
 -spec offline_msg_to_route(binary(), #offline_msg{}) ->
 				  {route, message()} | error.
 offline_msg_to_route(LServer, #offline_msg{from = From, to = To} = R) ->
-    CodecOpts = ejabberd_config:codec_options(LServer),
-    try xmpp:decode(R#offline_msg.packet, ?NS_CLIENT, CodecOpts) of
+    try xmpp:decode(R#offline_msg.packet, ?NS_CLIENT, [ignore_els]) of
 	Pkt ->
 	    Pkt1 = xmpp:set_from_to(Pkt, From, To),
 	    Pkt2 = add_delay_info(Pkt1, LServer, R#offline_msg.timestamp),
@@ -619,11 +612,10 @@ offline_msg_to_route(LServer, #offline_msg{from = From, to = To} = R) ->
 -spec read_messages(binary(), binary()) -> [{binary(), message()}].
 read_messages(LUser, LServer) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
-    CodecOpts = ejabberd_config:codec_options(LServer),
     lists:flatmap(
       fun({Seq, From, To, TS, El}) ->
 	      Node = integer_to_binary(Seq),
-	      try xmpp:decode(El, ?NS_CLIENT, CodecOpts) of
+	      try xmpp:decode(El, ?NS_CLIENT, [ignore_els]) of
 		  Pkt ->
 		      Node = integer_to_binary(Seq),
 		      Pkt1 = add_delay_info(Pkt, LServer, TS),
@@ -714,22 +706,19 @@ user_queue_parse_query(LUser, LServer, Query) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     case lists:keysearch(<<"delete">>, 1, Query) of
 	{value, _} ->
-	    user_queue_parse_query(LUser, LServer, Query, Mod);
-	_ ->
-	    nothing
-    end.
-
-user_queue_parse_query(LUser, LServer, Query, Mod) ->
-    case lists:keytake(<<"selected">>, 1, Query) of
-	{value, {_, Seq}, Query2} ->
-	    case catch binary_to_integer(Seq) of
-		I when is_integer(I), I>=0 ->
-		    Mod:remove_message(LUser, LServer, I);
-		_ ->
+	    case lists:keyfind(<<"selected">>, 1, Query) of
+		{_, Seq} ->
+		    case catch binary_to_integer(Seq) of
+			I when is_integer(I), I>=0 ->
+			    Mod:remove_message(LUser, LServer, I),
+			    ok;
+			_ ->
+			    nothing
+		    end;
+		false ->
 		    nothing
-	    end,
-	    user_queue_parse_query(LUser, LServer, Query2, Mod);
-	false ->
+	    end;
+	_ ->
 	    nothing
     end.
 
@@ -811,8 +800,8 @@ add_delay_info(Packet, LServer, TS) ->
 		_ -> TS
 	    end,
     Packet1 = xmpp:put_meta(Packet, from_offline, true),
-    misc:add_delay_info(Packet1, jid:make(LServer), NewTS,
-			<<"Offline storage">>).
+    xmpp_util:add_delay_info(Packet1, jid:make(LServer), NewTS,
+			     <<"Offline storage">>).
 
 -spec get_priority_from_presence(presence()) -> integer().
 get_priority_from_presence(#presence{priority = Prio}) ->
@@ -853,15 +842,9 @@ import(LServer, {sql, _}, DBType, <<"spool">>,
 mod_opt_type(access_max_user_messages) ->
     fun acl:shaper_rules_validator/1;
 mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(store_groupchat) ->
-    fun(V) when is_boolean(V) -> V end;
 mod_opt_type(store_empty_body) ->
     fun (V) when is_boolean(V) -> V;
         (unless_chat_state) -> unless_chat_state
-    end.
-
-mod_options(Host) ->
-    [{db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {access_max_user_messages, max_user_offline_messages},
-     {store_empty_body, unless_chat_state},
-     {store_groupchat, false}].
+    end;
+mod_opt_type(_) ->
+    [access_max_user_messages, db_type, store_empty_body].

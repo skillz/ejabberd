@@ -5,7 +5,7 @@
 %%% Created : 25 Sep 2008 by Eric Cestari <ecestari@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -92,9 +92,7 @@ features() ->
 	<<"modify-affiliations">>,
 	<<"outcast-affiliation">>,
 	<<"persistent-items">>,
-	<<"multi-items">>,
 	<<"publish">>,
-	<<"publish-options">>,
 	<<"purge-nodes">>,
 	<<"retract-items">>,
 	<<"retrieve-affiliations">>,

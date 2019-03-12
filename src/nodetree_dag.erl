@@ -5,7 +5,7 @@
 %%% Created : 15 Jun 2009 by Brian Cully <bjc@kublai.com>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -69,13 +69,13 @@ create_node(Key, Node, Type, Owner, Options, Parents) ->
 		Other -> Other
 	    end;
 	_ ->
-	    {error, xmpp:err_conflict(<<"Node already exists">>, ejabberd_config:get_mylang())}
+	    {error, xmpp:err_conflict(<<"Node already exists">>, ?MYLANG)}
     end.
 
 delete_node(Key, Node) ->
     case find_node(Key, Node) of
 	false ->
-	    {error, xmpp:err_item_not_found(<<"Node not found">>, ejabberd_config:get_mylang())};
+	    {error, xmpp:err_item_not_found(<<"Node not found">>, ?MYLANG)};
 	Record ->
 	    lists:foreach(fun (#pubsub_node{options = Opts} = Child) ->
 			NewOpts = remove_config_parent(Node, Opts),
@@ -99,7 +99,7 @@ get_node(Host, Node, _From) ->
 
 get_node(Host, Node) ->
     case find_node(Host, Node) of
-	false -> {error, xmpp:err_item_not_found(<<"Node not found">>, ejabberd_config:get_mylang())};
+	false -> {error, xmpp:err_item_not_found(<<"Node not found">>, ?MYLANG)};
 	Record -> Record
     end.
 
@@ -115,7 +115,7 @@ get_nodes(Key) ->
 get_parentnodes(Host, Node, _From) ->
     case find_node(Host, Node) of
 	false ->
-	    {error, xmpp:err_item_not_found(<<"Node not found">>, ejabberd_config:get_mylang())};
+	    {error, xmpp:err_item_not_found(<<"Node not found">>, ?MYLANG)};
 	#pubsub_node{parents = Parents} ->
 	    Q = qlc:q([N
 			|| #pubsub_node{nodeid = {NHost, NNode}} = N
@@ -139,7 +139,7 @@ get_subnodes(Host, <<>>) ->
     get_subnodes_helper(Host, <<>>);
 get_subnodes(Host, Node) ->
     case find_node(Host, Node) of
-	false -> {error, xmpp:err_item_not_found(<<"Node not found">>, ejabberd_config:get_mylang())};
+	false -> {error, xmpp:err_item_not_found(<<"Node not found">>, ?MYLANG)};
 	_ -> get_subnodes_helper(Host, Node)
     end.
 
@@ -226,7 +226,7 @@ validate_parentage(Key, Owners, [<<>> | T]) ->
 validate_parentage(Key, Owners, [ParentID | T]) ->
     case find_node(Key, ParentID) of
 	false ->
-	    {error, xmpp:err_item_not_found(<<"Node not found">>, ejabberd_config:get_mylang())};
+	    {error, xmpp:err_item_not_found(<<"Node not found">>, ?MYLANG)};
 	#pubsub_node{owners = POwners, options = POptions} ->
 	    NodeType = find_opt(node_type, ?DEFAULT_NODETYPE, POptions),
 	    MutualOwners = [O || O <- Owners, PO <- POwners, O == PO],

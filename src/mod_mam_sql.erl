@@ -4,7 +4,7 @@
 %%% Created : 15 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,8 +30,7 @@
 
 %% API
 -export([init/2, remove_user/2, remove_room/3, delete_old_messages/3,
-	 extended_fields/0, store/8, write_prefs/4, get_prefs/2, select/6, export/1, remove_from_archive/3,
-	 is_empty_for_user/2, is_empty_for_room/3]).
+	 extended_fields/0, store/7, write_prefs/4, get_prefs/2, select/6, export/1]).
 
 -export([get_room_history/3]).
 
@@ -50,52 +49,31 @@ init(_Host, _Opts) ->
 remove_user(LUser, LServer) ->
     ejabberd_sql:sql_query(
       LServer,
-      ?SQL("delete from archive where username=%(LUser)s and %(LServer)H")),
+      ?SQL("delete from archive where username=%(LUser)s")),
     ejabberd_sql:sql_query(
       LServer,
-      ?SQL("delete from archive_prefs where username=%(LUser)s and %(LServer)H")).
+      ?SQL("delete from archive_prefs where username=%(LUser)s")).
 
 remove_room(LServer, LName, LHost) ->
     LUser = jid:encode({LName, LHost, <<>>}),
     remove_user(LUser, LServer).
 
-remove_from_archive(LUser, LServer, none) ->
-    case ejabberd_sql:sql_query(LServer,
-				?SQL("delete from archive where username=%(LUser)s and %(LServer)H")) of
-	{error, Reason} -> {error, Reason};
-	_ -> ok
-    end;
-remove_from_archive(LUser, LServer, WithJid) ->
-    Peer = jid:encode(jid:remove_resource(WithJid)),
-    case ejabberd_sql:sql_query(LServer,
-				?SQL("delete from archive where username=%(LUser)s and %(LServer)H and bare_peer=%(Peer)s")) of
-	{error, Reason} -> {error, Reason};
-	_ -> ok
-    end.
-
 delete_old_messages(ServerHost, TimeStamp, Type) ->
-    TS = now_to_usec(TimeStamp),
-    case Type of
-        all ->
-            ejabberd_sql:sql_query(
-              ServerHost,
-              ?SQL("delete from archive"
-                   " where timestamp < %(TS)d and %(ServerHost)H"));
-        _ ->
-            SType = misc:atom_to_binary(Type),
-            ejabberd_sql:sql_query(
-              ServerHost,
-              ?SQL("delete from archive"
-                   " where timestamp < %(TS)d"
-                   " and kind=%(SType)s"
-                   " and %(ServerHost)H"))
-    end,
+    TypeClause = if Type == all -> <<"">>;
+		    true -> [<<" and kind='">>, misc:atom_to_binary(Type), <<"'">>]
+		 end,
+    TS = integer_to_binary(now_to_usec(TimeStamp)),
+    ejabberd_sql:sql_query(
+      ServerHost, [<<"delete from archive where timestamp<">>,
+		   TS, TypeClause, <<";">>]),
     ok.
 
 extended_fields() ->
     [{withtext, <<"">>}].
 
-store(Pkt, LServer, {LUser, LHost}, Type, Peer, Nick, _Dir, TS) ->
+store(Pkt, LServer, {LUser, LHost}, Type, Peer, Nick, _Dir) ->
+    TSinteger = p1_time_compat:system_time(micro_seconds),
+    ID = integer_to_binary(TSinteger),
     SUser = case Type of
 		chat -> LUser;
 		groupchat -> jid:encode({LUser, LHost, <<>>})
@@ -105,33 +83,23 @@ store(Pkt, LServer, {LUser, LHost}, Type, Peer, Nick, _Dir, TS) ->
 		   jid:remove_resource(Peer))),
     LPeer = jid:encode(
 	      jid:tolower(Peer)),
+    XML = fxml:element_to_binary(Pkt),
     Body = fxml:get_subtag_cdata(Pkt, <<"body">>),
     SType = misc:atom_to_binary(Type),
-    XML = case gen_mod:get_module_opt(LServer, mod_mam, compress_xml) of
-	      true ->
-		  J1 = case Type of
-			      chat -> jid:encode({LUser, LHost, <<>>});
-			      groupchat -> SUser
-			  end,
-		  xml_compress:encode(Pkt, J1, LPeer);
-	      _ ->
-		  fxml:element_to_binary(Pkt)
-	  end,
     case ejabberd_sql:sql_query(
            LServer,
-           ?SQL_INSERT(
-              "archive",
-              ["username=%(SUser)s",
-               "server_host=%(LServer)s",
-               "timestamp=%(TS)d",
-               "peer=%(LPeer)s",
-               "bare_peer=%(BarePeer)s",
-               "xml=%(XML)s",
-               "txt=%(Body)s",
-               "kind=%(SType)s",
-               "nick=%(Nick)s"])) of
+           ?SQL("insert into archive (username, timestamp,"
+                " peer, bare_peer, xml, txt, kind, nick) values ("
+		"%(SUser)s, "
+		"%(TSinteger)d, "
+		"%(LPeer)s, "
+		"%(BarePeer)s, "
+		"%(XML)s, "
+		"%(Body)s, "
+		"%(SType)s, "
+		"%(Nick)s)")) of
 	{updated, _} ->
-	    ok;
+	    {ok, ID};
 	Err ->
 	    Err
     end.
@@ -147,7 +115,6 @@ write_prefs(LUser, _LServer, #archive_prefs{default = Default,
             ServerHost,
             "archive_prefs",
             ["!username=%(LUser)s",
-             "!server_host=%(ServerHost)s",
              "def=%(SDefault)s",
              "always=%(SAlways)s",
              "never=%(SNever)s"]) of
@@ -161,7 +128,7 @@ get_prefs(LUser, LServer) ->
     case ejabberd_sql:sql_query(
 	   LServer,
 	   ?SQL("select @(def)s, @(always)s, @(never)s from archive_prefs"
-                " where username=%(LUser)s and %(LServer)H")) of
+                " where username=%(LUser)s")) of
 	{selected, [{SDefault, SAlways, SNever}]} ->
 	    Default = erlang:binary_to_existing_atom(SDefault, utf8),
 	    Always = ejabberd_sql:decode_term(SAlways),
@@ -178,7 +145,7 @@ select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
        MAMQuery, RSM, MsgType) ->
     User = case MsgType of
 	       chat -> LUser;
-	       _ -> jid:encode(JidArchive)
+	       {groupchat, _Role, _MUCState} -> jid:encode(JidArchive)
 	   end,
     {Query, CountQuery} = make_sql_query(User, LServer, MAMQuery, RSM),
     % TODO from XEP-0313 v0.2: "To conserve resources, a server MAY place a
@@ -204,8 +171,8 @@ select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
 	    {lists:flatmap(
 	       fun([TS, XML, PeerBin, Kind, Nick]) ->
 		       case make_archive_el(
-			   jid:encode(JidArchive), TS, XML, PeerBin, Kind, Nick,
-			   MsgType, JidRequestor, JidArchive) of
+			      TS, XML, PeerBin, Kind, Nick,
+			      MsgType, JidRequestor, JidArchive) of
 			   {ok, El} ->
 			       [{TS, binary_to_integer(TS), El}];
 			   {error, _} ->
@@ -227,13 +194,8 @@ export(_Server) ->
                 SDefault = erlang:atom_to_binary(Default, utf8),
                 SAlways = misc:term_to_expr(Always),
                 SNever = misc:term_to_expr(Never),
-                [?SQL_INSERT(
-                    "archive_prefs",
-                    ["username=%(LUser)s",
-                     "server_host=%(LServer)s",
-                     "def=%(SDefault)s",
-                     "always=%(SAlways)s",
-                     "never=%(SNever)s"])];
+                [?SQL("insert into archive_prefs (username, def, always, never) values"
+                "(%(LUser)s, %(SDefault)s, %(SAlways)s, %(SNever)s);")];
           (_Host, _R) ->
               []
       end},
@@ -252,35 +214,14 @@ export(_Server) ->
                 XML = fxml:element_to_binary(Pkt),
                 Body = fxml:get_subtag_cdata(Pkt, <<"body">>),
                 SType = misc:atom_to_binary(Type),
-                [?SQL_INSERT(
-                    "archive",
-                    ["username=%(SUser)s",
-                     "server_host=%(LServer)s",
-                     "timestamp=%(TStmp)d",
-                     "peer=%(LPeer)s",
-                     "bare_peer=%(BarePeer)s",
-                     "xml=%(XML)s",
-                     "txt=%(Body)s",
-                     "kind=%(SType)s",
-                     "nick=%(Nick)s"])];
+                [?SQL("insert into archive (username, timestamp, "
+				 "peer, bare_peer, xml, txt, kind, nick) "
+				 "values (%(SUser)s, %(TStmp)d, %(LPeer)s, "
+				 "%(BarePeer)s, %(XML)s, %(Body)s, %(SType)s, "
+				 "%(Nick)s);")];
          (_Host, _R) ->
               []
       end}].
-
-is_empty_for_user(LUser, LServer) ->
-    case ejabberd_sql:sql_query(
-	   LServer,
-	   ?SQL("select @(1)d from archive"
-		" where username=%(LUser)s and %(LServer)H limit 1")) of
-	{selected, [{1}]} ->
-	    false;
-	_ ->
-	    true
-    end.
-
-is_empty_for_room(LServer, LName, LHost) ->
-    LUser = jid:encode({LName, LHost, <<>>}),
-    is_empty_for_user(LUser, LServer).
 
 %%%===================================================================
 %%% Internal functions
@@ -364,24 +305,11 @@ make_sql_query(User, LServer, MAMQuery, RSM) ->
 			[]
 		end,
     SUser = Escape(User),
-    SServer = Escape(LServer),
 
-    Query =
-        case ejabberd_sql:use_new_schema() of
-            true ->
-                [<<"SELECT ">>, TopClause,
-                 <<" timestamp, xml, peer, kind, nick"
-                  " FROM archive WHERE username='">>,
-                 SUser, <<"' and server_host='">>,
-                 SServer, <<"'">>, WithClause, WithTextClause,
-                 StartClause, EndClause, PageClause];
-            false ->
-                [<<"SELECT ">>, TopClause,
-                 <<" timestamp, xml, peer, kind, nick"
-                  " FROM archive WHERE username='">>,
-                 SUser, <<"'">>, WithClause, WithTextClause,
-                 StartClause, EndClause, PageClause]
-        end,
+    Query = [<<"SELECT ">>, TopClause, <<" timestamp, xml, peer, kind, nick"
+	      " FROM archive WHERE username='">>,
+	     SUser, <<"'">>, WithClause, WithTextClause, StartClause, EndClause,
+	     PageClause],
 
     QueryPage =
 	case Direction of
@@ -396,19 +324,9 @@ make_sql_query(User, LServer, MAMQuery, RSM) ->
 		[Query, <<" ORDER BY timestamp ASC ">>,
 		 LimitClause, <<";">>]
 	end,
-    case ejabberd_sql:use_new_schema() of
-        true ->
-            {QueryPage,
-             [<<"SELECT COUNT(*) FROM archive WHERE username='">>,
-              SUser, <<"' and server_host='">>,
-              SServer, <<"'">>, WithClause, WithTextClause,
-              StartClause, EndClause, <<";">>]};
-        false ->
-            {QueryPage,
-             [<<"SELECT COUNT(*) FROM archive WHERE username='">>,
-              SUser, <<"'">>, WithClause, WithTextClause,
-              StartClause, EndClause, <<";">>]}
-    end.
+    {QueryPage,
+     [<<"SELECT COUNT(*) FROM archive WHERE username='">>,
+      SUser, <<"'">>, WithClause, WithTextClause, StartClause, EndClause, <<";">>]}.
 
 -spec get_max_direction_id(rsm_set() | undefined) ->
 				  {integer() | undefined,
@@ -426,13 +344,13 @@ get_max_direction_id(RSM) ->
 	    {undefined, undefined, <<>>}
     end.
 
--spec make_archive_el(binary(), binary(), binary(), binary(), binary(),
+-spec make_archive_el(binary(), binary(), binary(), binary(),
 		      binary(), _, jid(), jid()) ->
 			     {ok, xmpp_element()} | {error, invalid_jid |
 						     invalid_timestamp |
 						     invalid_xml}.
-make_archive_el(User, TS, XML, Peer, Kind, Nick, MsgType, JidRequestor, JidArchive) ->
-    case xml_compress:decode(XML, User, Peer) of
+make_archive_el(TS, XML, Peer, Kind, Nick, MsgType, JidRequestor, JidArchive) ->
+    case fxml_stream:parse_element(XML) of
 	#xmlel{} = El ->
 	    try binary_to_integer(TS) of
 		TSInt ->

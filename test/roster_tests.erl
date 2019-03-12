@@ -3,7 +3,7 @@
 %%% Created : 22 Oct 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -93,7 +93,7 @@ iq_set_many_items(Config) ->
 
 iq_set_duplicated_groups(Config) ->
     JID = jid:decode(<<"nurse@example.com">>),
-    G = p1_rand:get_string(),
+    G = randoms:get_string(),
     ct:comment("Trying to send roster-set with duplicated groups"),
     Item = #roster_item{jid = JID, groups = [G, G]},
     #stanza_error{reason = 'bad-request'} = set_items(Config, [Item]),

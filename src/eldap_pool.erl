@@ -5,7 +5,7 @@
 %%% Created : 12 Nov 2006 by Evgeniy Khramtsov <xram@jabber.ru>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,6 +31,7 @@
 -export([start_link/7, bind/3, search/2,
 	 modify_passwd/3]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 
 %%====================================================================
@@ -57,7 +58,7 @@ start_link(Name, Hosts, Backups, Port, Rootdn, Passwd,
 			      of
 			    {ok, Pid} -> pg2:join(PoolName, Pid);
 			    Err ->
-                                  ?ERROR_MSG("Err = ~p", [Err]),
+                                  ?INFO_MSG("Err = ~p", [Err]),
                                   error
 			  end
 		  end,

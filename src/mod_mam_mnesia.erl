@@ -4,7 +4,7 @@
 %%% Created : 15 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -28,8 +28,7 @@
 
 %% API
 -export([init/2, remove_user/2, remove_room/3, delete_old_messages/3,
-	 extended_fields/0, store/8, write_prefs/4, get_prefs/2, select/6, remove_from_archive/3,
-	 is_empty_for_user/2, is_empty_for_room/3]).
+	 extended_fields/0, store/7, write_prefs/4, get_prefs/2, select/6]).
 
 -export([get_room_history/3]).
 
@@ -51,20 +50,13 @@
 %%% API
 %%%===================================================================
 init(_Host, _Opts) ->
-    try
-	{atomic, _} = ejabberd_mnesia:create(
-			?MODULE, archive_msg,
+    ejabberd_mnesia:create(?MODULE, archive_msg,
 			[{disc_only_copies, [node()]},
 			 {type, bag},
 			 {attributes, record_info(fields, archive_msg)}]),
-	{atomic, _} = ejabberd_mnesia:create(
-			?MODULE, archive_prefs,
+    ejabberd_mnesia:create(?MODULE, archive_prefs,
 			[{disc_only_copies, [node()]},
-			 {attributes, record_info(fields, archive_prefs)}]),
-	ok
-    catch _:{badmatch, _} ->
-	    {error, db_failure}
-    end.
+			 {attributes, record_info(fields, archive_prefs)}]).
 
 remove_user(LUser, LServer) ->
     US = {LUser, LServer},
@@ -76,24 +68,6 @@ remove_user(LUser, LServer) ->
 
 remove_room(_LServer, LName, LHost) ->
     remove_user(LName, LHost).
-
-remove_from_archive(LUser, LServer, none) ->
-    US = {LUser, LServer},
-    case mnesia:transaction(fun () -> mnesia:delete({archive_msg, US}) end) of
-	{atomic, _} -> ok;
-	{aborted, Reason} -> {error, Reason}
-    end;
-remove_from_archive(LUser, LServer, WithJid) ->
-    US = {LUser, LServer},
-    Peer = jid:remove_resource(jid:split(WithJid)),
-    F = fun () ->
-	    Msgs = mnesia:match_object(#archive_msg{us = US, bare_peer = Peer, _ = '_'}),
-	    lists:foreach(fun mnesia:delete_object/1, Msgs)
-	end,
-    case mnesia:transaction(F) of
-	{atomic, _} -> ok;
-	{aborted, Reason} -> {error, Reason}
-    end.
 
 delete_old_messages(global, TimeStamp, Type) ->
     mnesia:change_table_copy_type(archive_msg, node(), disc_copies),
@@ -119,10 +93,10 @@ delete_old_user_messages(User, TimeStamp, Type) ->
 			ok
 		end
 	end,
-    NextRecord = mnesia:dirty_next(archive_msg, User),
     case mnesia:transaction(F) of
 	{atomic, ok} ->
-	    delete_old_user_messages(NextRecord, TimeStamp, Type);
+	    delete_old_user_messages(mnesia:dirty_next(archive_msg, User),
+				     TimeStamp, Type);
 	{aborted, Err} ->
 	    ?ERROR_MSG("Cannot delete old MAM messages: ~s", [Err]),
 	    Err
@@ -131,7 +105,7 @@ delete_old_user_messages(User, TimeStamp, Type) ->
 extended_fields() ->
     [].
 
-store(Pkt, _, {LUser, LServer}, Type, Peer, Nick, _Dir, TS) ->
+store(Pkt, _, {LUser, LServer}, Type, Peer, Nick, _Dir) ->
     case {mnesia:table_info(archive_msg, disc_only_copies),
 	  mnesia:table_info(archive_msg, memory)} of
 	{[_|_], TableSize} when TableSize > ?TABLE_SIZE_LIMIT ->
@@ -140,11 +114,13 @@ store(Pkt, _, {LUser, LServer}, Type, Peer, Nick, _Dir, TS) ->
 	    {error, overflow};
 	_ ->
 	    LPeer = {PUser, PServer, _} = jid:tolower(Peer),
+	    TS = p1_time_compat:timestamp(),
+	    ID = integer_to_binary(now_to_usec(TS)),
 	    F = fun() ->
 			mnesia:write(
 			  #archive_msg{us = {LUser, LServer},
-				       id = integer_to_binary(TS),
-				       timestamp = misc:usec_to_now(TS),
+				       id = ID,
+				       timestamp = TS,
 				       peer = LPeer,
 				       bare_peer = {PUser, PServer, <<>>},
 				       type = Type,
@@ -153,7 +129,7 @@ store(Pkt, _, {LUser, LServer}, Type, Peer, Nick, _Dir, TS) ->
 		end,
 	    case mnesia:transaction(F) of
 		{atomic, ok} ->
-		    ok;
+		    {ok, ID};
 		{aborted, Err} ->
 		    ?ERROR_MSG("Cannot add message to MAM archive of ~s@~s: ~s",
 			       [LUser, LServer, Err]),
@@ -201,15 +177,12 @@ select(_LServer, JidRequestor,
     erlang:garbage_collect(),
     Result.
 
-is_empty_for_user(LUser, LServer) ->
-    mnesia:dirty_read(archive_msg, {LUser, LServer}) == [].
-
-is_empty_for_room(_LServer, LName, LHost) ->
-    is_empty_for_user(LName, LHost).
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+now_to_usec({MSec, Sec, USec}) ->
+    (MSec*1000000 + Sec)*1000000 + USec.
+
 make_matchspec(LUser, LServer, Start, undefined, With) ->
     %% List is always greater than a tuple
     make_matchspec(LUser, LServer, Start, [], With);

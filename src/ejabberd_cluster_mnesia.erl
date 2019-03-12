@@ -5,7 +5,7 @@
 %%% Created : 7 Oct 2015 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,6 +31,7 @@
 	 get_known_nodes/0, node_id/0, get_node_by_id/1,
 	 send/2, wait_for_sync/1, subscribe/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 
 -spec init() -> ok.
@@ -59,15 +60,16 @@ join(Node) ->
             application:stop(mnesia),
             mnesia:delete_schema([node()]),
             application:start(mnesia),
-            case mnesia:change_config(extra_db_nodes, [Node]) of
-                {ok, _} ->
-                    replicate_database(Node),
-                    wait_for_sync(infinity),
-                    application:stop(mnesia),
-                    application:start(ejabberd);
-                {error, Reason} ->
-                    {error, Reason}
-            end;
+            mnesia:change_config(extra_db_nodes, [Node]),
+            mnesia:change_table_copy_type(schema, node(), disc_copies),
+            spawn(fun()  ->
+                lists:foreach(fun(Table) ->
+                            Type = ejabberd_cluster:call(
+				     Node, mnesia, table_info, [Table, storage_type]),
+                            mnesia:add_table_copy(Table, node(), Type)
+                    end, mnesia:system_info(tables)--[schema])
+                end),
+            application:start(ejabberd);
         _ ->
             {error, {no_ping, Node}}
     end.
@@ -92,11 +94,11 @@ leave([], Node) ->
 leave([Master|_], Node) ->
     application:stop(ejabberd),
     application:stop(mnesia),
+    ejabberd_cluster:call(Master, mnesia, del_table_copy, [schema, Node]),
     spawn(fun() ->
-              rpc:call(Master, mnesia, del_table_copy, [schema, Node]),
-              mnesia:delete_schema([node()]),
-              erlang:halt(0)
-          end),
+                mnesia:delete_schema([node()]),
+                erlang:halt(0)
+        end),
     ok.
 
 -spec node_id() -> binary().
@@ -113,10 +115,7 @@ get_node_by_id(Hash) ->
 
 -spec send({atom(), node()}, term()) -> boolean().
 send(Dst, Msg) ->
-    case erlang:send(Dst, Msg, [nosuspend, noconnect]) of
-	ok -> true;
-	_ -> false
-    end.
+    erlang:send(Dst, Msg).
 
 -spec wait_for_sync(timeout()) -> ok.
 wait_for_sync(Timeout) ->
@@ -131,15 +130,6 @@ subscribe(_) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-replicate_database(Node) ->
-    mnesia:change_table_copy_type(schema, node(), disc_copies),
-    lists:foreach(
-        fun(Table) ->
-            Type = ejabberd_cluster:call(Node, mnesia, table_info, [Table, storage_type]),
-            mnesia:add_table_copy(Table, node(), Type)
-        end, mnesia:system_info(tables)--[schema]).
-
 -spec match_node_id(integer()) -> node().
 match_node_id(I) ->
     match_node_id(I, get_nodes()).

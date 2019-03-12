@@ -4,7 +4,7 @@
 %%% Purpose : XEP-0355: Namespace Delegation
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,7 @@
 -behaviour(gen_mod).
 
 %% API
--export([start/2, stop/1, reload/3, mod_opt_type/1, depends/2, mod_options/1]).
+-export([start/2, stop/1, reload/3, mod_opt_type/1, depends/2]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
@@ -40,13 +40,13 @@
 	 disco_local_features/5, disco_sm_features/5,
 	 disco_local_identity/5, disco_sm_identity/5]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 
 -type disco_acc() :: {error, stanza_error()} | {result, [binary()]} | empty.
 -record(state, {server_host = <<"">> :: binary(),
-		delegations = dict:new() :: dict:dict()}).
--type state() :: #state{}.
+		delegations = dict:new() :: ?TDICT}).
 
 %%%===================================================================
 %%% API
@@ -60,6 +60,7 @@ stop(Host) ->
 reload(_Host, _NewOpts, _OldOpts) ->
     ok.
 
+mod_opt_type(iqdisc) -> fun gen_iq_handler:check_type/1;
 mod_opt_type(namespaces) ->
     fun(L) ->
 	    lists:map(
@@ -68,10 +69,9 @@ mod_opt_type(namespaces) ->
 		      Access = proplists:get_value(access, Opts, none),
 		      {NS, Attrs, Access}
 	      end, L)
-    end.
-
-mod_options(_Host) ->
-    [{namespaces, []}].
+    end;
+mod_opt_type(_) ->
+    [namespaces, iqdisc].
 
 depends(_, _) ->
     [].
@@ -87,7 +87,7 @@ component_connected(Host) ->
       fun(ServerHost) ->
 	      Proc = gen_mod:get_module_proc(ServerHost, ?MODULE),
 	      gen_server:cast(Proc, {component_connected, Host})
-      end, ejabberd_config:get_myhosts()).
+      end, ?MYHOSTS).
 
 -spec component_disconnected(binary(), binary()) -> ok.
 component_disconnected(Host, _Reason) ->
@@ -95,7 +95,7 @@ component_disconnected(Host, _Reason) ->
       fun(ServerHost) ->
 	      Proc = gen_mod:get_module_proc(ServerHost, ?MODULE),
 	      gen_server:cast(Proc, {component_disconnected, Host})
-      end, ejabberd_config:get_myhosts()).
+      end, ?MYHOSTS).
 
 -spec ejabberd_local(iq()) -> iq().
 ejabberd_local(IQ) ->
@@ -150,7 +150,7 @@ handle_cast({component_connected, Host}, State) ->
     ServerHost = State#state.server_host,
     To = jid:make(Host),
     NSAttrsAccessList = gen_mod:get_module_opt(
-			  ServerHost, ?MODULE, namespaces),
+			  ServerHost, ?MODULE, namespaces, []),
     lists:foreach(
       fun({NS, _Attrs, Access}) ->
 	      case acl:match_rule(ServerHost, Access, To) of
@@ -161,6 +161,27 @@ handle_cast({component_connected, Host}, State) ->
 	      end
       end, NSAttrsAccessList),
     {noreply, State};
+handle_cast({disco_info, Type, Host, NS, Info}, State) ->
+    From = jid:make(State#state.server_host),
+    To = jid:make(Host),
+    case dict:find({NS, Type}, State#state.delegations) of
+	error ->
+	    Msg = #message{from = From, to = To,
+			   sub_els = [#delegation{delegated = [#delegated{ns = NS}]}]},
+	    Delegations = dict:store({NS, Type}, {Host, Info}, State#state.delegations),
+	    gen_iq_handler:add_iq_handler(Type, State#state.server_host, NS,
+					  ?MODULE, Type, gen_iq_handler:iqdisc(Host)),
+	    ejabberd_router:route(Msg),
+	    ?INFO_MSG("Namespace '~s' is delegated to external component '~s'",
+		      [NS, Host]),
+	    {noreply, State#state{delegations = Delegations}};
+	{ok, {AnotherHost, _}} ->
+	    ?WARNING_MSG("Failed to delegate namespace '~s' to "
+			 "external component '~s' because it's already "
+			 "delegated to '~s'",
+			 [NS, Host, AnotherHost]),
+	    {noreply, State}
+    end;
 handle_cast({component_disconnected, Host}, State) ->
     ServerHost = State#state.server_host,
     Delegations =
@@ -178,24 +199,7 @@ handle_cast({component_disconnected, Host}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({iq_reply, ResIQ, {disco_info, Type, Host, NS}}, State) ->
-    {noreply,
-     case ResIQ of
-	 #iq{type = result, sub_els = [SubEl]} ->
-	     try xmpp:decode(SubEl) of
-		 #disco_info{} = Info ->
-		     process_disco_info(State, Type, Host, NS, Info)
-		 catch _:{xmpp_codec, _} ->
-			 State
-		 end;
-	 _ ->
-	     State
-     end};
-handle_info({iq_reply, ResIQ, #iq{} = IQ}, State) ->
-    process_iq_result(IQ, ResIQ),
-    {noreply, State};
-handle_info(Info, State) ->
-    ?WARNING_MSG("unexpected info: ~p", [Info]),
+handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, State) ->
@@ -221,7 +225,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec get_delegations(binary()) -> dict:dict().
+-spec get_delegations(binary()) -> ?TDICT.
 get_delegations(Host) ->
     Proc = gen_mod:get_module_proc(Host, ?MODULE),
     try gen_server:call(Proc, get_delegations) of
@@ -239,15 +243,15 @@ process_iq(#iq{to = To, lang = Lang, sub_els = [SubEl]} = IQ, Type) ->
     case dict:find({NS, Type}, Delegations) of
 	{ok, {Host, _}} ->
 	    Delegation = #delegation{
-			    forwarded = #forwarded{sub_els = [IQ]}},
+			    forwarded = #forwarded{xml_els = [xmpp:encode(IQ)]}},
 	    NewFrom = jid:make(LServer),
 	    NewTo = jid:make(Host),
-	    ejabberd_router:route_iq(
+	    ejabberd_local:route_iq(
 	      #iq{type = set,
 		  from = NewFrom,
 		  to = NewTo,
 		  sub_els = [Delegation]},
-	      IQ, gen_mod:get_module_proc(LServer, ?MODULE)),
+	      fun(Result) -> process_iq_result(IQ, Result) end),
 	    ignore;
 	error ->
 	    Txt = <<"Failed to map delegated namespace to external component">>,
@@ -258,10 +262,9 @@ process_iq(#iq{to = To, lang = Lang, sub_els = [SubEl]} = IQ, Type) ->
 process_iq_result(#iq{from = From, to = To, id = ID, lang = Lang} = IQ,
 		  #iq{type = result} = ResIQ) ->
     try
-	CodecOpts = ejabberd_config:codec_options(To#jid.lserver),
-	#delegation{forwarded = #forwarded{sub_els = [SubEl]}} =
+	#delegation{forwarded = #forwarded{xml_els = [SubEl]}} =
 	    xmpp:get_subtag(ResIQ, #delegation{}),
-	case xmpp:decode(SubEl, ?NS_CLIENT, CodecOpts) of
+	case xmpp:decode(SubEl, ?NS_CLIENT, [ignore_els]) of
 	    #iq{from = To, to = From, type = Type, id = ID} = Reply
 	      when Type == error; Type == result ->
 		ejabberd_router:route(Reply)
@@ -281,41 +284,29 @@ process_iq_result(#iq{lang = Lang} = IQ, timeout) ->
     Err = xmpp:err_internal_server_error(Txt, Lang),
     ejabberd_router:route_error(IQ, Err).
 
--spec process_disco_info(state(), ejabberd_local | ejabberd_sm,
-			 binary(), binary(), disco_info()) -> state().
-process_disco_info(State, Type, Host, NS, Info) ->
-    From = jid:make(State#state.server_host),
-    To = jid:make(Host),
-    case dict:find({NS, Type}, State#state.delegations) of
-	error ->
-	    Msg = #message{from = From, to = To,
-			   sub_els = [#delegation{delegated = [#delegated{ns = NS}]}]},
-	    Delegations = dict:store({NS, Type}, {Host, Info}, State#state.delegations),
-	    gen_iq_handler:add_iq_handler(Type, State#state.server_host, NS,
-					  ?MODULE, Type),
-	    ejabberd_router:route(Msg),
-	    ?INFO_MSG("Namespace '~s' is delegated to external component '~s'",
-		      [NS, Host]),
-	    State#state{delegations = Delegations};
-	{ok, {AnotherHost, _}} ->
-	    ?WARNING_MSG("Failed to delegate namespace '~s' to "
-			 "external component '~s' because it's already "
-			 "delegated to '~s'",
-			 [NS, Host, AnotherHost]),
-	    State
-    end.
-
 -spec send_disco_queries(binary(), binary(), binary()) -> ok.
 send_disco_queries(LServer, Host, NS) ->
     From = jid:make(LServer),
     To = jid:make(Host),
     lists:foreach(
       fun({Type, Node}) ->
-	      ejabberd_router:route_iq(
+	      ejabberd_local:route_iq(
 		#iq{type = get, from = From, to = To,
 		    sub_els = [#disco_info{node = Node}]},
-		{disco_info, Type, Host, NS},
-		gen_mod:get_module_proc(LServer, ?MODULE))
+		fun(#iq{type = result, sub_els = [SubEl]}) ->
+			try xmpp:decode(SubEl) of
+			    #disco_info{} = Info->
+				Proc = gen_mod:get_module_proc(LServer, ?MODULE),
+				gen_server:cast(
+				  Proc, {disco_info, Type, Host, NS, Info});
+			    _ ->
+				ok
+			catch _:{xmpp_codec, _} ->
+				ok
+			end;
+		   (_) ->
+			ok
+		end)
       end, [{ejabberd_local, <<(?NS_DELEGATION)/binary, "::", NS/binary>>},
 	    {ejabberd_sm, <<(?NS_DELEGATION)/binary, ":bare:", NS/binary>>}]).
 

@@ -5,7 +5,7 @@
 %%% Created : 18 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -32,34 +32,43 @@
 -behaviour(gen_mod).
 
 -export([start/2, stop/1, reload/3, process_local_iq/1,
-	 mod_opt_type/1, mod_options/1, depends/2]).
+	 mod_opt_type/1, depends/2]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 
 -include("xmpp.hrl").
 
-start(Host, _Opts) ->
+start(Host, Opts) ->
+    IQDisc = gen_mod:get_opt(iqdisc, Opts, gen_iq_handler:iqdisc(Host)),
     gen_iq_handler:add_iq_handler(ejabberd_local, Host,
-				  ?NS_VERSION, ?MODULE, process_local_iq).
+				  ?NS_VERSION, ?MODULE, process_local_iq,
+				  IQDisc).
 
 stop(Host) ->
     gen_iq_handler:remove_iq_handler(ejabberd_local, Host,
 				     ?NS_VERSION).
 
-reload(_Host, _NewOpts, _OldOpts) ->
-    ok.
+reload(Host, NewOpts, OldOpts) ->
+    case gen_mod:is_equal_opt(iqdisc, NewOpts, OldOpts, gen_iq_handler:iqdisc(Host)) of
+	{false, IQDisc, _} ->
+	    gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_VERSION,
+					  ?MODULE, process_local_iq, IQDisc);
+	true ->
+	    ok
+    end.
 
 process_local_iq(#iq{type = set, lang = Lang} = IQ) ->
     Txt = <<"Value 'set' of 'type' attribute is not allowed">>,
     xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
 process_local_iq(#iq{type = get, to = To} = IQ) ->
     Host = To#jid.lserver,
-    OS = case gen_mod:get_module_opt(Host, ?MODULE, show_os) of
+    OS = case gen_mod:get_module_opt(Host, ?MODULE, show_os, true) of
 	     true -> get_os();
 	     false -> undefined
 	 end,
     xmpp:make_iq_result(IQ, #version{name = <<"ejabberd">>,
-				     ver = ejabberd_config:get_version(),
+				     ver = ?VERSION,
 				     os = OS}).
 
 get_os() ->
@@ -76,8 +85,7 @@ get_os() ->
 depends(_Host, _Opts) ->
     [].
 
+mod_opt_type(iqdisc) -> fun gen_iq_handler:check_type/1;
 mod_opt_type(show_os) ->
-    fun (B) when is_boolean(B) -> B end.
-
-mod_options(_Host) ->
-    [{show_os, true}].
+    fun (B) when is_boolean(B) -> B end;
+mod_opt_type(_) -> [iqdisc, show_os].

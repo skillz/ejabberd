@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -28,19 +28,19 @@
 -behaviour(mod_muc_room).
 
 %% API
--export([init/2, import/3, store_room/5, restore_room/3, forget_room/3,
+-export([init/2, import/3, store_room/4, restore_room/3, forget_room/3,
 	 can_use_nick/4, get_rooms/2, get_nick/3, set_nick/4]).
 -export([register_online_room/4, unregister_online_room/4, find_online_room/3,
 	 get_online_rooms/3, count_online_rooms/2, rsm_supported/0,
 	 register_online_user/4, unregister_online_user/4,
-	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
-	 get_subscribed_rooms/3]).
+	 count_online_rooms_by_user/3, get_online_rooms_by_user/3]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
 	 get_affiliations/3, search_affiliation/4]).
 %% gen_server callbacks
 -export([start_link/2, init/1, handle_cast/2, handle_call/3, handle_info/2,
 	 terminate/2, code_change/3]).
 -export([need_transform/1, transform/1]).
+-export([db_subscribe/2, get_db_subscribers/2]).
 
 -include("mod_muc.hrl").
 -include("logger.hrl").
@@ -64,7 +64,13 @@ start_link(Host, Opts) ->
     Name = gen_mod:get_module_proc(Host, ?MODULE),
     gen_server:start_link({local, Name}, ?MODULE, [Host, Opts], []).
 
-store_room(_LServer, Host, Name, Opts, _) ->
+db_subscribe(_JID, _Room) ->
+  {error, not_implemented}.
+
+get_db_subscribers(_LServer, _LBareJID) ->
+	{error, not_implemented}.
+
+store_room(_LServer, Host, Name, Opts) ->
     F = fun () ->
 		mnesia:write(#muc_room{name_host = {Name, Host},
 				       opts = Opts})
@@ -263,13 +269,12 @@ unregister_online_user(_ServerHost, {U, S, R}, Room, Host) ->
 		      #muc_online_users{us = {U, S}, resource = R,
 					room = Room, host = Host}).
 
-count_online_rooms_by_user(ServerHost, U, S) ->
-    MucHost = gen_mod:get_module_opt_host(ServerHost, mod_muc, <<"conference.@HOST@">>),
+count_online_rooms_by_user(_ServerHost, U, S) ->
     ets:select_count(
       muc_online_users,
       ets:fun2ms(
-	fun(#muc_online_users{us = {U1, S1}, host = Host}) ->
-		U == U1 andalso S == S1 andalso MucHost == Host
+	fun(#muc_online_users{us = {U1, S1}}) ->
+		U == U1 andalso S == S1
 	end)).
 
 get_online_rooms_by_user(ServerHost, U, S) ->
@@ -340,8 +345,6 @@ handle_cast(_Msg, State) ->
 handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
     clean_table_from_bad_node(Node),
     {noreply, State};
-handle_info({mnesia_system_event, {mnesia_up, _Node}}, State) ->
-    {noreply, State};
 handle_info(Info, State) ->
     ?ERROR_MSG("unexpected info: ~p", [Info]),
     {noreply, State}.
@@ -401,6 +404,3 @@ transform(#muc_registered{us_host = {{U, S}, H}, nick = Nick} = R) ->
     R#muc_registered{us_host = {{iolist_to_binary(U), iolist_to_binary(S)},
 				iolist_to_binary(H)},
 		     nick = iolist_to_binary(Nick)}.
-
-get_subscribed_rooms(_, _, _) ->
-    not_implemented.

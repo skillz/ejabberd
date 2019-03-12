@@ -5,7 +5,7 @@
 %%% Created : 5 Jul 2007 by Evgeniy Khramtsov <xram@jabber.ru>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -82,7 +82,9 @@ get_pam_service(Host) ->
 get_pam_userinfotype(Host) ->
     ejabberd_config:get_option({pam_userinfotype, Host}, username).
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-spec opt_type(pam_service) -> fun((binary()) -> binary());
+	      (pam_userinfotype) -> fun((username | jid) -> username | jid);
+	      (atom()) -> [atom()].
 opt_type(pam_service) -> fun iolist_to_binary/1;
 opt_type(pam_userinfotype) ->
     fun (username) -> username;

@@ -5,7 +5,7 @@
 %%% Created :  2 Feb 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,6 +30,7 @@
 %% External exports
 -export([import_file/1, import_dir/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 
@@ -111,6 +112,7 @@ process_xdb(User, Server,
 xdb_data(_User, _Server, {xmlcdata, _CData}) -> ok;
 xdb_data(User, Server, #xmlel{attrs = Attrs} = El) ->
     From = jid:make(User, Server),
+    LUser = From#jid.luser,
     LServer = From#jid.lserver,
     case fxml:get_attr_s(<<"xmlns">>, Attrs) of
       ?NS_AUTH ->
@@ -141,7 +143,7 @@ xdb_data(User, Server, #xmlel{attrs = Attrs} = El) ->
 				(_) -> true
 			     end, Attrs),
 		catch mod_private:set_data(
-			From,
+			LUser, LServer,
 			[{XMLNS, El#xmlel{attrs = NewAttrs}}]);
 	    _ ->
 		?DEBUG("jd2ejd: Unknown namespace \"~s\"~n", [XMLNS])

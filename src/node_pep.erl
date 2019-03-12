@@ -5,7 +5,7 @@
 %%% Created :  1 Dec 2007 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,6 +31,7 @@
 -author('christophe.romain@process-one.net').
 
 -include("pubsub.hrl").
+-include("logger.hrl").
 
 -export([init/3, terminate/2, options/0, features/0,
     create_node_permission/6, create_node/2, delete_node/1,
@@ -87,7 +88,6 @@ features() ->
 	<<"outcast-affiliation">>,
 	<<"persistent-items">>,
 	<<"publish">>,
-	<<"publish-options">>,
 	<<"purge-nodes">>,
 	<<"retract-items">>,
 	<<"retrieve-affiliations">>,
@@ -118,7 +118,8 @@ create_node(Nidx, Owner) ->
     node_flat:create_node(Nidx, Owner).
 
 delete_node(Nodes) ->
-    node_flat:delete_node(Nodes).
+    {result, {_, _, Result}} = node_flat:delete_node(Nodes),
+    {result, {default, Result}}.
 
 subscribe_node(Nidx, Sender, Subscriber, AccessModel,
 	    SendLast, PresenceSubscription, RosterGroup, Options) ->

@@ -4,7 +4,7 @@
 %%% Purpose : Bytestream process.
 %%% Created : 12 Oct 2006 by Evgeniy Khramtsov <xram@jabber.ru>
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,23 +27,22 @@
 -author('xram@jabber.ru').
 
 -behaviour(p1_fsm).
--behaviour(ejabberd_listener).
 
 %% gen_fsm callbacks.
 -export([init/1, handle_event/3, handle_sync_event/4,
 	 code_change/4, handle_info/3, terminate/3]).
 
 %% gen_fsm states.
--export([accepting/2, wait_for_init/2, wait_for_auth/2,
+-export([wait_for_init/2, wait_for_auth/2,
 	 wait_for_request/2, wait_for_activation/2,
 	 stream_established/2]).
 
--export([start/2, stop/1, start_link/2, start_link/3, activate/2,
-	 relay/3, accept/1, listen_opt_type/1,
-	 listen_options/0]).
+-export([start/2, stop/1, start_link/3, activate/2,
+	 relay/3, socket_type/0, listen_opt_type/1]).
 
 -include("mod_proxy65.hrl").
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 
 -define(WAIT_TIMEOUT, 60000).
@@ -54,7 +53,7 @@
          sha1 = <<"">> :: binary(),
          host = <<"">> :: binary(),
          auth_type = anonymous :: plain | anonymous,
-         shaper = none :: ejabberd_shaper:shaper()}).
+         shaper = none :: shaper:shaper()}).
 
 %% Unused callbacks
 handle_event(_Event, StateName, StateData) ->
@@ -70,27 +69,24 @@ start({gen_tcp, Socket}, Opts1) ->
 				      fun({server_host, _}) -> true;
 					 (_) -> false
 				      end, Opts1),
-    p1_fsm:start(?MODULE, [Socket, Host, Opts], []).
-
-start_link({gen_tcp, Socket}, Opts1) ->
-    {[{server_host, Host}], Opts} = lists:partition(
-				      fun({server_host, _}) -> true;
-					 (_) -> false
-				      end, Opts1),
-    start_link(Socket, Host, Opts).
+    Supervisor = gen_mod:get_module_proc(Host,
+					 ejabberd_mod_proxy65_sup),
+    supervisor:start_child(Supervisor,
+			   [Socket, Host, Opts]).
 
 start_link(Socket, Host, Opts) ->
     p1_fsm:start_link(?MODULE, [Socket, Host, Opts], []).
 
 init([Socket, Host, Opts]) ->
     process_flag(trap_exit, true),
-    AuthType = gen_mod:get_opt(auth_type, Opts),
-    Shaper = gen_mod:get_opt(shaper, Opts),
-    RecvBuf = gen_mod:get_opt(recbuf, Opts),
-    SendBuf = gen_mod:get_opt(sndbuf, Opts),
+    AuthType = gen_mod:get_opt(auth_type, Opts, anonymous),
+    Shaper = gen_mod:get_opt(shaper, Opts, none),
+    RecvBuf = gen_mod:get_opt(recbuf, Opts, 8192),
+    SendBuf = gen_mod:get_opt(sndbuf, Opts, 8192),
     TRef = erlang:send_after(?WAIT_TIMEOUT, self(), stop),
-    inet:setopts(Socket, [{recbuf, RecvBuf}, {sndbuf, SendBuf}]),
-    {ok, accepting,
+    inet:setopts(Socket,
+		 [{active, true}, {recbuf, RecvBuf}, {sndbuf, SendBuf}]),
+    {ok, wait_for_init,
      #state{host = Host, auth_type = AuthType,
 	    socket = Socket, shaper = Shaper, timer = TRef}}.
 
@@ -105,8 +101,7 @@ terminate(_Reason, StateName, #state{sha1 = SHA1}) ->
 %%%------------------------------
 %%% API.
 %%%------------------------------
-accept(StreamPid) ->
-    p1_fsm:send_event(StreamPid, accept).
+socket_type() -> raw.
 
 stop(StreamPid) -> StreamPid ! stop.
 
@@ -130,10 +125,6 @@ activate({P1, J1}, {P2, J2}) ->
 %%%-----------------------
 %%% States
 %%%-----------------------
-accepting(accept, State) ->
-    inet:setopts(State#state.socket, [{active, true}]),
-    {next_state, wait_for_init, State}.
-
 wait_for_init(Packet,
 	      #state{socket = Socket, auth_type = AuthType} =
 		  StateData) ->
@@ -204,7 +195,7 @@ stream_established(_Data, StateData) ->
 %% SOCKS5 packets.
 handle_info({tcp, _S, Data}, StateName, StateData)
     when StateName /= wait_for_activation ->
-    misc:cancel_timer(StateData#state.timer),
+    erlang:cancel_timer(StateData#state.timer),
     TRef = erlang:send_after(?WAIT_TIMEOUT, self(), stop),
     p1_fsm:send_event(self(), Data),
     {next_state, StateName, StateData#state{timer = TRef}};
@@ -212,7 +203,7 @@ handle_info({tcp, _S, Data}, StateName, StateData)
 handle_info({activate, PeerPid, PeerSocket, IJid, TJid},
 	    wait_for_activation, StateData) ->
     erlang:monitor(process, PeerPid),
-    misc:cancel_timer(StateData#state.timer),
+    erlang:cancel_timer(StateData#state.timer),
     MySocket = StateData#state.socket,
     Shaper = StateData#state.shaper,
     Host = StateData#state.host,
@@ -254,19 +245,14 @@ handle_sync_event(_Event, _From, StateName,
 %%%-------------------------------------------------
 relay(MySocket, PeerSocket, Shaper) ->
     case gen_tcp:recv(MySocket, 0) of
-	{ok, Data} ->
-	    case gen_tcp:send(PeerSocket, Data) of
-		ok ->
-		    {NewShaper, Pause} = ejabberd_shaper:update(Shaper, byte_size(Data)),
-		    if Pause > 0 -> timer:sleep(Pause);
-		       true -> pass
-		    end,
-		    relay(MySocket, PeerSocket, NewShaper);
-		{error, _} = Err ->
-		    Err
-	    end;
-	{error, _} = Err ->
-	    Err
+      {ok, Data} ->
+	  gen_tcp:send(PeerSocket, Data),
+	  {NewShaper, Pause} = shaper:update(Shaper, byte_size(Data)),
+	  if Pause > 0 -> timer:sleep(Pause);
+	     true -> pass
+	  end,
+	  relay(MySocket, PeerSocket, NewShaper);
+      _ -> stopped
     end.
 
 %%%------------------------
@@ -287,11 +273,11 @@ select_auth_method(anonymous, AuthMethods) ->
 find_maxrate(Shaper, JID1, JID2, Host) ->
     MaxRate1 = case acl:match_rule(Host, Shaper, JID1) of
                    deny -> none;
-                   R1 -> ejabberd_shaper:new(R1)
+                   R1 -> shaper:new(R1)
                end,
     MaxRate2 = case acl:match_rule(Host, Shaper, JID2) of
                    deny -> none;
-                   R2 -> ejabberd_shaper:new(R2)
+                   R2 -> shaper:new(R2)
                end,
     if MaxRate1 == none; MaxRate2 == none -> none;
        true -> lists:max([MaxRate1, MaxRate2])
@@ -308,12 +294,5 @@ listen_opt_type(recbuf) ->
 listen_opt_type(shaper) -> fun acl:shaper_rules_validator/1;
 listen_opt_type(sndbuf) ->
     fun (I) when is_integer(I), I > 0 -> I end;
-listen_opt_type(accept_interval) ->
-    fun(I) when is_integer(I), I>=0 -> I end.
-
-listen_options() ->
-    [{auth_type, anonymous},
-     {recbuf, 65536},
-     {sndbuf, 65536},
-     {accept_interval, 0},
-     {shaper, none}].
+listen_opt_type(_) ->
+    [auth_type, recbuf, sndbuf, shaper].

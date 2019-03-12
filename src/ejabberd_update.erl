@@ -5,7 +5,7 @@
 %%% Created : 27 Jan 2006 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -29,6 +29,7 @@
 %% API
 -export([update/0, update/1, update_info/0]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 
 %%====================================================================

@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -42,6 +42,3 @@
             false -> ok;
             _ -> 'Elixir.Logger':bare_log(error, io_lib:format(Format, Args), [?MODULE])
         end).
-
-%% Uncomment if you want to debug p1_fsm/gen_fsm
-%%-define(DBGFSM, true).

@@ -61,6 +61,7 @@ defmodule Ejabberd.ConfigFile do
     @opts [
       port: 5280,
       web_admin: true,
+      http_poll: true,
       http_bind: true,
       captcha: true]
   end
@@ -83,7 +84,7 @@ defmodule Ejabberd.ConfigFile do
 
   module :mod_client_state do
     @opts [
-      queue_chat_states: true,
+      drop_chat_states: true,
       queue_presence: false]
   end
 
@@ -91,6 +92,9 @@ defmodule Ejabberd.ConfigFile do
   end
 
   module :mod_disco do
+  end
+
+  module :mod_irc do
   end
 
   module :mod_http_bind do

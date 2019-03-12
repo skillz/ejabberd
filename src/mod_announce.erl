@@ -5,7 +5,7 @@
 %%% Created : 11 Aug 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -36,7 +36,7 @@
 	 import_start/2, import/5, announce/1, send_motd/1, disco_identity/5,
 	 disco_features/5, disco_items/5, depends/2,
 	 send_announcement_to_all/3, announce_commands/4,
-	 announce_items/4, mod_opt_type/1, mod_options/1, clean_cache/1]).
+	 announce_items/4, mod_opt_type/1, clean_cache/1]).
 -export([init/1, handle_call/3, handle_cast/2,
 	 handle_info/2, terminate/2, code_change/3]).
 -export([announce_all/1,
@@ -50,6 +50,7 @@
 	 announce_motd_delete/1,
 	 announce_all_hosts_motd_delete/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 -include("mod_announce.hrl").
@@ -236,7 +237,7 @@ disco_identity(Acc, _From, _To, Node, Lang) ->
 -define(INFO_RESULT(Allow, Feats, Lang),
 	case Allow of
 	    deny ->
-		{error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+		{error, xmpp:err_forbidden(<<"Denied by ACL">>, Lang)};
 	    allow ->
 		{result, Feats}
 	end).
@@ -251,7 +252,7 @@ disco_features(Acc, From, #jid{lserver = LServer} = _To, <<"announce">>, Lang) -
 	    case {acl:match_rule(LServer, Access1, From),
 		  acl:match_rule(global, Access2, From)} of
 		{deny, deny} ->
-		    Txt = <<"Access denied by service policy">>,
+		    Txt = <<"Denied by ACL">>,
 		    {error, xmpp:err_forbidden(Txt, Lang)};
 		_ ->
 		    {result, []}
@@ -302,7 +303,7 @@ disco_features(Acc, From, #jid{lserver = LServer} = _To, Node, Lang) ->
 -define(ITEMS_RESULT(Allow, Items, Lang),
 	case Allow of
 	    deny ->
-		{error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+		{error, xmpp:err_forbidden(<<"Denied by ACL">>, Lang)};
 	    allow ->
 		{result, Items}
 	end).
@@ -416,7 +417,7 @@ commands_result(Allow, From, To, Request) ->
     case Allow of
 	deny ->
 	    Lang = Request#adhoc_command.lang,
-	    {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+	    {error, xmpp:err_forbidden(<<"Denied by ACL">>, Lang)};
 	allow ->
 	    announce_commands(From, To, Request)
     end.
@@ -669,7 +670,7 @@ announce_motd(#message{to = To} = Packet) ->
     announce_motd(To#jid.lserver, Packet).
 
 announce_all_hosts_motd(Packet) ->
-    Hosts = ejabberd_config:get_myhosts(),
+    Hosts = ?MYHOSTS,
     [announce_motd(Host, Packet) || Host <- Hosts].
 
 announce_motd(Host, Packet) ->
@@ -684,7 +685,7 @@ announce_motd_update(#message{to = To} = Packet) ->
     announce_motd_update(To#jid.lserver, Packet).
 
 announce_all_hosts_motd_update(Packet) ->
-    Hosts = ejabberd_config:get_myhosts(),
+    Hosts = ?MYHOSTS,
     [announce_motd_update(Host, Packet) || Host <- Hosts].
 
 announce_motd_update(LServer, Packet) ->
@@ -702,7 +703,7 @@ announce_all_hosts_motd_delete(_Packet) ->
       fun(Host) ->
 	      Mod = gen_mod:db_mod(Host, ?MODULE),
 	      delete_motd(Mod, Host)
-      end, ejabberd_config:get_myhosts()).
+      end, ?MYHOSTS).
 
 -spec send_motd({presence(), ejabberd_c2s:state()}) -> {presence(), ejabberd_c2s:state()}.
 send_motd({_, #{pres_last := _}} = Acc) ->
@@ -714,8 +715,7 @@ send_motd({#presence{type = available},
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     case get_motd(Mod, LServer) of
 	{ok, Packet} ->
-	    CodecOpts = ejabberd_config:codec_options(LServer),
-	    try xmpp:decode(Packet, ?NS_CLIENT, CodecOpts) of
+	    try xmpp:decode(Packet, ?NS_CLIENT, [ignore_els]) of
 		Msg ->
 		    case is_motd_user(Mod, LUser, LServer) of
 			false ->
@@ -806,8 +806,7 @@ get_stored_motd(LServer) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     case get_motd(Mod, LServer) of
         {ok, Packet} ->
-	    CodecOpts = ejabberd_config:codec_options(LServer),
-	    try xmpp:decode(Packet, ?NS_CLIENT, CodecOpts) of
+	    try xmpp:decode(Packet, ?NS_CLIENT, [ignore_els]) of
 		#message{body = Body, subject = Subject} ->
 		    {xmpp:get_text(Subject), xmpp:get_text(Body)}
 	    catch _:{xmpp_codec, Why} ->
@@ -835,7 +834,7 @@ send_announcement_to_all(Host, SubjectS, BodyS) ->
 -spec get_access(global | binary()) -> atom().
 
 get_access(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, access).
+    gen_mod:get_module_opt(Host, ?MODULE, access, none).
 
 -spec add_store_hint(stanza()) -> stanza().
 add_store_hint(El) ->
@@ -844,24 +843,30 @@ add_store_hint(El) ->
 -spec route_forbidden_error(stanza()) -> ok.
 route_forbidden_error(Packet) ->
     Lang = xmpp:get_lang(Packet),
-    Err = xmpp:err_forbidden(<<"Access denied by service policy">>, Lang),
+    Err = xmpp:err_forbidden(<<"Denied by ACL">>, Lang),
     ejabberd_router:route_error(Packet, Err).
 
 -spec init_cache(module(), binary(), gen_mod:opts()) -> ok.
 init_cache(Mod, Host, Opts) ->
     case use_cache(Mod, Host) of
 	true ->
-	    CacheOpts = cache_opts(Opts),
+	    CacheOpts = cache_opts(Host, Opts),
 	    ets_cache:new(?MOTD_CACHE, CacheOpts);
 	false ->
 	    ets_cache:delete(?MOTD_CACHE)
     end.
 
--spec cache_opts(gen_mod:opts()) -> [proplists:property()].
-cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
+-spec cache_opts(binary(), gen_mod:opts()) -> [proplists:property()].
+cache_opts(Host, Opts) ->
+    MaxSize = gen_mod:get_opt(
+		cache_size, Opts,
+		ejabberd_config:cache_size(Host)),
+    CacheMissed = gen_mod:get_opt(
+		    cache_missed, Opts,
+		    ejabberd_config:cache_missed(Host)),
+    LifeTime = case gen_mod:get_opt(
+		      cache_life_time, Opts,
+		      ejabberd_config:cache_life_time(Host)) of
 		   infinity -> infinity;
 		   I -> timer:seconds(I)
 	       end,
@@ -871,7 +876,10 @@ cache_opts(Opts) ->
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false ->
+	    gen_mod:get_module_opt(
+	      Host, ?MODULE, use_cache,
+	      ejabberd_config:use_cache(Host))
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].
@@ -905,17 +913,4 @@ import(LServer, {sql, _}, DBType, Tab, List) ->
 
 mod_opt_type(access) -> fun acl:access_rules_validator/1;
 mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun (I) when is_integer(I), I > 0 -> I;
-        (infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
-
-mod_options(Host) ->
-    [{access, none},
-     {db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+mod_opt_type(_) -> [access, db_type].

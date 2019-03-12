@@ -5,7 +5,7 @@
 %%% Created : 15 Sep 2014 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -43,7 +43,7 @@
 %% add_commands allow exporting a class of commands, from
 %%   open: methods is not risky and can be called by without any access check
 %%   restricted (default): the same, but will appear only in ejabberdctl list.
-%%   admin – auth is required with XMLRPC and HTTP API and checked for admin privileges, works as usual in ejabberdctl.
+%%   admin – auth is required with XMLRPC and HTTP API and checked for admin priviledges, works as usual in ejabberdctl.
 %%   user - can be used through XMLRPC and HTTP API, even by user. Only admin can use the commands for other users.
 %%
 %% Then to perform an action, send a POST request to the following URL:
@@ -74,13 +74,12 @@
 
 -behaviour(gen_mod).
 
--export([start/2, stop/1, reload/3, process/2, mod_opt_type/1, depends/2,
-	 mod_options/1]).
+-export([start/2, stop/1, reload/3, process/2, mod_opt_type/1, depends/2]).
 
+-include("ejabberd.hrl").
 -include("xmpp.hrl").
 -include("logger.hrl").
 -include("ejabberd_http.hrl").
--include("ejabberd_stacktrace.hrl").
 
 -define(DEFAULT_API_VERSION, 0).
 
@@ -137,43 +136,39 @@ depends(_Host, _Opts) ->
 %% basic auth
 %% ----------
 
-extract_auth(#request{auth = HTTPAuth, ip = {IP, _}, opts = Opts}) ->
+extract_auth(#request{auth = HTTPAuth, ip = {IP, _}}) ->
     Info = case HTTPAuth of
-	       {SJID, Pass} ->
-		   try jid:decode(SJID) of
+            {SJID, Pass} ->
+                try jid:decode(SJID) of
 		       #jid{luser = User, lserver = Server} ->
-			   case ejabberd_auth:check_password(User, <<"">>, Server, Pass) of
+                        case ejabberd_auth:check_password(User, <<"">>, Server, Pass) of
 			       true ->
 				   #{usr => {User, Server, <<"">>}, caller_server => Server};
 			       false ->
 				   {error, invalid_auth}
-			   end
-		   catch _:{bad_jid, _} ->
-		       {error, invalid_auth}
-		   end;
-	       {oauth, Token, _} ->
+                        end
+		catch _:{bad_jid, _} ->
+			{error, invalid_auth}
+                end;
+            {oauth, Token, _} ->
 		   case ejabberd_oauth:check_token(Token) of
 		       {ok, {U, S}, Scope} ->
 			   #{usr => {U, S, <<"">>}, oauth_scope => Scope, caller_server => S};
 		       {false, Reason} ->
 			   {error, Reason}
-		   end;
-	       invalid ->
-		   {error, invalid_auth};
-	       _ ->
+                end;
+            _ ->
 		   #{}
-	   end,
+        end,
     case Info of
 	Map when is_map(Map) ->
-	    Tag = proplists:get_value(tag, Opts, <<>>),
-	    Map#{caller_module => ?MODULE, ip => IP, tag => Tag};
+	    Map#{caller_module => ?MODULE, ip => IP};
 	_ ->
 	    ?DEBUG("Invalid auth data: ~p", [Info]),
 	    Info
     end;
-extract_auth(#request{ip = IP, opts = Opts}) ->
-    Tag = proplists:get_value(tag, Opts, <<>>),
-    #{ip => IP, caller_module => ?MODULE, tag => Tag}.
+extract_auth(#request{ip = IP}) ->
+    #{ip => IP, caller_module => ?MODULE}.
 
 %% ------------------
 %% command processing
@@ -197,8 +192,8 @@ process([Call], #request{method = 'POST', data = Data, ip = IPPort} = Req) ->
         _:{error,{_,invalid_json}} = _Err ->
 	    ?DEBUG("Bad Request: ~p", [_Err]),
 	    badrequest_response(<<"Invalid JSON input">>);
-	?EX_RULE(_Class, _Error, Stack) ->
-            ?DEBUG("Bad Request: ~p ~p", [_Error, ?EX_STACK(Stack)]),
+	  _:_Error ->
+            ?DEBUG("Bad Request: ~p ~p", [_Error, erlang:get_stacktrace()]),
             badrequest_response()
     end;
 process([Call], #request{method = 'GET', q = Data, ip = {IP, _}} = Req) ->
@@ -214,9 +209,10 @@ process([Call], #request{method = 'GET', q = Data, ip = {IP, _}} = Req) ->
         %% TODO We need to refactor to remove redundant error return formatting
         throw:{error, unknown_command} ->
             json_format({404, 44, <<"Command not found.">>});
-        ?EX_RULE(_, _Error, Stack) ->
-            ?DEBUG("Bad Request: ~p ~p", [_Error, ?EX_STACK(Stack)]),
-            badrequest_response()
+        _:_Error ->
+
+        ?DEBUG("Bad Request: ~p ~p", [_Error, erlang:get_stacktrace()]),
+        badrequest_response()
     end;
 process([_Call], #request{method = 'OPTIONS', data = <<>>}) ->
     {200, ?OPTIONS_HEADER, []};
@@ -277,8 +273,20 @@ handle(Call, Auth, Args, Version) when is_atom(Call), is_list(Args) ->
     case ejabberd_commands:get_command_format(Call, Auth, Version) of
         {ArgsSpec, _} when is_list(ArgsSpec) ->
             Args2 = [{misc:binary_to_atom(Key), Value} || {Key, Value} <- Args],
+            Spec = lists:foldr(
+                    fun ({Key, binary}, Acc) ->
+                            [{Key, <<>>}|Acc];
+                        ({Key, string}, Acc) ->
+			    [{Key, ""}|Acc];
+                        ({Key, integer}, Acc) ->
+                            [{Key, 0}|Acc];
+                        ({Key, {list, _}}, Acc) ->
+                            [{Key, []}|Acc];
+                        ({Key, atom}, Acc) ->
+                            [{Key, undefined}|Acc]
+                    end, [], ArgsSpec),
 	    try
-          handle2(Call, Auth, Args2, Version)
+          handle2(Call, Auth, match(Args2, Spec), Version)
 	    catch throw:not_found ->
 		    {404, <<"not_found">>};
 		  throw:{not_found, Why} when is_atom(Why) ->
@@ -292,9 +300,9 @@ handle(Call, Auth, Args, Version) when is_atom(Call), is_list(Args) ->
 		  throw:{not_allowed, Msg} ->
 		    {401, iolist_to_binary(Msg)};
                   throw:{error, account_unprivileged} ->
-		      {403, 31, <<"Command need to be run with admin privilege.">>};
-		throw:{error, access_rules_unauthorized} ->
-		    {403, 32, <<"AccessRules: Account does not have the right to perform the operation.">>};
+        {403, 31, <<"Command need to be run with admin priviledge.">>};
+      throw:{error, access_rules_unauthorized} ->
+        {403, 32, <<"AccessRules: Account does not have the right to perform the operation.">>};
 		  throw:{invalid_parameter, Msg} ->
 		    {400, iolist_to_binary(Msg)};
 		  throw:{error, Why} when is_atom(Why) ->
@@ -305,8 +313,8 @@ handle(Call, Auth, Args, Version) when is_atom(Call), is_list(Args) ->
 		    {400, misc:atom_to_binary(Error)};
 		  throw:Msg when is_list(Msg); is_binary(Msg) ->
 		    {400, iolist_to_binary(Msg)};
-		  ?EX_RULE(Class, Error, Stack) ->
-		    ?ERROR_MSG("REST API Error: ~p:~p ~p", [Class, Error, ?EX_STACK(Stack)]),
+		  _Error ->
+		    ?ERROR_MSG("REST API Error: ~p ~p", [_Error, erlang:get_stacktrace()]),
 		    {500, <<"internal_error">>}
 	    end;
         {error, Msg} ->
@@ -327,20 +335,15 @@ handle2(Call, Auth, Args, Version) when is_atom(Call), is_list(Args) ->
 	    format_command_result(Call, Auth, Res, Version)
     end.
 
-get_elem_delete(A, L, F) ->
+get_elem_delete(A, L) ->
     case proplists:get_all_values(A, L) of
       [Value] -> {Value, proplists:delete(A, L)};
       [_, _ | _] ->
 	  %% Crash reporting the error
 	  exit({duplicated_attribute, A, L});
       [] ->
-	  case F of
-	      {list, _} ->
-		  {[], L};
-	      _ ->
-		  %% Report the error and then force a crash
-		  exit({attribute_not_found, A, L})
-	  end
+	  %% Report the error and then force a crash
+	  exit({attribute_not_found, A, L})
     end.
 
 format_args(Args, ArgsFormat) ->
@@ -349,7 +352,7 @@ format_args(Args, ArgsFormat) ->
 					  {Args1, Res}) ->
 					     {ArgValue, Args2} =
 						 get_elem_delete(ArgName,
-								 Args1, ArgFormat),
+								 Args1),
 					     Formatted = format_arg(ArgValue,
 								    ArgFormat),
 					     {Args2, Res ++ [Formatted]}
@@ -357,10 +360,7 @@ format_args(Args, ArgsFormat) ->
 				     {Args, []}, ArgsFormat),
     case ArgsRemaining of
       [] -> R;
-      L when is_list(L) ->
-	  throw({invalid_parameter,
-		 io_lib:format("Request have unknown arguments: ~w",
-			       [[N || {N, _} <- L]])})
+      L when is_list(L) -> exit({additional_unused_args, L})
     end.
 
 format_arg({Elements},
@@ -429,6 +429,9 @@ process_unicode_codepoints(Str) ->
 %% internal helpers
 %% ----------------
 
+match(Args, Spec) ->
+    [{Key, proplists:get_value(Key, Args, Default)} || {Key, Default} <- Spec].
+
 format_command_result(Cmd, Auth, Result, Version) ->
     {_, ResultFormat} = ejabberd_commands:get_command_format(Cmd, Auth, Version),
     case {ResultFormat, Result} of
@@ -481,9 +484,6 @@ format_result(Code, {Name, restuple}) ->
 format_result(Els, {Name, {list, {_, {tuple, [{_, atom}, _]}} = Fmt}}) ->
     {misc:atom_to_binary(Name), {[format_result(El, Fmt) || El <- Els]}};
 
-format_result(Els, {Name, {list, {_, {tuple, [{name, string}, {value, _}]}} = Fmt}}) ->
-    {misc:atom_to_binary(Name), {[format_result(El, Fmt) || El <- Els]}};
-
 format_result(Els, {Name, {list, Def}}) ->
     {misc:atom_to_binary(Name), [element(2, format_result(El, Def)) || El <- Els]};
 
@@ -491,11 +491,6 @@ format_result(Tuple, {_Name, {tuple, [{_, atom}, ValFmt]}}) ->
     {Name2, Val} = Tuple,
     {_, Val2} = format_result(Val, ValFmt),
     {misc:atom_to_binary(Name2), Val2};
-
-format_result(Tuple, {_Name, {tuple, [{name, string}, {value, _} = ValFmt]}}) ->
-    {Name2, Val} = Tuple,
-    {_, Val2} = format_result(Val, ValFmt),
-    {iolist_to_binary(Name2), Val2};
 
 format_result(Tuple, {Name, {tuple, Def}}) ->
     Els = lists:zip(tuple_to_list(Tuple), Def),
@@ -507,8 +502,6 @@ format_result(404, {_Name, _}) ->
 
 format_error_result(conflict, Code, Msg) ->
     {409, Code, iolist_to_binary(Msg)};
-format_error_result(not_exists, Code, Msg) ->
-    {404, Code, iolist_to_binary(Msg)};
 format_error_result(_ErrorAtom, Code, Msg) ->
     {500, Code, iolist_to_binary(Msg)}.
 
@@ -558,7 +551,7 @@ hide_sensitive_args(NonListArgs) ->
     NonListArgs.
 
 permission_addon() ->
-    Access = gen_mod:get_module_opt(global, ?MODULE, admin_ip_access),
+    Access = gen_mod:get_module_opt(global, ?MODULE, admin_ip_access, none),
     Rules = acl:resolve_access(Access, global),
     R = case Rules of
 	    all ->
@@ -583,5 +576,5 @@ permission_addon() ->
 		 end, {1, []}, R),
     Res.
 
-mod_opt_type(admin_ip_access) -> fun acl:access_rules_validator/1.
-mod_options(_) -> [{admin_ip_access, none}].
+mod_opt_type(admin_ip_access) -> fun acl:access_rules_validator/1;
+mod_opt_type(_) -> [admin_ip_access].

@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -18,9 +18,13 @@
 %%%
 %%%----------------------------------------------------------------------
 
+-include("ejabberd.hrl").
+
 -define(MAX_USERS_DEFAULT, 200).
 
 -define(SETS, gb_sets).
+
+-define(DICT, dict).
 
 -record(lqueue,
 {
@@ -59,11 +63,8 @@
     max_users                            = ?MAX_USERS_DEFAULT :: non_neg_integer() | none,
     logging                              = false :: boolean(),
     vcard                                = <<"">> :: binary(),
-    vcard_xupdate                        = undefined :: undefined | external | binary(),
-    captcha_whitelist                    = (?SETS):empty() :: gb_sets:set(),
-    mam                                  = false :: boolean(),
-    pubsub                               = <<"">> :: binary(),
-    lang                                 = ejabberd_config:get_mylang() :: binary()
+    captcha_whitelist                    = (?SETS):empty() :: ?TGB_SET,
+    mam                                  = false :: boolean()
 }).
 
 -type config() :: #config{}.
@@ -100,40 +101,21 @@
     room                    = <<"">> :: binary(),
     host                    = <<"">> :: binary(),
     server_host             = <<"">> :: binary(),
-    access                  = {none,none,none,none,none} :: {atom(), atom(), atom(), atom(), atom()},
+    access                  = {none,none,none,none} :: {atom(), atom(), atom(), atom()},
     jid                     = #jid{} :: jid(),
     config                  = #config{} :: config(),
-    users                   = #{} :: map(),
-    subscribers             = #{} :: map(),
-    subscriber_nicks        = #{} :: map(),
+    users                   = (?DICT):new() :: ?TDICT,
+    subscribers             = (?DICT):new() :: ?TDICT,
+    subscriber_nicks        = (?DICT):new() :: ?TDICT,
     last_voice_request_time = treap:empty() :: treap:treap(),
-    robots                  = #{} :: map(),
-    nicks                   = #{} :: map(),
-    affiliations            = #{} :: map(),
+    robots                  = (?DICT):new() :: ?TDICT,
+    nicks                   = (?DICT):new() :: ?TDICT,
+    affiliations            = (?DICT):new() :: ?TDICT,
     history                 :: lqueue(),
-    subject                 = [] :: [text()],
+    subject                 = <<"">> :: binary(),
     subject_author          = <<"">> :: binary(),
-    just_created            = misc:now_to_usec(now()) :: true | integer(),
+    just_created            = false :: boolean(),
     activity                = treap:empty() :: treap:treap(),
     room_shaper             = none :: shaper:shaper(),
     room_queue              :: p1_queue:queue() | undefined
 }).
-
-%%------------------------------------------------------------------------
-%%
-%% Skills patch:
-%% Define message types that we shouldn't include in the offline message flow.
-%% Also contains various constant values that are the locations of stanza data.
-%%
-%%------------------------------------------------------------------------
-
--define(VsFriendsMessageType, 1).
--define(NudgeMessageType, 3).
-
--define(NoOfflineToSenderTypes, 
-        [
-         ?VsFriendsMessageType, 
-         ?NudgeMessageType
-        ]).
-
--define(SdkElementsPosition, 3).

@@ -5,7 +5,7 @@
 %%% Created : 17 Feb 2006 by Mickael Remond <mremond@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,6 @@
 
 -export([start/1,
 	 stop/1,
-         use_cache/1,
 	 allow_anonymous/1,
 	 is_sasl_anonymous_enabled/1,
 	 is_login_anonymous_enabled/1,
@@ -45,6 +44,7 @@
 	 get_users/2, count_users/2, store_type/1,
 	 plain_password_required/1, opt_type/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("jid.hrl").
 
@@ -60,9 +60,6 @@ stop(Host) ->
 			  ?MODULE, register_connection, 100),
     ejabberd_hooks:delete(sm_remove_connection_hook, Host,
 			  ?MODULE, unregister_connection, 100).
-
-use_cache(_) ->
-    false.
 
 %% Return true if anonymous is allowed for host or false otherwise
 allow_anonymous(Host) ->
@@ -177,7 +174,10 @@ plain_password_required(_) ->
 store_type(_) ->
     external.
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-spec opt_type(allow_multiple_connection) -> fun((boolean()) -> boolean());
+	      (anonymous_protocol) -> fun((sasl_anon | login_anon | both) ->
+						 sasl_anon | login_anon | both);
+	      (atom()) -> [atom()].
 opt_type(allow_multiple_connections) ->
     fun (V) when is_boolean(V) -> V end;
 opt_type(anonymous_protocol) ->

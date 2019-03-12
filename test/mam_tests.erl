@@ -3,7 +3,7 @@
 %%% Created : 14 Nov 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,7 @@
 		muc_jid/1, is_feature_advertised/3, get_event/1, put_event/2]).
 
 -include("suite.hrl").
--define(VERSIONS, [?NS_MAM_TMP, ?NS_MAM_0, ?NS_MAM_1, ?NS_MAM_2]).
+-define(VERSIONS, [?NS_MAM_TMP, ?NS_MAM_0, ?NS_MAM_1]).
 
 %%%===================================================================
 %%% API
@@ -58,23 +58,22 @@ feature_enabled(Config) ->
     true = sets:is_subset(RequiredFeatures, UserFeatures),
     ct:comment("Checking if all MAM conference service features are enabled"),
     true = lists:member(?NS_MAM_1, MUCFeatures),
-    true = lists:member(?NS_MAM_2, MUCFeatures),
     clean(disconnect(Config)).
 
 fake_by(Config) ->
     BareServerJID = server_jid(Config),
-    FullServerJID = jid:replace_resource(BareServerJID, p1_rand:get_string()),
+    FullServerJID = jid:replace_resource(BareServerJID, randoms:get_string()),
     FullMyJID = my_jid(Config),
     BareMyJID = jid:remove_resource(FullMyJID),
     Fakes = lists:flatmap(
 	      fun(JID) ->
-		      [#mam_archived{id = p1_rand:get_string(), by = JID},
-		       #stanza_id{id = p1_rand:get_string(), by = JID}]
+		      [#mam_archived{id = randoms:get_string(), by = JID},
+		       #stanza_id{id = randoms:get_string(), by = JID}]
 	      end, [BareServerJID, FullServerJID, BareMyJID, FullMyJID]),
     Body = xmpp:mk_text(<<"body">>),
-    ForeignJID = jid:make(p1_rand:get_string()),
-    Archived = #mam_archived{id = p1_rand:get_string(), by = ForeignJID},
-    StanzaID = #stanza_id{id = p1_rand:get_string(), by = ForeignJID},
+    ForeignJID = jid:make(randoms:get_string()),
+    Archived = #mam_archived{id = randoms:get_string(), by = ForeignJID},
+    StanzaID = #stanza_id{id = randoms:get_string(), by = ForeignJID},
     #message{body = Body, sub_els = SubEls} =
 	send_recv(Config, #message{to = FullMyJID,
 				   body = Body,
@@ -260,7 +259,6 @@ muc_master(Config) ->
     %% MAM feature should not be advertised at this point,
     %% because MAM is not enabled so far
     false = is_feature_advertised(Config, ?NS_MAM_1, Room),
-    false = is_feature_advertised(Config, ?NS_MAM_2, Room),
     %% Fill in some history
     send_messages_to_room(Config, lists:seq(1, 21)),
     %% We now should be able to retrieve those via MAM, even though
@@ -268,14 +266,24 @@ muc_master(Config) ->
     recv_messages_from_room(Config, lists:seq(2, 21)),
     %% Now enable MAM for the conference
     %% Retrieve config first
-    CfgOpts = muc_tests:get_config(Config),
-    %% Find the MAM field in the config
-    true = proplists:is_defined(mam, CfgOpts),
-    %% Enable MAM
-    [104] = muc_tests:set_config(Config, [{mam, true}]),
+    #iq{type = result, sub_els = [#muc_owner{config = #xdata{} = RoomCfg}]} =
+        send_recv(Config, #iq{type = get, sub_els = [#muc_owner{}],
+                              to = Room}),
+    %% Find the MAM field in the config and enable it
+    NewFields = lists:flatmap(
+		  fun(#xdata_field{var = <<"mam">> = Var}) ->
+			  [#xdata_field{var = Var, values = [<<"1">>]}];
+		     (_) ->
+			  []
+		  end, RoomCfg#xdata.fields),
+    NewRoomCfg = #xdata{type = submit, fields = NewFields},
+    #iq{type = result, sub_els = []} =
+	send_recv(Config, #iq{type = set, to = Room,
+			      sub_els = [#muc_owner{config = NewRoomCfg}]}),
+    #message{from = Room, type = groupchat,
+	     sub_els = [#muc_user{status_codes = [104]}]} = recv_message(Config),
     %% Check if MAM has been enabled
     true = is_feature_advertised(Config, ?NS_MAM_1, Room),
-    true = is_feature_advertised(Config, ?NS_MAM_2, Room),
     %% We now sending some messages again
     send_messages_to_room(Config, lists:seq(1, 5)),
     %% And retrieve them via MAM again.
@@ -350,7 +358,7 @@ recv_archived_messages(Config, From, To, QID, Range) ->
                                sub_els =
                                    [#forwarded{
                                        delay = #delay{},
-                                       sub_els = [El]}]}]} = recv_message(Config),
+                                       xml_els = [El]}]}]} = recv_message(Config),
 	      #message{from = From, to = To,
 		       body = Body} = xmpp:decode(El)
       end, Range).
@@ -369,7 +377,7 @@ send_query(Config, #mam_query{xmlns = NS} = Query) ->
     maybe_recv_iq_result(Config, NS, I),
     I.
 
-recv_fin(Config, I, QueryID, NS, IsComplete) when NS == ?NS_MAM_1; NS == ?NS_MAM_2 ->
+recv_fin(Config, I, QueryID, ?NS_MAM_1 = NS, IsComplete) ->
     ct:comment("Receiving fin iq for namespace '~s'", [NS]),
     #iq{type = result, id = I,
 	sub_els = [#mam_fin{xmlns = NS,
@@ -377,7 +385,7 @@ recv_fin(Config, I, QueryID, NS, IsComplete) when NS == ?NS_MAM_1; NS == ?NS_MAM
 			    complete = Complete,
 			    rsm = RSM}]} = recv_iq(Config),
     ct:comment("Checking if complete is ~s", [IsComplete]),
-    ?match(IsComplete, Complete),
+    Complete = IsComplete,
     RSM;
 recv_fin(Config, I, QueryID, ?NS_MAM_TMP = NS, _IsComplete) ->
     ct:comment("Receiving fin iq for namespace '~s'", [NS]),
@@ -394,7 +402,7 @@ recv_fin(Config, _, QueryID, ?NS_MAM_0 = NS, IsComplete) ->
 	     complete = Complete,
 	     rsm = RSM} = xmpp:get_subtag(FinMsg, #mam_fin{xmlns = NS}),
     ct:comment("Checking if complete is ~s", [IsComplete]),
-    ?match(IsComplete, Complete),
+    Complete = IsComplete,
     RSM.
 
 send_messages_to_room(Config, Range) ->
@@ -416,9 +424,10 @@ recv_messages_from_room(Config, Range) ->
     Room = muc_room_jid(Config),
     MyNickJID = jid:replace_resource(Room, MyNick),
     MyJID = my_jid(Config),
-    QID = p1_rand:get_string(),
+    QID = randoms:get_string(),
+    Count = length(Range),
     I = send(Config, #iq{type = set, to = Room,
-			 sub_els = [#mam_query{xmlns = ?NS_MAM_2, id = QID}]}),
+			 sub_els = [#mam_query{xmlns = ?NS_MAM_1, id = QID}]}),
     lists:foreach(
       fun(N) ->
 	      Body = xmpp:mk_text(integer_to_binary(N)),
@@ -426,22 +435,21 @@ recv_messages_from_room(Config, Range) ->
 		 to = MyJID, from = Room,
 		 sub_els =
 		     [#mam_result{
-			 xmlns = ?NS_MAM_2,
+			 xmlns = ?NS_MAM_1,
 			 queryid = QID,
 			 sub_els =
 			     [#forwarded{
 				 delay = #delay{},
-				 sub_els = [El]}]}]} = recv_message(Config),
+				 xml_els = [El]}]}]} = recv_message(Config),
 	      #message{from = MyNickJID,
 		       type = groupchat,
 		       body = Body} = xmpp:decode(El)
       end, Range),
     #iq{from = Room, id = I, type = result,
-	sub_els = [#mam_fin{xmlns = ?NS_MAM_2,
+	sub_els = [#mam_fin{xmlns = ?NS_MAM_1,
 			    id = QID,
-			    rsm = RSM,
-			    complete = true}]} = recv_iq(Config),
-    match_rsm_count(RSM, length(Range)).
+			    rsm = #rsm_set{count = Count},
+			    complete = true}]} = recv_iq(Config).
 
 query_all(Config, From, To) ->
     lists:foreach(
@@ -450,12 +458,11 @@ query_all(Config, From, To) ->
       end, ?VERSIONS).
 
 query_all(Config, From, To, NS) ->
-    QID = p1_rand:get_string(),
+    QID = randoms:get_string(),
     Range = lists:seq(1, 5),
     ID = send_query(Config, #mam_query{xmlns = NS, id = QID}),
     recv_archived_messages(Config, From, To, QID, Range),
-    RSM = recv_fin(Config, ID, QID, NS, _Complete = true),
-    match_rsm_count(RSM, 5).
+    #rsm_set{count = 5} = recv_fin(Config, ID, QID, NS, _Complete = true).
 
 query_with(Config, From, To) ->
     lists:foreach(
@@ -466,7 +473,7 @@ query_with(Config, From, To) ->
 query_with(Config, From, To, NS) ->
     Peer = ?config(peer, Config),
     BarePeer = jid:remove_resource(Peer),
-    QID = p1_rand:get_string(),
+    QID = randoms:get_string(),
     Range = lists:seq(1, 5),
     lists:foreach(
       fun(JID) ->
@@ -481,8 +488,7 @@ query_with(Config, From, To, NS) ->
 		      end,
 	      ID = send_query(Config, Query),
 	      recv_archived_messages(Config, From, To, QID, Range),
-	      RSM = recv_fin(Config, ID, QID, NS, true),
-	      match_rsm_count(RSM, 5)
+	      #rsm_set{count = 5} = recv_fin(Config, ID, QID, NS, true)
       end, [Peer, BarePeer]).
 
 query_rsm_max(Config, From, To) ->
@@ -494,14 +500,13 @@ query_rsm_max(Config, From, To) ->
 query_rsm_max(Config, From, To, NS) ->
     lists:foreach(
       fun(Max) ->
-	      QID = p1_rand:get_string(),
+	      QID = randoms:get_string(),
 	      Range = lists:sublist(lists:seq(1, Max), 5),
 	      Query = #mam_query{xmlns = NS, id = QID, rsm = #rsm_set{max = Max}},
 	      ID = send_query(Config, Query),
 	      recv_archived_messages(Config, From, To, QID, Range),
 	      IsComplete = Max >= 5,
-	      RSM = recv_fin(Config, ID, QID, NS, IsComplete),
-	      match_rsm_count(RSM, 5)
+	      #rsm_set{count = 5} = recv_fin(Config, ID, QID, NS, IsComplete)
       end, lists:seq(0, 6)).
 
 query_rsm_after(Config, From, To) ->
@@ -515,14 +520,13 @@ query_rsm_after(Config, From, To, NS) ->
       fun(Range, #rsm_first{data = After}) ->
 	      ct:comment("Retrieving ~p messages after '~s'",
 			 [length(Range), After]),
-	      QID = p1_rand:get_string(),
+	      QID = randoms:get_string(),
 	      Query = #mam_query{xmlns = NS, id = QID,
 				 rsm = #rsm_set{'after' = After}},
 	      ID = send_query(Config, Query),
 	      recv_archived_messages(Config, From, To, QID, Range),
-	      RSM = #rsm_set{first = First} =
+	      #rsm_set{count = 5, first = First} =
 		  recv_fin(Config, ID, QID, NS, true),
-	      match_rsm_count(RSM, 5),
 	      First
       end, #rsm_first{data = undefined},
       [lists:seq(N, 5) || N <- lists:seq(1, 6)]).
@@ -538,20 +542,12 @@ query_rsm_before(Config, From, To, NS) ->
       fun(Range, Before) ->
 	      ct:comment("Retrieving ~p messages before '~s'",
 			 [length(Range), Before]),
-	      QID = p1_rand:get_string(),
+	      QID = randoms:get_string(),
 	      Query = #mam_query{xmlns = NS, id = QID,
 				 rsm = #rsm_set{before = Before}},
 	      ID = send_query(Config, Query),
 	      recv_archived_messages(Config, From, To, QID, Range),
-	      RSM = #rsm_set{last = Last} =
+	      #rsm_set{count = 5, last = Last} =
 		  recv_fin(Config, ID, QID, NS, true),
-	      match_rsm_count(RSM, 5),
 	      Last
       end, <<"">>, lists:reverse([lists:seq(1, N) || N <- lists:seq(0, 5)])).
-
-match_rsm_count(#rsm_set{count = undefined}, _) ->
-    %% The backend doesn't support counting
-    ok;
-match_rsm_count(#rsm_set{count = Count1}, Count2) ->
-    ct:comment("Checking if RSM 'count' is ~p", [Count2]),
-    ?match(Count2, Count1).

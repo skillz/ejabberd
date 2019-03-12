@@ -5,7 +5,7 @@
 %%% Created :  7 May 2006 by Mickael Remond <mremond@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -61,6 +61,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("ejabberd_commands.hrl").
 
@@ -103,7 +104,7 @@ get_commands_spec() ->
 			module = ?MODULE, function = status,
 			result_desc = "Result tuple",
 			result_example = {ok, <<"The node ejabberd@localhost is started with status: started"
-						"ejabberd X.X is running in that node">>},
+			    "ejabberd X.X is running in that node">>},
 			args = [], result = {res, restuple}},
      #ejabberd_commands{name = stop, tags = [server],
 			desc = "Stop ejabberd gracefully",
@@ -125,9 +126,9 @@ get_commands_spec() ->
      #ejabberd_commands{name = stop_kindly, tags = [server],
 			desc = "Inform users and rooms, wait, and stop the server",
 			longdesc = "Provide the delay in seconds, and the "
-			"announcement quoted, for example: \n"
-			"ejabberdctl stop_kindly 60 "
-			"\\\"The server will stop in one minute.\\\"",
+			    "announcement quoted, for example: \n"
+			    "ejabberdctl stop_kindly 60 "
+			    "\\\"The server will stop in one minute.\\\"",
 			module = ?MODULE, function = stop_kindly,
 			args_desc = ["Seconds to wait", "Announcement to send, with quotes"],
 			args_example = [60, <<"Server will stop now.">>],
@@ -191,7 +192,7 @@ get_commands_spec() ->
 			result_example = [<<"user1">>, <<"user2">>],
 			args = [{host, binary}],
 			result = {users, {list, {username, string}}}},
-     #ejabberd_commands{name = registered_vhosts, tags = [server],
+	 #ejabberd_commands{name = registered_vhosts, tags = [server],
 			desc = "List all registered vhosts in SERVER",
 			module = ?MODULE, function = registered_vhosts,
 			result_desc = "List of available vhosts",
@@ -214,7 +215,7 @@ get_commands_spec() ->
      #ejabberd_commands{name = leave_cluster, tags = [cluster],
 			desc = "Remove and shutdown Node from the running cluster",
 			longdesc = "This command can be run from any running node of the cluster, "
-			"even the node to be removed.",
+			    "even the node to be removed.",
 			module = ?MODULE, function = leave_cluster,
 			args_desc = ["Nodename of the node to kick from the cluster"],
 			args_example = [<<"ejabberd1@machine8">>],
@@ -241,6 +242,7 @@ get_commands_spec() ->
 			args_example = ["/var/lib/ejabberd/jabberd14/"],
 			args = [{file, string}],
 			result = {res, restuple}},
+
      #ejabberd_commands{name = import_piefxis, tags = [mnesia],
 			desc = "Import users data from a PIEFXIS file (XEP-0227)",
 			module = ejabberd_piefxis, function = import_file,
@@ -275,8 +277,6 @@ get_commands_spec() ->
 
      #ejabberd_commands{name = import_prosody, tags = [mnesia, sql, riak],
 			desc = "Import data from Prosody",
-			longdesc = "Note: this method requires ejabberd compiled with optional tools support "
-				"and package must provide optional luerl dependency.",
 			module = prosody2ejabberd, function = from_dir,
 			args_desc = ["Full path to the Prosody data directory"],
 			args_example = ["/var/lib/prosody/datadump/"],
@@ -321,9 +321,9 @@ get_commands_spec() ->
 			desc = "Change the erlang node name in a backup file",
 			module = ?MODULE, function = mnesia_change_nodename,
 			args_desc = ["Name of the old erlang node", "Name of the new node",
-				     "Path to old backup file", "Path to the new backup file"],
+			    "Path to old backup file", "Path to the new backup file"],
 			args_example = ["ejabberd@machine1", "ejabberd@machine2",
-					"/var/lib/ejabberd/old.backup", "/var/lib/ejabberd/new.backup"],
+			    "/var/lib/ejabberd/old.backup", "/var/lib/ejabberd/new.backup"],
 			args = [{oldnodename, string}, {newnodename, string},
 				{oldbackup, string}, {newbackup, string}],
 			result = {res, restuple}},
@@ -413,7 +413,7 @@ stop_kindly(DelaySeconds, AnnouncementTextString) ->
 	      ejabberd_listener, stop_listeners, []},
 	     {"Sending announcement to connected users",
 	      mod_announce, send_announcement_to_all,
-	      [ejabberd_config:get_myname(), Subject, AnnouncementText]},
+	      [?MYNAME, Subject, AnnouncementText]},
 	     {"Sending service message to MUC rooms",
 	      ejabberd_admin, send_service_message_all_mucs,
 	      [Subject, AnnouncementText]},
@@ -421,7 +421,7 @@ stop_kindly(DelaySeconds, AnnouncementTextString) ->
 	     {"Stopping ejabberd", application, stop, [ejabberd]},
 	     {"Stopping Mnesia", mnesia, stop, []},
 	     {"Stopping Erlang node", init, stop, []}
-	    ],
+    ],
     NumberLast = length(Steps),
     TimestampStart = calendar:datetime_to_gregorian_seconds({date(), time()}),
     lists:foldl(
@@ -447,7 +447,7 @@ send_service_message_all_mucs(Subject, AnnouncementText) ->
 			  ServerHost, mod_muc, <<"conference.@HOST@">>),
 	      mod_muc:broadcast_service_message(ServerHost, MUCHost, Message)
       end,
-      ejabberd_config:get_myhosts()).
+      ?MYHOSTS).
 
 %%%
 %%% ejabberd_update
@@ -469,8 +469,8 @@ update_module(ModuleNameBin) when is_binary(ModuleNameBin) ->
 update_module(ModuleNameString) ->
     ModuleName = list_to_atom(ModuleNameString),
     case ejabberd_update:update([ModuleName]) of
-	{ok, _Res} -> {ok, []};
-	{error, Reason} -> {error, Reason}
+          {ok, _Res} -> {ok, []};
+          {error, Reason} -> {error, Reason}
     end.
 
 %%%
@@ -500,7 +500,7 @@ registered_users(Host) ->
     lists:map(fun({U, _S}) -> U end, SUsers).
 
 registered_vhosts() ->
-    ejabberd_config:get_myhosts().
+	?MYHOSTS.
 
 reload_config() ->
     ejabberd_config:reload_file().
@@ -542,6 +542,7 @@ import_dir(Path) ->
 	    {cannot_import_dir, String}
     end.
 
+
 %%%
 %%% Purge DB
 %%%
@@ -550,13 +551,13 @@ delete_expired_messages() ->
     lists:foreach(
       fun(Host) ->
               {atomic, ok} = mod_offline:remove_expired_messages(Host)
-      end, ejabberd_config:get_myhosts()).
+      end, ?MYHOSTS).
 
 delete_old_messages(Days) ->
     lists:foreach(
       fun(Host) ->
               {atomic, _} = mod_offline:remove_old_messages(Days, Host)
-      end, ejabberd_config:get_myhosts()).
+      end, ?MYHOSTS).
 
 %%%
 %%% Mnesia management
@@ -623,12 +624,13 @@ keep_tables() ->
 %% loaded modules
 keep_modules_tables() ->
     lists:map(fun(Module) -> module_tables(Module) end,
-	      gen_mod:loaded_modules(ejabberd_config:get_myname())).
+	      gen_mod:loaded_modules(?MYNAME)).
 
 %% TODO: This mapping should probably be moved to a callback function in each
 %% module.
 %% Mapping between modules and their tables
 module_tables(mod_announce) -> [motd, motd_users];
+module_tables(mod_irc) -> [irc_custom];
 module_tables(mod_last) -> [last_activity];
 module_tables(mod_muc) -> [muc_room, muc_registered];
 module_tables(mod_offline) -> [offline_msg];

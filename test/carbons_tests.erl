@@ -3,7 +3,7 @@
 %%% Created : 16 Nov 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -135,7 +135,7 @@ prepare_slave(Config) ->
 send_messages(Config) ->
     Server = ?config(server, Config),
     MyJID = my_jid(Config),
-    JID = jid:make(p1_rand:get_string(), Server),
+    JID = jid:make(randoms:get_string(), Server),
     lists:foreach(
       fun({send, #message{type = Type} = Msg}) ->
 	      I = send(Config, Msg#message{to = JID}),
@@ -169,11 +169,11 @@ recv_carbons(Config) ->
 		  recv_message(Config),
 	      case Dir of
 		  send ->
-		      #carbons_sent{forwarded = #forwarded{sub_els = [El]}} =
+		      #carbons_sent{forwarded = #forwarded{xml_els = [El]}} =
 			  xmpp:get_subtag(CarbonMsg, #carbons_sent{}),
 		      #message{body = Body} = xmpp:decode(El);
 		  recv ->
-		      #carbons_received{forwarded = #forwarded{sub_els = [El]}}=
+		      #carbons_received{forwarded = #forwarded{xml_els = [El]}}=
 			  xmpp:get_subtag(CarbonMsg, #carbons_received{}),
 		      #message{body = Body} = xmpp:decode(El)
 	      end;

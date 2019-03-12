@@ -5,7 +5,7 @@
 %%% Created : 21 Aug 2007 by Badlop <badlop@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,13 +31,13 @@
 %%% TODO: commands strings should be strings without ~n
 
 -module(ejabberd_xmlrpc).
--behaviour(ejabberd_listener).
 
 -author('badlop@process-one.net').
 
--export([start/2, start_link/2, handler/2, process/2, accept/1,
-	 transform_listen_option/2, listen_opt_type/1, listen_options/0]).
+-export([start/2, handler/2, process/2, socket_type/0,
+	 transform_listen_option/2, listen_opt_type/1]).
 
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("ejabberd_http.hrl").
 -include("mod_roster.hrl").
@@ -191,11 +191,7 @@
 start({gen_tcp = _SockMod, Socket}, Opts) ->
     ejabberd_http:start({gen_tcp, Socket}, [{xmlrpc, true}|Opts]).
 
-start_link({gen_tcp = _SockMod, Socket}, Opts) ->
-    ejabberd_http:start_link({gen_tcp, Socket}, [{xmlrpc, true}|Opts]).
-
-accept(Pid) ->
-    ejabberd_http:accept(Pid).
+socket_type() -> raw.
 
 %% -----------------------------
 %% HTTP interface
@@ -580,7 +576,10 @@ listen_opt_type(access_commands) ->
 		      {<<"ejabberd_xmlrpc compatibility shim">>,
 		       {[?MODULE], [{access, Ac}], Commands}}
 	      end, lists:flatten(Opts))
-    end.
-
-listen_options() ->
-    [{access_commands, []}].
+    end;
+listen_opt_type(maxsessions) ->
+    fun(I) when is_integer(I), I>0 -> I end;
+listen_opt_type(timeout) ->
+    fun(I) when is_integer(I), I>0 -> I end;
+listen_opt_type(_) ->
+    [access_commands, maxsessions, timeout].

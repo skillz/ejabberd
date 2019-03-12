@@ -1,5 +1,5 @@
 --
--- ejabberd, Copyright (C) 2002-2019   ProcessOne
+-- ejabberd, Copyright (C) 2002-2017   ProcessOne
 --
 -- This program is free software; you can redistribute it and/or
 -- modify it under the terms of the GNU General Public License as
@@ -101,10 +101,10 @@ CREATE TABLE archive (
     created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE INDEX i_username_timestamp ON archive USING btree (username, timestamp);
-CREATE INDEX i_username_peer ON archive USING btree (username, peer);
-CREATE INDEX i_username_bare_peer ON archive USING btree (username, bare_peer);
+CREATE INDEX i_username ON archive USING btree (username);
 CREATE INDEX i_timestamp ON archive USING btree (timestamp);
+CREATE INDEX i_peer ON archive USING btree (peer);
+CREATE INDEX i_bare_peer ON archive USING btree (bare_peer);
 
 CREATE TABLE archive_prefs (
     username text NOT NULL PRIMARY KEY,
@@ -221,7 +221,7 @@ CREATE TABLE pubsub_node (
   host text NOT NULL,
   node text NOT NULL,
   parent text NOT NULL DEFAULT '',
-  plugin text NOT NULL,
+  "type" text NOT NULL,
   nodeid SERIAL UNIQUE
 );
 CREATE INDEX i_pubsub_node_parent ON pubsub_node USING btree (parent);
@@ -254,8 +254,8 @@ CREATE TABLE pubsub_item (
   nodeid bigint REFERENCES pubsub_node(nodeid) ON DELETE CASCADE,
   itemid text NOT NULL,
   publisher text NOT NULL,
-  creation varchar(32) NOT NULL,
-  modification varchar(32) NOT NULL,
+  creation text NOT NULL,
+  modification text NOT NULL,
   payload text NOT NULL DEFAULT ''
 );
 CREATE INDEX i_pubsub_item_itemid ON pubsub_item USING btree (itemid);
@@ -308,17 +308,14 @@ CREATE TABLE muc_online_users (
 CREATE UNIQUE INDEX i_muc_online_users ON muc_online_users USING btree (username, server, resource, name, host);
 CREATE INDEX i_muc_online_users_us ON muc_online_users USING btree (username, server);
 
-CREATE TABLE muc_room_subscribers (
-   room text NOT NULL,
-   host text NOT NULL,
-   jid text NOT NULL,
-   nick text NOT NULL,
-   nodes text NOT NULL,
-   created_at TIMESTAMP NOT NULL DEFAULT now()
+CREATE TABLE irc_custom (
+    jid text NOT NULL,
+    host text NOT NULL,
+    data text NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE INDEX i_muc_room_subscribers_host_jid ON muc_room_subscribers USING btree (host, jid);
-CREATE UNIQUE INDEX i_muc_room_subscribers_host_room_jid ON muc_room_subscribers USING btree (host, room, jid);
+CREATE UNIQUE INDEX i_irc_custom_jid_host ON irc_custom USING btree (jid, host);
 
 CREATE TABLE motd (
     username text PRIMARY KEY,
@@ -377,6 +374,16 @@ CREATE TABLE bosh (
 
 CREATE UNIQUE INDEX i_bosh_sid ON bosh USING btree (sid);
 
+CREATE TABLE carboncopy (
+    username text NOT NULL,
+    resource text NOT NULL,
+    namespace text NOT NULL,
+    node text NOT NULL
+);
+
+CREATE UNIQUE INDEX i_carboncopy_ur ON carboncopy USING btree (username, resource);
+CREATE INDEX i_carboncopy_user ON carboncopy USING btree (username);
+
 CREATE TABLE proxy65 (
     sid text NOT NULL,
     pid_t text NOT NULL,
@@ -388,67 +395,3 @@ CREATE TABLE proxy65 (
 
 CREATE UNIQUE INDEX i_proxy65_sid ON proxy65 USING btree (sid);
 CREATE INDEX i_proxy65_jid ON proxy65 USING btree (jid_i);
-
-CREATE TABLE push_session (
-    username text NOT NULL,
-    timestamp bigint NOT NULL,
-    service text NOT NULL,
-    node text NOT NULL,
-    xml text NOT NULL
-);
-
-CREATE UNIQUE INDEX i_push_usn ON push_session USING btree (username, service, node);
-CREATE UNIQUE INDEX i_push_ut ON push_session USING btree (username, timestamp);
-
-CREATE TABLE mix_channel (
-    channel text NOT NULL,
-    service text NOT NULL,
-    username text NOT NULL,
-    domain text NOT NULL,
-    jid text NOT NULL,
-    hidden boolean NOT NULL,
-    hmac_key text NOT NULL,
-    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE UNIQUE INDEX i_mix_channel ON mix_channel (channel, service);
-CREATE INDEX i_mix_channel_serv ON mix_channel (service);
-
-CREATE TABLE mix_participant (
-    channel text NOT NULL,
-    service text NOT NULL,
-    username text NOT NULL,
-    domain text NOT NULL,
-    jid text NOT NULL,
-    id text NOT NULL,
-    nick text NOT NULL,
-    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE UNIQUE INDEX i_mix_participant ON mix_participant (channel, service, username, domain);
-CREATE INDEX i_mix_participant_chan_serv ON mix_participant (channel, service);
-
-CREATE TABLE mix_subscription (
-    channel text NOT NULL,
-    service text NOT NULL,
-    username text NOT NULL,
-    domain text NOT NULL,
-    node text NOT NULL,
-    jid text NOT NULL
-);
-
-CREATE UNIQUE INDEX i_mix_subscription ON mix_subscription (channel, service, username, domain, node);
-CREATE INDEX i_mix_subscription_chan_serv_ud ON mix_subscription (channel, service, username, domain);
-CREATE INDEX i_mix_subscription_chan_serv_node ON mix_subscription (channel, service, node);
-CREATE INDEX i_mix_subscription_chan_serv ON mix_subscription (channel, service);
-
-CREATE TABLE mix_pam (
-    username text NOT NULL,
-    channel text NOT NULL,
-    service text NOT NULL,
-    id text NOT NULL,
-    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE UNIQUE INDEX i_mix_pam ON mix_pam (username, channel, service);
-CREATE INDEX i_mix_pam_us ON mix_pam (username);

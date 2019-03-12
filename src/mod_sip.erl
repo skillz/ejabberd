@@ -5,7 +5,7 @@
 %%% Created : 21 Apr 2014 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2014-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2014-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -20,16 +20,15 @@
 %%% You should have received a copy of the GNU General Public License along
 %%% with this program; if not, write to the Free Software Foundation, Inc.,
 %%% 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-%%%
-%%%-------------------------------------------------------------------
 
+%%%-------------------------------------------------------------------
 -module(mod_sip).
 -protocol({rfc, 3261}).
 
 -include("logger.hrl").
 
 -ifndef(SIP).
--export([start/2, stop/1, depends/2, mod_options/1]).
+-export([start/2, stop/1, depends/2, mod_opt_type/1]).
 start(_, _) ->
     ?CRITICAL_MSG("ejabberd is not compiled with SIP support", []),
     {error, sip_not_compiled}.
@@ -37,7 +36,7 @@ stop(_) ->
     ok.
 depends(_, _) ->
     [].
-mod_options(_) ->
+mod_opt_type(_) ->
     [].
 -else.
 -behaviour(gen_mod).
@@ -49,8 +48,9 @@ mod_options(_) ->
 
 -export([data_in/2, data_out/2, message_in/2,
 	 message_out/2, request/2, request/3, response/2,
-	 locate/1, mod_opt_type/1, mod_options/1, depends/2]).
+	 locate/1, mod_opt_type/1, depends/2]).
 
+-include("ejabberd.hrl").
 -include_lib("esip/include/esip.hrl").
 
 %%%===================================================================
@@ -60,8 +60,7 @@ start(_Host, _Opts) ->
     ejabberd:start_app(esip),
     esip:set_config_value(max_server_transactions, 10000),
     esip:set_config_value(max_client_transactions, 10000),
-    esip:set_config_value(
-      software, <<"ejabberd ", (ejabberd_config:get_version())/binary>>),
+    esip:set_config_value(software, <<"ejabberd ", (?VERSION)/binary>>),
     esip:set_config_value(module, ?MODULE),
     Spec = {mod_sip_registrar, {mod_sip_registrar, start_link, []},
 	    transient, 2000, worker, [mod_sip_registrar]},
@@ -151,7 +150,7 @@ request(Req, SIPSock, TrID, Action) ->
                     mod_sip_proxy:route(Req, SIPSock, TrID, Pid),
                     {mod_sip_proxy, route, [Pid]};
                 Err ->
-		    ?WARNING_MSG("Failed to proxy request ~p: ~p", [Req, Err]),
+		    ?INFO_MSG("failed to proxy request ~p: ~p", [Req, Err]),
                     Err
             end;
         {proxy_auth, LServer} ->
@@ -360,15 +359,9 @@ mod_opt_type(via) ->
 			      {Type, {Host, Port}}
 		      end,
 		      L)
-    end.
-
-mod_options(Host) ->
-    Route = <<"sip:", Host/binary, ";lr">>,
-    [{always_record_route, true},
-     {flow_timeout_tcp, 120},
-     {flow_timeout_udp, 29},
-     {record_route, Route},
-     {routes, [Route]},
-     {via, []}].
+    end;
+mod_opt_type(_) ->
+    [always_record_route, flow_timeout_tcp,
+     flow_timeout_udp, record_route, routes, via].
 
 -endif.

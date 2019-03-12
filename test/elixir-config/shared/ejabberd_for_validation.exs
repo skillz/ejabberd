@@ -15,4 +15,6 @@ defmodule Ejabberd.ConfigFile do
     @dependency [:mod_adhoc]
   end
 
+  module :mod_irc do
+  end
 end

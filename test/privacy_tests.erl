@@ -3,7 +3,7 @@
 %%% Created : 18 Oct 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -202,8 +202,7 @@ malformed_iq_query(Config) ->
     disconnect(Config).
 
 malformed_get(Config) ->
-    JID = jid:make(p1_rand:get_string()),
-    Item = #block_item{jid = JID},
+    JID = jid:make(randoms:get_string()),
     lists:foreach(
       fun(SubEl) ->
 	      #iq{type = error} =
@@ -212,7 +211,7 @@ malformed_get(Config) ->
 	    #privacy_query{default = none},
 	    #privacy_query{lists = [#privacy_list{name = <<"1">>},
 				    #privacy_list{name = <<"2">>}]},
-	    #block{items = [Item]}, #unblock{items = [Item]},
+	    #block{items = [JID]}, #unblock{items = [JID]},
 	    #block{}, #unblock{}]),
     disconnect(Config).
 
@@ -226,9 +225,7 @@ malformed_set(Config) ->
 				    #privacy_list{name = <<"2">>}]},
 	    #block{},
 	    #block_list{},
-	    #block_list{
-	       items = [#block_item{
-			   jid = jid:make(p1_rand:get_string())}]}]),
+	    #block_list{items = [jid:make(randoms:get_string())]}]),
     disconnect(Config).
 
 malformed_type_value(Config) ->
@@ -245,8 +242,8 @@ malformed_type_value(Config) ->
     disconnect(Config).
 
 set_get_block(Config) ->
-    J1 = jid:make(p1_rand:get_string(), p1_rand:get_string()),
-    J2 = jid:make(p1_rand:get_string(), p1_rand:get_string()),
+    J1 = jid:make(randoms:get_string(), randoms:get_string()),
+    J2 = jid:make(randoms:get_string(), randoms:get_string()),
     {ok, ListName} = set_block(Config, [J1, J2]),
     JIDs = get_block(Config),
     JIDs = lists:sort([J1, J2]),
@@ -304,7 +301,7 @@ deny_server_full_jid_slave(Config) ->
     deny_slave(Config).
 
 deny_group_master(Config) ->
-    Group = p1_rand:get_string(),
+    Group = randoms:get_string(),
     deny_master(Config, {group, Group}).
 
 deny_group_slave(Config) ->
@@ -314,19 +311,19 @@ deny_sub_both_master(Config) ->
     deny_master(Config, {subscription, <<"both">>}).
 
 deny_sub_both_slave(Config) ->
-    deny_slave(Config, 2).
+    deny_slave(Config).
 
 deny_sub_from_master(Config) ->
     deny_master(Config, {subscription, <<"from">>}).
 
 deny_sub_from_slave(Config) ->
-    deny_slave(Config, 1).
+    deny_slave(Config).
 
 deny_sub_to_master(Config) ->
     deny_master(Config, {subscription, <<"to">>}).
 
 deny_sub_to_slave(Config) ->
-    deny_slave(Config, 2).
+    deny_slave(Config).
 
 deny_sub_none_master(Config) ->
     deny_master(Config, {subscription, <<"none">>}).
@@ -353,7 +350,7 @@ deny_master(Config, {Type, Value}) ->
     lists:foreach(
       fun(Opts) ->
 	      ct:pal("Set list for ~s, ~s, ~w", [Type, Value, Opts]),
-	      ListName = p1_rand:get_string(),
+	      ListName = randoms:get_string(),
 	      Item = #privacy_item{order = 0,
 				   action = deny,
 				   iq = proplists:get_bool(iq, Opts),
@@ -392,8 +389,7 @@ deny_master(Config, {Type, Value}) ->
 		  false -> send_messages(Config)
 	      end,
 	      case is_other_blocked(Opts) of
-		  true ->
-		      check_other_blocked(Config, 'not-acceptable', Value);
+		  true -> check_other_blocked(Config, 'not-acceptable');
 		  false -> ok
 	      end,
 	      ct:comment("Waiting for slave to finish processing our stanzas"),
@@ -405,16 +401,12 @@ deny_master(Config, {Type, Value}) ->
     clean_up(disconnect(Config)).
 
 deny_slave(Config) ->
-    deny_slave(Config, 0).
-
-deny_slave(Config, RosterPushesCount) ->
     set_roster(Config, both, []),
-    deny_slave(Config, RosterPushesCount, get_event(Config)).
+    deny_slave(Config, get_event(Config)).
 
-deny_slave(Config, RosterPushesCount, disconnect) ->
-    recv_roster_pushes(Config, RosterPushesCount),
+deny_slave(Config, disconnect) ->
     clean_up(disconnect(Config));
-deny_slave(Config, RosterPushesCount, Opts) ->
+deny_slave(Config, Opts) ->
     send_presences(Config),
     case is_iq_in_blocked(Opts) of
 	true -> check_iq_blocked(Config, 'service-unavailable');
@@ -434,7 +426,7 @@ deny_slave(Config, RosterPushesCount, Opts) ->
 	false -> recv_messages(Config)
     end,
     put_event(Config, done),
-    deny_slave(Config, RosterPushesCount, get_event(Config)).
+    deny_slave(Config, get_event(Config)).
 
 deny_offline_master(Config) ->
     set_roster(Config, both, []),
@@ -465,7 +457,7 @@ block_master(Config) ->
     check_presence_blocked(Config, 'not-acceptable'),
     check_iq_blocked(Config, 'not-acceptable'),
     check_message_blocked(Config, 'not-acceptable'),
-    check_other_blocked(Config, 'not-acceptable', other),
+    check_other_blocked(Config, 'not-acceptable'),
     %% We should always be able to communicate with our home server
     server_send_iqs(Config),
     server_recv_iqs(Config),
@@ -612,25 +604,24 @@ set_default(Config, Name) ->
 
 get_block(Config) ->
     case send_recv(Config, #iq{type = get, sub_els = [#block_list{}]}) of
-	#iq{type = result, sub_els = [#block_list{items = Items}]} ->
-	    lists:sort([JID || #block_item{jid = JID} <- Items]);
+	#iq{type = result, sub_els = [#block_list{items = JIDs}]} ->
+	    lists:sort(JIDs);
 	#iq{type = error} = Err ->
 	    xmpp:get_error(Err)
     end.
 
 set_block(Config, JIDs) ->
-    Items = [#block_item{jid = JID} || JID <- JIDs],
     case send_recv(Config, #iq{type = set,
-			       sub_els = [#block{items = Items}]}) of
+			       sub_els = [#block{items = JIDs}]}) of
 	#iq{type = result, sub_els = []} ->
-	    {#iq{id = I1, sub_els = [#block{items = Items1}]},
+	    {#iq{id = I1, sub_els = [#block{items = Items}]},
 	     #iq{id = I2, sub_els = [#privacy_query{lists = Lists}]}} =
 		?recv2(#iq{type = set, sub_els = [#block{}]},
 		       #iq{type = set, sub_els = [#privacy_query{}]}),
 	    send(Config, #iq{type = result, id = I1}),
 	    send(Config, #iq{type = result, id = I2}),
 	    ct:comment("Checking if all JIDs present in the push"),
-	    true = lists:sort(Items) == lists:sort(Items1),
+	    true = lists:sort(JIDs) == lists:sort(Items),
 	    ct:comment("Getting name of the corresponding privacy list"),
 	    [#privacy_list{name = Name}] = Lists,
 	    {ok, Name};
@@ -640,18 +631,17 @@ set_block(Config, JIDs) ->
 
 set_unblock(Config, JIDs) ->
     ct:comment("Unblocking ~p", [JIDs]),
-    Items = [#block_item{jid = JID} || JID <- JIDs],
     case send_recv(Config, #iq{type = set,
-			       sub_els = [#unblock{items = Items}]}) of
+			       sub_els = [#unblock{items = JIDs}]}) of
 	#iq{type = result, sub_els = []} ->
-	    {#iq{id = I1, sub_els = [#unblock{items = Items1}]},
+	    {#iq{id = I1, sub_els = [#unblock{items = Items}]},
 	     #iq{id = I2, sub_els = [#privacy_query{lists = Lists}]}} =
 		?recv2(#iq{type = set, sub_els = [#unblock{}]},
 		       #iq{type = set, sub_els = [#privacy_query{}]}),
 	    send(Config, #iq{type = result, id = I1}),
 	    send(Config, #iq{type = result, id = I2}),
 	    ct:comment("Checking if all JIDs present in the push"),
-	    true = lists:sort(Items) == lists:sort(Items1),
+	    true = lists:sort(JIDs) == lists:sort(Items),
 	    ct:comment("Getting name of the corresponding privacy list"),
 	    [#privacy_list{name = Name}] = Lists,
 	    {ok, Name};
@@ -710,51 +700,16 @@ check_presence_blocked(Config, Reason) ->
 	      #stanza_error{reason = Reason} = xmpp:get_error(Err)
       end, [available, unavailable]).
 
-recv_roster_pushes(_Config, 0) ->
-    ok;
-recv_roster_pushes(Config, Count) ->
-    receive
-	#iq{type = set, sub_els = [#roster_query{}]} ->
-	    recv_roster_pushes(Config, Count - 1)
-    end.
-
-recv_err_and_roster_pushes(Config, Count) ->
-    recv_roster_pushes(Config, Count),
-    recv_presence(Config).
-
-check_other_blocked(Config, Reason, Subscription) ->
+check_other_blocked(Config, Reason) ->
     PeerJID = ?config(peer, Config),
     ct:comment("Checking if subscriptions and presence-errors are blocked"),
     send(Config, #presence{type = error, to = PeerJID}),
-    {ErrorFor, PushFor} = case Subscription of
-			      <<"both">> ->
-				  {[subscribe, subscribed],
-				   [unsubscribe, unsubscribed]};
-			      <<"from">> ->
-				  {[subscribe, subscribed, unsubscribe],
-				   [subscribe, unsubscribe, unsubscribed]};
-			      <<"to">> ->
-				  {[unsubscribe],
-				   [subscribed, unsubscribe, unsubscribed]};
-			      <<"none">> ->
-				  {[subscribe, subscribed, unsubscribe, unsubscribed],
-				   [subscribe, unsubscribe]};
-			      _ ->
-				  {[subscribe, subscribed, unsubscribe, unsubscribed],
-				   [unsubscribe, unsubscribed]}
-			  end,
     lists:foreach(
-	fun(Type) ->
-	    send(Config, #presence{type = Type, to = PeerJID}),
-	    Count = case lists:member(Type, PushFor) of true -> 1; _ -> 0 end,
-	    case lists:member(Type, ErrorFor) of
-		true ->
-		    Err = recv_err_and_roster_pushes(Config, Count),
-		    #stanza_error{reason = Reason} = xmpp:get_error(Err);
-		_ ->
-		    recv_roster_pushes(Config, Count)
-	    end
-	end, [subscribe, subscribed, unsubscribe, unsubscribed]).
+      fun(Type) ->
+	      #presence{type = error} = Err =
+		  send_recv(Config, #presence{type = Type, to = PeerJID}),
+	      #stanza_error{reason = Reason} = xmpp:get_error(Err)
+      end, [subscribe, subscribed, unsubscribe, unsubscribed]).
 
 send_presences(Config) ->
     PeerJID = ?config(peer, Config),
@@ -815,7 +770,7 @@ is_message_in_blocked(Opts) ->
 is_message_out_blocked(Opts) ->
     match_all(Opts).
 
-is_iq_in_blocked(Opts) ->
+is_iq_in_blocked(Opts) ->    
     proplists:get_bool(iq, Opts) or match_all(Opts).
 
 is_iq_out_blocked(Opts) ->

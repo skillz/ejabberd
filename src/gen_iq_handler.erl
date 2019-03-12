@@ -5,7 +5,7 @@
 %%% Created : 22 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,96 +27,129 @@
 
 -author('alexey@process-one.net').
 
+-ifndef(GEN_SERVER).
+-define(GEN_SERVER, gen_server).
+-endif.
+-behaviour(?GEN_SERVER).
 -behaviour(ejabberd_config).
 
 %% API
--export([add_iq_handler/5, remove_iq_handler/3, handle/1, handle/2,
-	 check_type/1, transform_module_options/1,
-	 opt_type/1, start/1, get_features/2]).
-%% Deprecated functions
--export([add_iq_handler/6, handle/5, iqdisc/1]).
--deprecated([{add_iq_handler, 6}, {handle, 5}, {iqdisc, 1}]).
+-export([start_link/3, add_iq_handler/6,
+	 remove_iq_handler/3, stop_iq_handler/3, handle/5,
+	 process_iq/4, check_type/1, transform_module_options/1,
+	 opt_type/1, iqdisc/1]).
 
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2,
+	 handle_info/2, terminate/2, code_change/3]).
+
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
--include("translate.hrl").
--include("ejabberd_stacktrace.hrl").
+
+-record(state, {host, module, function}).
 
 -type component() :: ejabberd_sm | ejabberd_local.
+-type type() :: no_queue | one_queue | pos_integer() | parallel.
+-type opts() :: no_queue | {one_queue, pid()} | {queues, [pid()]} | parallel.
+-export_type([opts/0, type/0]).
 
 %%====================================================================
 %% API
 %%====================================================================
--spec start(component()) -> ok.
-start(Component) ->
-    catch ets:new(Component, [named_table, public, ordered_set,
-			      {read_concurrency, true},
-			      {heir, erlang:group_leader(), none}]),
-    ok.
+%%--------------------------------------------------------------------
+%% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
+%% Description: Starts the server
+%%--------------------------------------------------------------------
+start_link(Host, Module, Function) ->
+    ?GEN_SERVER:start_link(?MODULE, [Host, Module, Function],
+			  []).
 
--spec add_iq_handler(component(), binary(), binary(), module(), atom()) -> ok.
-add_iq_handler(Component, Host, NS, Module, Function) ->
-    ets:insert(Component, {{Host, NS}, Module, Function}),
-    ok.
+-spec add_iq_handler(module(), binary(), binary(), module(), atom(), type()) -> ok.
+
+add_iq_handler(Component, Host, NS, Module, Function,
+	       Type) ->
+    case Type of
+	no_queue ->
+	    Component:register_iq_handler(Host, NS, Module,
+		Function, no_queue);
+	one_queue ->
+	    {ok, Pid} = supervisor:start_child(ejabberd_iq_sup,
+		    [Host, Module, Function]),
+	    Component:register_iq_handler(Host, NS, Module,
+		Function, {one_queue, Pid});
+	N when is_integer(N) ->
+	    Pids = lists:map(fun (_) ->
+			    {ok, Pid} =
+				supervisor:start_child(ejabberd_iq_sup,
+				    [Host, Module,
+					Function]),
+			    Pid
+		    end,
+		    lists:seq(1, N)),
+	    Component:register_iq_handler(Host, NS, Module,
+		Function, {queues, Pids});
+	parallel ->
+	    Component:register_iq_handler(Host, NS, Module,
+		Function, parallel)
+    end.
 
 -spec remove_iq_handler(component(), binary(), binary()) -> ok.
+
 remove_iq_handler(Component, Host, NS) ->
-    ets:delete(Component, {Host, NS}),
-    ok.
+    Component:unregister_iq_handler(Host, NS).
 
--spec handle(iq()) -> ok.
-handle(#iq{to = To} = IQ) ->
-    Component = case To#jid.luser of
-		    <<"">> -> ejabberd_local;
-		    _ -> ejabberd_sm
-		end,
-    handle(Component, IQ).
+-spec stop_iq_handler(atom(), atom(), [pid()]) -> any().
 
--spec handle(component(), iq()) -> ok.
-handle(Component,
-       #iq{to = To, type = T, lang = Lang, sub_els = [El]} = Packet)
-  when T == get; T == set ->
-    XMLNS = xmpp:get_ns(El),
-    Host = To#jid.lserver,
-    case ets:lookup(Component, {Host, XMLNS}) of
-	[{_, Module, Function}] ->
-	    process_iq(Host, Module, Function, Packet);
-	[] ->
-	    Txt = <<"No module is handling this query">>,
-	    Err = xmpp:err_service_unavailable(Txt, Lang),
-	    ejabberd_router:route_error(Packet, Err)
-    end;
-handle(_, #iq{type = T, lang = Lang, sub_els = SubEls} = Packet)
-  when T == get; T == set ->
-    Txt = case SubEls of
-	      [] -> ?T("No child elements found");
-	      _ -> ?T("Too many child elements")
-	  end,
-    Err = xmpp:err_bad_request(Txt, Lang),
-    ejabberd_router:route_error(Packet, Err);
-handle(_, #iq{type = T}) when T == result; T == error ->
-    ok.
+stop_iq_handler(_Module, _Function, Opts) ->
+    case Opts of
+      {one_queue, Pid} -> ?GEN_SERVER:call(Pid, stop);
+      {queues, Pids} ->
+	  lists:foreach(fun (Pid) ->
+				catch ?GEN_SERVER:call(Pid, stop)
+			end,
+			Pids);
+      _ -> ok
+    end.
 
--spec get_features(component(), binary()) -> [binary()].
-get_features(Component, Host) ->
-    get_features(Component, ets:next(Component, {Host, <<"">>}), Host, []).
+-spec handle(binary(), atom(), atom(), opts(), iq()) -> any().
 
-get_features(Component, {Host, XMLNS}, Host, XMLNSs) ->
-    get_features(Component,
-		 ets:next(Component, {Host, XMLNS}), Host, [XMLNS|XMLNSs]);
-get_features(_, _, _, XMLNSs) ->
-    XMLNSs.
+handle(Host, Module, Function, Opts, IQ) ->
+    case Opts of
+	no_queue ->
+	    process_iq(Host, Module, Function, IQ);
+	{one_queue, Pid} ->
+	    Pid ! {process_iq, IQ};
+	{queues, Pids} ->
+	    Pid = lists:nth(erlang:phash(p1_time_compat:unique_integer(),
+                                         length(Pids)), Pids),
+	    Pid ! {process_iq, IQ};
+	parallel ->
+	    spawn(?MODULE, process_iq, [Host, Module, Function, IQ]);
+	_ -> todo
+    end.
 
--spec process_iq(binary(), atom(), atom(), iq()) -> ok.
+-spec process_iq(binary(), atom(), atom(), iq()) -> any().
+
 process_iq(_Host, Module, Function, IQ) ->
-    try process_iq(Module, Function, IQ) of
-	#iq{} = ResIQ ->
-	    ejabberd_router:route(ResIQ);
-	ignore ->
-	    ok
-    catch ?EX_RULE(E, R, St) ->
+    try
+	ResIQ = case erlang:function_exported(Module, Function, 1) of
+		    true ->
+			process_iq(Module, Function, IQ);
+		    false ->
+			From = xmpp:get_from(IQ),
+			To = xmpp:get_to(IQ),
+			process_iq(Module, Function, From, To,
+				   jlib:iq_query_info(xmpp:encode(IQ)))
+		end,
+	if ResIQ /= ignore ->
+		ejabberd_router:route(ResIQ);
+	   true ->
+		ok
+	end
+    catch E:R ->
 	    ?ERROR_MSG("failed to process iq:~n~s~nReason = ~p",
-		       [xmpp:pp(IQ), {E, {R, ?EX_STACK(St)}}]),
+		       [xmpp:pp(IQ), {E, {R, erlang:get_stacktrace()}}]),
 	    Txt = <<"Module failed to handle the query">>,
 	    Err = xmpp:err_internal_server_error(Txt, IQ#iq.lang),
 	    ejabberd_router:route_error(IQ, Err)
@@ -131,18 +164,29 @@ process_iq(Module, Function, #iq{lang = Lang, sub_els = [El]} = IQ) ->
 	      end,
 	Module:Function(IQ#iq{sub_els = [Pkt]})
     catch error:{xmpp_codec, Why} ->
-	    Txt = xmpp:io_format_error(Why),
+	    Txt = xmpp:format_error(Why),
 	    xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang))
     end.
 
--spec check_type(any()) -> no_queue.
-check_type(_Type) ->
-    ?WARNING_MSG("Option 'iqdisc' is deprecated and has no effect anymore", []),
-    no_queue.
+-spec process_iq(module(), atom(), jid(), jid(), term()) -> iq().
+process_iq(Module, Function, From, To, IQ) ->
+    case Module:Function(From, To, IQ) of
+	ignore -> ignore;
+	ResIQ ->
+	    xmpp:set_from_to(
+	      xmpp:decode(jlib:iq_to_xml(ResIQ), ?NS_CLIENT, [ignore_els]),
+	      To, From)
+    end.
 
--spec iqdisc(binary() | global) -> no_queue.
-iqdisc(_Host) ->
-    no_queue.
+-spec check_type(type()) -> type().
+
+check_type(no_queue) -> no_queue;
+check_type(one_queue) -> one_queue;
+check_type(N) when is_integer(N), N>0 -> N;
+check_type(parallel) -> parallel.
+
+iqdisc(Host) ->
+    ejabberd_config:get_option({iqdisc, Host}, no_queue).
 
 -spec transform_module_options([{atom(), any()}]) -> [{atom(), any()}].
 
@@ -154,17 +198,37 @@ transform_module_options(Opts) ->
               Opt
       end, Opts).
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
+-spec opt_type(iqdisc) -> fun((type()) -> type());
+	      (atom()) -> [atom()].
 opt_type(iqdisc) -> fun check_type/1;
 opt_type(_) -> [iqdisc].
 
 %%====================================================================
-%% Deprecated API
+%% gen_server callbacks
 %%====================================================================
--spec add_iq_handler(module(), binary(), binary(), module(), atom(), any()) -> ok.
-add_iq_handler(Component, Host, NS, Module, Function, _Type) ->
-    add_iq_handler(Component, Host, NS, Module, Function).
 
--spec handle(binary(), atom(), atom(), any(), iq()) -> any().
-handle(Host, Module, Function, _Opts, IQ) ->
-    process_iq(Host, Module, Function, IQ).
+init([Host, Module, Function]) ->
+    {ok,
+     #state{host = Host, module = Module,
+	    function = Function}}.
+
+handle_call(stop, _From, State) ->
+    Reply = ok, {stop, normal, Reply, State}.
+
+handle_cast(_Msg, State) -> {noreply, State}.
+
+handle_info({process_iq, IQ},
+	    #state{host = Host, module = Module,
+		   function = Function} =
+		State) ->
+    process_iq(Host, Module, Function, IQ),
+    {noreply, State};
+handle_info(_Info, State) -> {noreply, State}.
+
+terminate(_Reason, _State) -> ok.
+
+code_change(_OldVsn, State, _Extra) -> {ok, State}.
+
+%%--------------------------------------------------------------------
+%%% Internal functions
+%%--------------------------------------------------------------------

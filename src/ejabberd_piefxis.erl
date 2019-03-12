@@ -5,7 +5,7 @@
 %%% Created : 17 Jul 2008 by Pablo Polvorin <pablo.polvorin@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -40,7 +40,7 @@
 
 -define(CHUNK_SIZE, 1024*20). %20k
 
--include("scram.hrl").
+-include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 -include("mod_privacy.hrl").
@@ -92,7 +92,7 @@ import_file(FileName, State) ->
 
 -spec export_server(binary()) -> any().
 export_server(Dir) ->
-    export_hosts(ejabberd_config:get_myhosts(), Dir).
+    export_hosts(?MYHOSTS, Dir).
 
 -spec export_host(binary(), binary()) -> any().
 export_host(Dir, Host) ->
@@ -166,10 +166,15 @@ export_users([], _Server, _Fd) ->
 export_user(User, Server, Fd) ->
     Password = ejabberd_auth:get_password_s(User, Server),
     LServer = jid:nameprep(Server),
-    Pass = case ejabberd_auth:password_format(LServer) of
-	       scram -> format_scram_password(Password);
-	       _ -> Password
-	   end,
+    PasswordFormat = ejabberd_auth:password_format(LServer),
+    Pass = case Password of
+      {_,_,_,_} ->
+        case PasswordFormat of
+          scram -> format_scram_password(Password);          
+          _ -> <<"">>
+        end;
+      _ -> Password
+    end,
     Els = get_offline(User, Server) ++
         get_vcard(User, Server) ++
         get_privacy(User, Server) ++
@@ -181,8 +186,7 @@ export_user(User, Server, Fd) ->
                                 {<<"password">>, Pass}],
                        children = Els})).
 
-format_scram_password(#scram{storedkey = StoredKey, serverkey = ServerKey,
-			     salt = Salt, iterationcount = IterationCount}) ->
+format_scram_password({StoredKey, ServerKey, Salt, IterationCount}) ->
   StoredKeyB64 = base64:encode(StoredKey),
   ServerKeyB64 = base64:encode(ServerKey),
   SaltB64 = base64:encode(Salt),
@@ -273,7 +277,7 @@ get_roster(User, Server) ->
 get_private(User, Server) ->
     case mod_private:get_data(User, Server) of
         [_|_] = Els ->
-	    [xmpp:encode(#private{sub_els = Els})];
+	    [xmpp:encode(#private{xml_els = Els})];
         _ ->
             []
     end.
@@ -400,8 +404,6 @@ process_user(#xmlel{name = <<"user">>, attrs = Attrs, children = Els},
             case ejabberd_auth:try_register(LUser, LServer, Pass) of
                 ok ->
                     process_user_els(Els, State#state{user = LUser});
-                {error, invalid_password} when (Password == <<>>) ->
-                    process_user_els(Els, State#state{user = LUser});
                 {error, Err} ->
                     stop("Failed to create user '~s': ~p", [Name, Err])
             end
@@ -431,7 +433,7 @@ process_user_el(#xmlel{name = Name, attrs = Attrs, children = Els} = El,
 	    {<<"query">>, ?NS_PRIVATE} ->
 		process_private(xmpp:decode(El), State);
 	    {<<"vCard">>, ?NS_VCARD} ->
-		process_vcard(xmpp:decode(El), State);
+		process_vcard(El, State);
 	    {<<"offline-messages">>, NS} ->
 		Msgs = [xmpp:decode(E, NS, [ignore_els]) || E <- Els],
 		process_offline_msgs(Msgs, State);
@@ -471,47 +473,30 @@ process_roster(RosterQuery, State = #state{user = U, server = S}) ->
 -spec process_privacy(privacy_query(), state()) -> {ok, state()} | {error, _}.
 process_privacy(#privacy_query{lists = Lists,
 			       default = Default,
-			       active = Active},
+			       active = Active} = PrivacyQuery,
 		State = #state{user = U, server = S}) ->
     JID = jid:make(U, S),
-    if Lists /= undefined ->
-	    process_privacy2(JID, #privacy_query{lists = Lists});
-	true ->
-	    ok
-    end,
-    if Active /= undefined ->
-	    process_privacy2(JID, #privacy_query{active = Active});
-	true ->
-	    ok
-    end,
-    if Default /= undefined ->
-	    process_privacy2(JID, #privacy_query{default = Default});
-	true ->
-	    ok
-    end,
-    {ok, State}.
-
-process_privacy2(JID, PQ) ->
-        case mod_privacy:process_iq(#iq{type = set, id = p1_rand:get_string(),
-                                from = JID, to = JID,
-                                sub_els = [PQ]}) of
-	    #iq{type = error} = ResIQ ->
-	        #stanza_error{reason = Reason} = xmpp:get_error(ResIQ),
-	        if Reason /= 'item-not-found' ->
+    IQ = #iq{type = set, id = randoms:get_string(),
+	     from = JID, to = JID, sub_els = [PrivacyQuery]},
+    case mod_privacy:process_iq(IQ) of
+	#iq{type = error} = ResIQ ->
+	    #stanza_error{reason = Reason} = xmpp:get_error(ResIQ),
+	    if Reason == 'item-not-found', Lists == [],
+	       Active == undefined, Default /= undefined ->
 		    %% Failed to set default list because there is no
 		    %% list with such name. We shouldn't stop here.
-		    stop("Failed to write default privacy: ~p", [Reason]);
-                true ->
-                   ok
-                end;
-            _ ->
-                ok
-        end.
+		    {ok, State};
+	       true ->
+		    stop("Failed to write privacy: ~p", [Reason])
+            end;
+        _ ->
+            {ok, State}
+    end.
 
 -spec process_private(private(), state()) -> {ok, state()} | {error, _}.
 process_private(Private, State = #state{user = U, server = S}) ->
     JID = jid:make(U, S),
-    IQ = #iq{type = set, id = p1_rand:get_string(),
+    IQ = #iq{type = set, id = randoms:get_string(),
 	     from = JID, to = JID, sub_els = [Private]},
     case mod_private:process_sm_iq(IQ) of
         #iq{type = result} ->
@@ -523,7 +508,7 @@ process_private(Private, State = #state{user = U, server = S}) ->
 -spec process_vcard(xmlel(), state()) -> {ok, state()} | {error, _}.
 process_vcard(El, State = #state{user = U, server = S}) ->
     JID = jid:make(U, S),
-    IQ = #iq{type = set, id = p1_rand:get_string(),
+    IQ = #iq{type = set, id = randoms:get_string(),
 	     from = JID, to = JID, sub_els = [El]},
     case mod_vcard:process_sm_iq(IQ) of
         #iq{type = result} ->
