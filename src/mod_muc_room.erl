@@ -134,6 +134,7 @@ init([Host, ServerHost, Access, Room, HistorySize,
 		   room_shaper = Shaper}),
     State1 = set_opts(DefRoomOpts, State),
     store_room(State1),
+    NewState = get_history_upon_init(State),
     ?INFO_MSG("Created MUC room ~s@~s by ~s",
 	      [Room, Host, jid:encode(Creator)]),
     add_to_log(room_existence, created, State1),
@@ -1023,7 +1024,7 @@ process_presence(Nick, #presence{from = From, type = Type0} = Packet0, StateData
 	     drop ->
 		 {next_state, normal_state, StateData};
 	     #presence{} = Packet ->
-		 close_room_if_temporary_and_empty(
+		 close_room_without_occupants(
 		   do_process_presence(Nick, Packet, StateData))
 	   end;
        true ->
