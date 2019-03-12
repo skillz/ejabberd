@@ -37,7 +37,21 @@
 %%% API
 %%%----------------------------------------------------------------------
 
-opt_type(auth_opts) -> fun (V) -> V end;
+opt_type(auth_opts) ->
+    fun(L) ->
+            lists:map(
+              fun({host, V}) when is_binary(V) ->
+                      {host, V};
+                 ({connection_pool_size, V}) when is_integer(V) ->
+                      {connection_pool_size, V};
+                 ({connection_opts, V}) when is_list(V) ->
+                      {connection_opts, V};
+                 ({basic_auth, V}) when is_binary(V) ->
+                      {basic_auth, V};
+                 ({path_prefix, V}) when is_binary(V) ->
+                      {path_prefix, V}
+              end, L)
+    end;
 opt_type(_) -> [auth_opts].
 
 -spec start(binary()) -> ok.
@@ -48,18 +62,19 @@ start(Host) ->
     Opts = proplists:get_value(connection_opts, AuthOpts, []),
     ChildMods = [fusco],
     ChildMFA = {fusco, start_link, [binary_to_list(AuthHost), Opts]},
-    
-    fusco:start_link(binary_to_list(AuthHost), Opts),
-    cuesport:start_link(pool_name(Host), PoolSize, ChildMods, ChildMFA),
-    ok.
+    Proc = gen_mod:get_module_proc(Host, ?MODULE),
+    ChildSpec = {Proc, {cuesport, start_link,
+			[pool_name(Host), PoolSize, ChildMods, ChildMFA]},
+		 transient, 2000, supervisor, [cuesport | ChildMods]},
+    supervisor:start_child(ejabberd_backend_sup, ChildSpec).
 
 -spec plain_password_required(binary()) -> false.
 plain_password_required(Server) ->
     store_type(Server) == scram.
 
--spec store_type(binary()) -> plain | scram.
-store_type(Server) ->
-    ejabberd_auth:password_format(Server).
+-spec store_type(binary()) -> external.
+store_type(_) ->
+    external.
 
 -spec check_password(ejabberd:luser(), binary(), ejabberd:lserver(), binary()) -> boolean().
 check_password(LUser, _AuthzId, LServer, Password) ->
@@ -132,25 +147,9 @@ try_register(LUser, LServer, Password) ->
         Error -> Error
     end.
 
--spec get_password(ejabberd:luser(), ejabberd:lserver()) -> false | binary() |
-                                          {binary(), binary(), binary(), integer()}.
-get_password(LUser, LServer) ->
-    case make_req(get, <<"get_password">>, LUser, LServer, <<"">>) of
-        {error, _} ->
-            false;
-        {ok, Password} ->
-            case scram2:enabled(LServer) of
-                true ->
-                    case scram2:deserialize(Password) of
-                        {ok, #scram{} = Scram} ->
-                            scram2:scram_to_tuple(Scram);
-                        _ ->
-                            false
-                    end;
-                false ->
-                    Password
-            end
-    end.
+-spec get_password(ejabberd:luser(), ejabberd:lserver()) -> error.
+get_password(_, _) ->
+    error.
 
 -spec get_password_s(ejabberd:luser(), ejabberd:lserver()) -> binary().
 get_password_s(User, Server) ->
@@ -223,7 +222,6 @@ make_req(Method, Path, LUser, LServer, Password) ->
     Connection = cuesport:get_worker(existing_pool_name(LServer)),
 
     ?DEBUG("Making request '~s' for user ~s@~s...", [Path, LUser, LServer]),
-    ?DEBUG("With connection ~p  PathPrefix ~p   Path   ~p       Method  ~p         Query ~p", [Connection, PathPrefix, Path, Method, Query]),
     {ok, {{Code, _Reason}, _RespHeaders, RespBody, _, _}} = case Method of
         get -> fusco:request(Connection, <<PathPrefix/binary, Path/binary, "?", Query/binary>>,
                              "GET", Header, "", 2, 5000);
@@ -275,5 +273,8 @@ login(_User, _Server) ->
 get_password(_User, _Server, _DefaultValue) ->
     erlang:error(not_implemented).
 
-stop(_Host) ->
-    ok.
+stop(Host) ->
+    Proc = gen_mod:get_module_proc(Host, ?MODULE),
+    supervisor:terminate_child(ejabberd_backend_sup, Proc),
+    supervisor:delete_child(ejabberd_backend_sup, Proc).
+
