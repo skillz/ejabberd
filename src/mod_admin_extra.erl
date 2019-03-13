@@ -1536,10 +1536,22 @@ build_packet(Type, Subject, Body) ->
 send_stanza(FromString, ToString, Stanza) ->
     try
 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
-	From = jid:decode(FromString),
-	To = jid:decode(ToString),
-	Pkt = xmpp:decode(El, ?NS_CLIENT, [ignore_els]),
-	ejabberd_router:route(xmpp:set_from_to(Pkt, From, To))
+	To            = jid:decode(ToString),
+	case mod_muc:find_online_room(To#jid.user, To#jid.server) of
+	{ok, _} ->
+		From = jid:decode(FromString),
+		Pkt = xmpp:decode(El, ?NS_CLIENT, [ignore_els]),
+		ejabberd_router:route(xmpp:set_from_to(Pkt, From, To));
+	error ->
+		From          = get_offline_user(To, jid:decode(FromString)),
+		LServer       = From#jid.lserver,
+		Packet        = xmpp:decode(El, ?NS_CLIENT, [ignore_els]), 
+		ArchivePacket = ejabberd_hooks:run_fold(muc_filter_message, LServer, Packet, 
+			                                    [spoof_muc_state(LServer, To), From#jid.user]),
+		Wrapped       = wrap(To, From, ArchivePacket, ?NS_MUCSUB_NODES_MESSAGES),
+		PacketToSend  = xmpp:set_from_to(Wrapped, To, From),
+		ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, [])
+	end
     catch _:{xmpp_codec, Why} ->
 	    io:format("incorrect stanza: ~s~n", [xmpp:format_error(Why)]),
 	    {error, Why};

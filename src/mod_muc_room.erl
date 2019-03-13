@@ -973,7 +973,7 @@ process_presence(Nick, #presence{from = From, type = Type0} = Packet0, StateData
 		   do_process_presence(Nick, Packet, StateData))
 	   end;
        true ->
-	    {next_state, normal_state, StateData}
+		close_room_without_occupants(StateData)
     end.
 
 -spec do_process_presence(binary(), presence(), state()) -> state().
