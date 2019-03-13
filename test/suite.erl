@@ -3,7 +3,7 @@
 %%% Created : 27 Jun 2013 by Evgeniy Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -55,6 +55,7 @@ init_config(Config) ->
     CfgContent = process_config_tpl(CfgContentTpl, [
                                                     {c2s_port, 5222},
                                                     {loglevel, 4},
+                                                    {new_schema, false},
                                                     {s2s_port, 5269},
 						    {component_port, 5270},
                                                     {web_port, 5280},
@@ -68,14 +69,40 @@ init_config(Config) ->
                                                     {pgsql_port, 5432},
                                                     {pgsql_db, <<"ejabberd_test">>},
                                                     {pgsql_user, <<"ejabberd_test">>},
-                                                    {pgsql_pass, <<"ejabberd_test">>}
-                                                   ]),
+                                                    {pgsql_pass, <<"ejabberd_test">>},
+						    {priv_dir, PrivDir}
+						   ]),
+    HostTypes = re:split(CfgContent, "(\\s*- \"(.*)\\.localhost\")",
+			 [group, {return, binary}]),
+    Types = [binary_to_list(Type) || [_, _, Type] <- HostTypes],
+    Backends = get_config_backends(Types),
+    HostTypes = re:split(CfgContent, "(\\s*- \"(.*)\\.localhost\")",
+			   [group, {return, binary}]),
+    CfgContent2 = lists:foldl(fun([Pre, Frag, Type], Acc) ->
+				      case lists:member(binary_to_list(Type), Backends) of
+					  true ->
+					      <<Acc/binary, Pre/binary, Frag/binary>>;
+					  _ ->
+					      <<Acc/binary, Pre/binary>>
+				      end;
+				 ([Rest], Acc) ->
+				      <<Acc/binary, Rest/binary>>
+			      end, <<>>, HostTypes),
     ConfigPath = filename:join([CWD, "ejabberd.yml"]),
-    ok = file:write_file(ConfigPath, CfgContent),
+    ok = file:write_file(ConfigPath, CfgContent2),
     setup_ejabberd_lib_path(Config),
-    ok = application:load(sasl),
-    ok = application:load(mnesia),
-    ok = application:load(ejabberd),
+    case application:load(sasl) of
+	ok -> ok;
+	{error, {already_loaded, _}} -> ok
+    end,
+    case application:load(mnesia) of
+	ok -> ok;
+	{error, {already_loaded, _}} -> ok
+    end,
+    case application:load(ejabberd) of
+	ok -> ok;
+	{error, {already_loaded, _}} -> ok
+    end,
     application:set_env(ejabberd, config, ConfigPath),
     application:set_env(ejabberd, log_path, LogPath),
     application:set_env(sasl, sasl_error_logger, {file, SASLPath}),
@@ -104,14 +131,14 @@ init_config(Config) ->
      {rosterver, false},
      {lang, <<"en">>},
      {base_dir, BaseDir},
-     {socket, undefined},
+     {receiver, undefined},
      {pubsub_node, <<"node!@#$%^&*()'\"`~<>+-/;:_=[]{}|\\">>},
      {pubsub_node_title, <<"title!@#$%^&*()'\"`~<>+-/;:_=[]{}|\\">>},
      {resource, <<"resource!@#$%^&*()'\"`~<>+-/;:_=[]{}|\\">>},
      {master_resource, <<"master_resource!@#$%^&*()'\"`~<>+-/;:_=[]{}|\\">>},
      {slave_resource, <<"slave_resource!@#$%^&*()'\"`~<>+-/;:_=[]{}|\\">>},
      {password, Password},
-     {backends, get_config_backends()}
+     {backends, Backends}
      |Config].
 
 find_top_dir(Dir) ->
@@ -138,24 +165,40 @@ setup_ejabberd_lib_path(Config) ->
 %% Read environment variable CT_DB=riak,mysql to limit the backends to test.
 %% You can thus limit the backend you want to test with:
 %%  CT_BACKENDS=riak,mysql rebar ct suites=ejabberd
-get_config_backends() ->
-    case os:getenv("CT_BACKENDS") of
-        false  -> all;
-        String ->
-            Backends0 = string:tokens(String, ","),
-            lists:map(fun(Backend) -> string:strip(Backend, both, $ ) end, Backends0)
-    end.
+get_config_backends(Types) ->
+    EnvBackends = case os:getenv("CT_BACKENDS") of
+		      false  -> Types;
+		      String ->
+			  Backends0 = string:tokens(String, ","),
+			  lists:map(fun(Backend) -> string:strip(Backend, both, $ ) end, Backends0)
+		  end,
+    application:load(ejabberd),
+    EnabledBackends = lists:map(fun(V) when is_atom(V) ->
+					atom_to_list(V);
+				   (V) ->
+					V
+				end,
+			       application:get_env(ejabberd, enabled_backends, Types)),
+    lists:foldl(fun(Backend, Backends) ->
+			case lists:member(Backend, EnabledBackends) of
+			    false ->
+				lists:delete(Backend, Backends);
+			    _ ->
+				Backends
+			end
+		end, EnvBackends, ["odbc", "mysql", "pgsql",
+				   "sqlite", "riak", "redis"]).
 
 process_config_tpl(Content, []) ->
     Content;
 process_config_tpl(Content, [{Name, DefaultValue} | Rest]) ->
     Val = case ct:get_config(Name, DefaultValue) of
-              V1 when is_integer(V1) ->
-                  integer_to_binary(V1);
-              V2 when is_atom(V2) ->
-                  atom_to_binary(V2, latin1);
-              V3 ->
-                  V3
+              V when is_integer(V) ->
+                  integer_to_binary(V);
+              V when is_atom(V) ->
+                  atom_to_binary(V, latin1);
+              V ->
+                  iolist_to_binary(V)
           end,
     NewContent = binary:replace(Content,
 				<<"@@",(atom_to_binary(Name,latin1))/binary, "@@">>,
@@ -188,7 +231,7 @@ connect(Config) ->
     end.
 
 tcp_connect(Config) ->
-    case ?config(socket, Config) of
+    case ?config(receiver, Config) of
 	undefined ->
 	    Owner = self(),
 	    NS = case ?config(type, Config) of
@@ -196,13 +239,12 @@ tcp_connect(Config) ->
 		     server -> ?NS_SERVER;
 		     component -> ?NS_COMPONENT
 		 end,
-	    ReceiverPid = spawn(fun() -> receiver(NS, Owner) end),
-	    {ok, Sock} = ejabberd_socket:connect(
-			   ?config(server_host, Config),
-			   ?config(server_port, Config),
-			   [binary, {packet, 0}, {active, false}],
-			   infinity, ReceiverPid),
-	    set_opt(socket, Sock, Config);
+	    Server = ?config(server_host, Config),
+	    Port = ?config(server_port, Config),
+	    ReceiverPid = spawn(fun() ->
+					start_receiver(NS, Owner, Server, Port)
+				end),
+	    set_opt(receiver, ReceiverPid, Config);
 	_ ->
 	    Config
     end.
@@ -246,7 +288,6 @@ process_stream_features(Config) ->
 
 disconnect(Config) ->
     ct:comment("Disconnecting"),
-    Socket = ?config(socket, Config),
     try
 	send_text(Config, ?STREAM_TRAILER)
     catch exit:normal ->
@@ -254,13 +295,12 @@ disconnect(Config) ->
     end,
     receive {xmlstreamend, <<"stream:stream">>} -> ok end,
     flush(Config),
-    ejabberd_socket:close(Socket),
+    ok = recv_call(Config, close),
     ct:comment("Disconnected"),
-    set_opt(socket, undefined, Config).
+    set_opt(receiver, undefined, Config).
 
 close_socket(Config) ->
-    Socket = ?config(socket, Config),
-    ejabberd_socket:close(Socket),
+    ok = recv_call(Config, close),
     Config.
 
 starttls(Config) ->
@@ -276,18 +316,15 @@ starttls(Config, ShouldFail) ->
 	#starttls_failure{} ->
 	    ct:fail(starttls_failed);
 	#starttls_proceed{} ->
-	    {ok, TLSSocket} = ejabberd_socket:starttls(
-				?config(socket, Config),
-				[{certfile, ?config(certfile, Config)},
-				 connect]),
-	    set_opt(socket, TLSSocket, Config)
+	    ok = recv_call(Config, {starttls, ?config(certfile, Config)}),
+	    Config
     end.
 
 zlib(Config) ->
     send(Config, #compress{methods = [<<"zlib">>]}),
     receive #compressed{} -> ok end,
-    {ok, ZlibSocket} = ejabberd_socket:compress(?config(socket, Config)),
-    process_stream_features(init_stream(set_opt(socket, ZlibSocket, Config))).
+    ok = recv_call(Config, compress),
+    process_stream_features(init_stream(Config)).
 
 auth(Config) ->
     auth(Config, false).
@@ -429,13 +466,15 @@ wait_auth_SASL_result(Config, ShouldFail) ->
 	#sasl_success{} when ShouldFail ->
 	    ct:fail(sasl_auth_should_have_failed);
         #sasl_success{} ->
-            ejabberd_socket:reset_stream(?config(socket, Config)),
+	    ok = recv_call(Config, reset_stream),
             send(Config, stream_header(Config)),
 	    Type = ?config(type, Config),
 	    NS = if Type == client -> ?NS_CLIENT;
 		    Type == server -> ?NS_SERVER
 		 end,
-	    receive #stream_start{xmlns = NS, version = {1,0}} -> ok end,
+	    Config2 = receive #stream_start{id = ID, xmlns = NS, version = {1,0}} ->
+		set_opt(stream_id, ID, Config)
+	    end,
             receive #stream_features{sub_els = Fs} ->
 		    if Type == client ->
 			    #xmpp_session{optional = true} =
@@ -452,7 +491,7 @@ wait_auth_SASL_result(Config, ShouldFail) ->
 			      set_opt(rosterver, true, ConfigAcc);
 			 (_, ConfigAcc) ->
 			      ConfigAcc
-		      end, Config, Fs)
+		      end, Config2, Fs)
 	    end;
         #sasl_challenge{text = ClientIn} ->
             {Response, SASL} = (?config(sasl, Config))(ClientIn),
@@ -515,7 +554,7 @@ decode(El, NS, Opts) ->
     end.
 
 send_text(Config, Text) ->
-    ejabberd_socket:send(?config(socket, Config), Text).
+    recv_call(Config, {send_text, Text}).
 
 send(State, Pkt) ->
     {NewID, NewPkt} = case Pkt of
@@ -563,7 +602,7 @@ sasl_new(<<"ANONYMOUS">>, _) ->
 sasl_new(<<"DIGEST-MD5">>, {User, Server, Password}) ->
     {<<"">>,
      fun (ServerIn) ->
-	     case cyrsasl_digest:parse(ServerIn) of
+	     case xmpp_sasl_digest:parse(ServerIn) of
 	       bad -> {error, <<"Invalid SASL challenge">>};
 	       KeyVals ->
 		   Nonce = fxml:get_attr_s(<<"nonce">>, KeyVals),
@@ -589,7 +628,7 @@ sasl_new(<<"DIGEST-MD5">>, {User, Server, Password}) ->
 			    MyResponse/binary, "\"">>,
 		   {Resp,
 		    fun (ServerIn2) ->
-			    case cyrsasl_digest:parse(ServerIn2) of
+			    case xmpp_sasl_digest:parse(ServerIn2) of
 			      bad -> {error, <<"Invalid SASL challenge">>};
 			      _KeyVals2 ->
                                     {<<"">>,
@@ -646,6 +685,10 @@ proxy_jid(Config) ->
     Server = ?config(server, Config),
     jid:make(<<>>, <<"proxy.", Server/binary>>, <<>>).
 
+upload_jid(Config) ->
+    Server = ?config(server, Config),
+    jid:make(<<>>, <<"upload.", Server/binary>>, <<>>).
+
 muc_jid(Config) ->
     Server = ?config(server, Config),
     jid:make(<<>>, <<"conference.", Server/binary>>, <<>>).
@@ -680,7 +723,7 @@ id() ->
     id(<<>>).
 
 id(<<>>) ->
-    randoms:get_string();
+    p1_rand:get_string();
 id(ID) ->
     ID.
 
@@ -761,23 +804,71 @@ get_roster(Config) ->
     {LUser, LServer, _} = jid:tolower(my_jid(Config)),
     mod_roster:get_roster(LUser, LServer).
 
-receiver(NS, Owner) ->
-    MRef = erlang:monitor(process, Owner),
-    receiver(NS, Owner, MRef).
-
-receiver(NS, Owner, MRef) ->
+recv_call(Config, Msg) ->
+    Receiver = ?config(receiver, Config),
+    Ref = make_ref(),
+    Receiver ! {Ref, Msg},
     receive
+	{Ref, Reply} ->
+	    Reply
+    end.
+
+start_receiver(NS, Owner, Server, Port) ->
+    MRef = erlang:monitor(process, Owner),
+    {ok, Socket} = xmpp_socket:connect(
+		     Server, Port,
+		     [binary, {packet, 0}, {active, false}], infinity),
+    receiver(NS, Owner, Socket, MRef).
+
+receiver(NS, Owner, Socket, MRef) ->
+    receive
+	{Ref, reset_stream} ->
+	    Socket1 = xmpp_socket:reset_stream(Socket),
+	    Owner ! {Ref, ok},
+	    receiver(NS, Owner, Socket1, MRef);
+	{Ref, {starttls, Certfile}} ->
+	    {ok, TLSSocket} = xmpp_socket:starttls(
+				Socket,
+				[{certfile, Certfile}, connect]),
+	    Owner ! {Ref, ok},
+	    receiver(NS, Owner, TLSSocket, MRef);
+	{Ref, compress} ->
+	    {ok, ZlibSocket} = xmpp_socket:compress(Socket),
+	    Owner ! {Ref, ok},
+	    receiver(NS, Owner, ZlibSocket, MRef);
+	{Ref, {send_text, Text}} ->
+	    Ret = xmpp_socket:send(Socket, Text),
+	    Owner ! {Ref, Ret},
+	    receiver(NS, Owner, Socket, MRef);
+	{Ref, close} ->
+	    xmpp_socket:close(Socket),
+	    Owner ! {Ref, ok},
+	    receiver(NS, Owner, Socket, MRef);
         {'$gen_event', {xmlstreamelement, El}} ->
 	    Owner ! decode_stream_element(NS, El),
-	    receiver(NS, Owner, MRef);
+	    receiver(NS, Owner, Socket, MRef);
 	{'$gen_event', {xmlstreamstart, Name, Attrs}} ->
 	    Owner ! decode(#xmlel{name = Name, attrs = Attrs}, <<>>, []),
-	    receiver(NS, Owner, MRef);
+	    receiver(NS, Owner, Socket, MRef);
 	{'$gen_event', Event} ->
             Owner ! Event,
-	    receiver(NS, Owner, MRef);
+	    receiver(NS, Owner, Socket, MRef);
 	{'DOWN', MRef, process, Owner, _} ->
-	    ok
+	    ok;
+	{tcp, _, Data} ->
+	    case xmpp_socket:recv(Socket, Data) of
+		{ok, Socket1} ->
+		    receiver(NS, Owner, Socket1, MRef);
+		{error, _} ->
+		    Owner ! closed,
+		    receiver(NS, Owner, Socket, MRef)
+	    end;
+	{tcp_error, _, _} ->
+	    Owner ! closed,
+	    receiver(NS, Owner, Socket, MRef);
+	{tcp_closed, _} ->
+	    Owner ! closed,
+	    receiver(NS, Owner, Socket, MRef)
     end.
 
 %%%===================================================================

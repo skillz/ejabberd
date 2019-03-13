@@ -5,7 +5,7 @@
 %%% Created :
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -43,9 +43,8 @@
 %% utility for other http modules
 -export([content_type/3]).
 
--export([reopen_log/0, mod_opt_type/1, depends/2]).
+-export([reopen_log/0, mod_opt_type/1, mod_options/1, depends/2]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 -include("ejabberd_http.hrl").
 -include_lib("kernel/include/file.hrl").
@@ -66,9 +65,8 @@
 	{-1, 403, [], <<"Forbidden">>}).
 -define(HTTP_ERR_REQUEST_AUTH,
 	{-1, 401, ?REQUEST_AUTH_HEADERS, <<"Unauthorized">>}).
-
--define(DEFAULT_CONTENT_TYPE,
-	<<"application/octet-stream">>).
+-define(HTTP_ERR_HOST_UNKNOWN,
+	{-1, 410, [], <<"Host unknown">>}).
 
 -define(DEFAULT_CONTENT_TYPES,
 	[{<<".css">>, <<"text/css">>},
@@ -124,24 +122,19 @@ init([Host, Opts]) ->
 
 initialize(Host, Opts) ->
     DocRoot = gen_mod:get_opt(docroot, Opts),
-    check_docroot_defined(DocRoot, Host),
-    DRInfo = check_docroot_exists(DocRoot),
-    check_docroot_is_dir(DRInfo, DocRoot),
-    check_docroot_is_readable(DRInfo, DocRoot),
     AccessLog = gen_mod:get_opt(accesslog, Opts),
     AccessLogFD = try_open_log(AccessLog, Host),
-    DirectoryIndices = gen_mod:get_opt(directory_indices, Opts, []),
-    CustomHeaders = gen_mod:get_opt(custom_headers, Opts, []),
-    DefaultContentType = gen_mod:get_opt(default_content_type, Opts,
-					 ?DEFAULT_CONTENT_TYPE),
-    UserAccess0 = gen_mod:get_opt(must_authenticate_with, Opts, []),
+    DirectoryIndices = gen_mod:get_opt(directory_indices, Opts),
+    CustomHeaders = gen_mod:get_opt(custom_headers, Opts),
+    DefaultContentType = gen_mod:get_opt(default_content_type, Opts),
+    UserAccess0 = gen_mod:get_opt(must_authenticate_with, Opts),
     UserAccess = case UserAccess0 of
 		     [] -> none;
 		     _ ->
 			 dict:from_list(UserAccess0)
 		 end,
     ContentTypes = build_list_content_types(
-                     gen_mod:get_opt(content_types, Opts, []),
+                     gen_mod:get_opt(content_types, Opts),
                      ?DEFAULT_CONTENT_TYPES),
     ?DEBUG("known content types: ~s",
 	   [str:join([[$*, K, " -> ", V] || {K, V} <- ContentTypes],
@@ -170,32 +163,6 @@ build_list_content_types(AdminCTsUnsorted, DefaultCTsUnsorted) ->
     [{Extension, Value}
      || {Extension, Value} <- CTsUnfiltered,
 	Value /= undefined].
-
-check_docroot_defined(DocRoot, Host) ->
-    case DocRoot of
-      undefined -> throw({undefined_docroot_option, Host});
-      _ -> ok
-    end.
-
-check_docroot_exists(DocRoot) ->
-    case file:read_file_info(DocRoot) of
-      {error, Reason} ->
-	  throw({error_access_docroot, DocRoot, Reason});
-      {ok, FI} -> FI
-    end.
-
-check_docroot_is_dir(DRInfo, DocRoot) ->
-    case DRInfo#file_info.type of
-      directory -> ok;
-      _ -> throw({docroot_not_directory, DocRoot})
-    end.
-
-check_docroot_is_readable(DRInfo, DocRoot) ->
-    case DRInfo#file_info.access of
-      read -> ok;
-      read_write -> ok;
-      _ -> throw({docroot_not_readable, DocRoot})
-    end.
 
 try_open_log(undefined, _Host) ->
     undefined;
@@ -297,17 +264,21 @@ code_change(_OldVsn, State, _Extra) ->
 %% Returns the page to be sent back to the client and/or HTTP status code.
 process(LocalPath, #request{host = Host, auth = Auth, headers = RHeaders} = Request) ->
     ?DEBUG("Requested ~p", [LocalPath]),
-    try gen_server:call(get_proc_name(Host), {serve, LocalPath, Auth, RHeaders}) of
-	{FileSize, Code, Headers, Contents} ->
-	    add_to_log(FileSize, Code, Request),
-	    {Code, Headers, Contents}
-    catch
-	exit:{noproc, _} ->
-	    ?ERROR_MSG("Received an HTTP request with Host ~p, but couldn't find the related "
-		       "ejabberd virtual host", [Request#request.host]),
-	    ejabberd_web:error(not_found)
+    try
+	VHost = ejabberd_router:host_of_route(Host),
+	{FileSize, Code, Headers, Contents} =
+	    gen_server:call(get_proc_name(VHost),
+			    {serve, LocalPath, Auth, RHeaders}),
+	add_to_log(FileSize, Code, Request#request{host = VHost}),
+	{Code, Headers, Contents}
+    catch _:{Why, _} when Why == noproc; Why == invalid_domain; Why == unregistered_route ->
+	    ?DEBUG("Received an HTTP request with Host: ~s, "
+		   "but couldn't find the related "
+		   "ejabberd virtual host", [Host]),
+	    {FileSize1, Code1, Headers1, Contents1} = ?HTTP_ERR_HOST_UNKNOWN,
+	    add_to_log(FileSize1, Code1, Request#request{host = ejabberd_config:get_myname()}),
+	    {Code1, Headers1, Contents1}
     end.
-
 
 serve(LocalPath, Auth, DocRoot, DirectoryIndices, CustomHeaders, DefaultContentType,
     ContentTypes, UserAccess, IfModifiedSince) ->
@@ -379,13 +350,12 @@ serve_file(FileInfo, FileName, CustomHeaders, DefaultContentType, ContentTypes) 
     ?DEBUG("Delivering: ~s", [FileName]),
     ContentType = content_type(FileName, DefaultContentType,
 			       ContentTypes),
-    {ok, FileContents} = file:read_file(FileName),
     {FileInfo#file_info.size, 200,
      [{<<"Server">>, <<"ejabberd">>},
       {<<"Last-Modified">>, last_modified(FileInfo)},
       {<<"Content-Type">>, ContentType}
       | CustomHeaders],
-     FileContents}.
+     {file, FileName}}.
 
 %%----------------------------------------------------------------------
 %% Log file
@@ -412,7 +382,7 @@ reopen_log() ->
     lists:foreach(
       fun(Host) ->
 	      gen_server:cast(get_proc_name(Host), reopen_log)
-      end, ?MYHOSTS).
+      end, ejabberd_config:get_myhosts()).
 
 add_to_log(FileSize, Code, Request) ->
     gen_server:cast(get_proc_name(Request#request.host),
@@ -424,9 +394,8 @@ add_to_log(File, FileSize, Code, Request) ->
     {{Year, Month, Day}, {Hour, Minute, Second}} = calendar:local_time(),
     IP = ip_to_string(element(1, Request#request.ip)),
     Path = join(Request#request.path, "/"),
-    Query = case join(lists:map(fun(E) -> lists:concat([element(1, E), "=", binary_to_list(element(2, E))]) end,
-				Request#request.q), "&") of
-		[] ->
+    Query = case stringify_query(Request#request.q) of
+		<<"">> ->
 		    "";
 		String ->
 		    [$? | String]
@@ -444,6 +413,15 @@ add_to_log(File, FileSize, Code, Request) ->
     io:format(File, "~s - - [~p/~p/~p:~p:~p:~p] \"~s /~s~s\" ~p ~p ~p ~p~n",
 	      [IP, Day, Month, Year, Hour, Minute, Second, Request#request.method, Path, Query, Code,
                FileSize, Referer, UserAgent]).
+
+stringify_query(Q) ->
+    stringify_query(Q, []).
+stringify_query([], Res) ->
+    join(lists:reverse(Res), "&");
+stringify_query([{nokey, _B} | Q], Res) ->
+    stringify_query(Q, Res);
+stringify_query([{A, B} | Q], Res) ->
+    stringify_query(Q, [join([A,B], "=") | Res]).
 
 find_header(Header, Headers, Default) ->
     case lists:keysearch(Header, 1, Headers) of
@@ -485,7 +463,10 @@ ip_to_string(Address) when size(Address) == 8 ->
     Parts = lists:map(fun (Int) -> io_lib:format("~.16B", [Int]) end, tuple_to_list(Address)),
     string:to_lower(lists:flatten(join(Parts, ":"))).
 
-mod_opt_type(accesslog) -> fun iolist_to_binary/1;
+mod_opt_type(accesslog) ->
+    fun(undefined) -> undefined;
+       (File) -> iolist_to_binary(File)
+    end;
 mod_opt_type(content_types) ->
     fun(L) when is_list(L) ->
 	    lists:map(
@@ -500,15 +481,32 @@ mod_opt_type(default_content_type) ->
     fun iolist_to_binary/1;
 mod_opt_type(directory_indices) ->
     fun (L) when is_list(L) -> L end;
-mod_opt_type(docroot) -> fun (A) -> A end;
+mod_opt_type(docroot) ->
+    fun(S) ->
+	    Path = iolist_to_binary(S),
+	    case filelib:ensure_dir(filename:join(Path, "foo")) of
+		ok ->
+		    Path;
+		{error, Why} ->
+		    ?ERROR_MSG("Failed to create directory ~s: ~s",
+			       [Path, file:format_error(Why)]),
+		    erlang:error(badarg)
+	    end
+    end;
 mod_opt_type(must_authenticate_with) ->
     fun (L) when is_list(L) ->
 	    lists:map(fun(UP) when is_binary(UP) ->
 			      [K, V] = binary:split(UP, <<":">>),
 			      {K, V}
 		      end, L)
-    end;
-mod_opt_type(_) ->
-    [accesslog, content_types, custom_headers,
-     default_content_type, directory_indices, docroot,
-     must_authenticate_with].
+    end.
+
+mod_options(_) ->
+    [{accesslog, undefined},
+     {content_types, []},
+     {default_content_type, <<"application/octet-stream">>},
+     {custom_headers, []},
+     {directory_indices, []},
+     {must_authenticate_with, []},
+     %% Required option
+     docroot].

@@ -2,7 +2,7 @@
 %%% Created : 11 Jan 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,7 +30,6 @@
 -export([init/1, handle_cast/2, handle_call/3, handle_info/2,
 	 terminate/2, code_change/3, start_link/0]).
 
--include("ejabberd.hrl").
 -include("ejabberd_router.hrl").
 -include("logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").

@@ -5,7 +5,7 @@
 %%% Created : 27 Jul 2016 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -34,7 +34,6 @@
          clean/1]).
 
 -include("ejabberd_oauth.hrl").
--include("ejabberd.hrl").
 -include("ejabberd_sql_pt.hrl").
 -include("jid.hrl").
 -include("logger.hrl").
@@ -49,7 +48,7 @@ store(R) ->
     Scope = str:join(R#oauth_token.scope, <<" ">>),
     Expire = R#oauth_token.expire,
     case ?SQL_UPSERT(
-	    ?MYNAME,
+	    ejabberd_config:get_myname(),
 	    "oauth_token",
 	    ["!token=%(Token)s",
 	     "jid=%(SJID)s",
@@ -57,15 +56,13 @@ store(R) ->
 	     "expire=%(Expire)d"]) of
 	ok ->
 	    ok;
-	Err ->
-	    ?ERROR_MSG("Failed to write to SQL 'oauth_token' table: ~p",
-		       [Err]),
+	_ ->
 	    {error, db_failure}
     end.
 
 lookup(Token) ->
     case ejabberd_sql:sql_query(
-           ?MYNAME,
+           ejabberd_config:get_myname(),
            ?SQL("select @(jid)s, @(scope)s, @(expire)d"
                 " from oauth_token where token=%(Token)s")) of
         {selected, [{SJID, Scope, Expire}]} ->
@@ -81,6 +78,6 @@ lookup(Token) ->
 
 clean(TS) ->
     ejabberd_sql:sql_query(
-      ?MYNAME,
+      ejabberd_config:get_myname(),
       ?SQL("delete from oauth_token where expire < %(TS)d")).
 

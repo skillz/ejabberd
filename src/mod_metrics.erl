@@ -5,7 +5,7 @@
 %%% Created : 22 Oct 2015 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -28,11 +28,10 @@
 -author('christophe.romain@process-one.net').
 -behaviour(gen_mod).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 
--export([start/2, stop/1, mod_opt_type/1, depends/2, reload/3]).
+-export([start/2, stop/1, mod_opt_type/1, mod_options/1, depends/2, reload/3]).
 
 -export([offline_message_hook/1,
          sm_register_connection_hook/3, sm_remove_connection_hook/3,
@@ -85,10 +84,9 @@ offline_message_hook({_Action, #message{to = #jid{lserver = LServer}}} = Acc) ->
 
 -spec sm_register_connection_hook(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> any().
 sm_register_connection_hook(_SID, #jid{lserver=LServer}, _Info) ->
-    OpenPorts = length([P || P <- erlang:ports(), erlang:port_info(P, name) == {name, "tcp_inet"}]),
-    push(LServer, {erlang_processes, length(erlang:processes())}),
-    push(LServer, {connected_users, length(ejabberd_sm:dirty_get_sessions_list())}),
-    push(LServer, {open_tcp_ports, OpenPorts}),
+    push(LServer, {open_tcp_ports, erlang:system_info(port_count)}),
+    push(LServer, {erlang_processes, erlang:system_info(process_count)}),
+    push(LServer, {connected_users, ets:info(session,size)}),
     push(LServer, sm_register_connection).
 
 -spec sm_remove_connection_hook(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> any().
@@ -131,8 +129,8 @@ register_user(_User, Server) ->
 %%====================================================================
 
 push(Host, Probe) ->
-    IP = gen_mod:get_module_opt(Host, ?MODULE, ip, {127,0,0,1}),
-    Port = gen_mod:get_module_opt(Host, ?MODULE, port, 11111),
+    IP = gen_mod:get_module_opt(Host, ?MODULE, ip),
+    Port = gen_mod:get_module_opt(Host, ?MODULE, port),
     send_metrics(Host, Probe, IP, Port).
 
 send_metrics(Host, Probe, Peer, Port) ->
@@ -188,6 +186,7 @@ mod_opt_type(ip) ->
 	    IP
     end;
 mod_opt_type(port) ->
-    fun(I) when is_integer(I), I>0, I<65536 -> I end;
-mod_opt_type(_) ->
-    [ip, port].
+    fun(I) when is_integer(I), I>0, I<65536 -> I end.
+
+mod_options(_) ->
+    [{ip, <<"127.0.0.1">>}, {port, 11111}].

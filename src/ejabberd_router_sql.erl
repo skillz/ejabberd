@@ -3,7 +3,7 @@
 %%% Created : 28 Mar 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -29,10 +29,10 @@
 -export([init/0, register_route/5, unregister_route/3, find_routes/1,
 	 get_all_routes/0]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
 -include("ejabberd_router.hrl").
+-include("ejabberd_stacktrace.hrl").
 
 %%%===================================================================
 %%% API
@@ -41,7 +41,7 @@ init() ->
     Node = erlang:atom_to_binary(node(), latin1),
     ?DEBUG("Cleaning SQL 'route' table...", []),
     case ejabberd_sql:sql_query(
-	   ?MYNAME, ?SQL("delete from route where node=%(Node)s")) of
+	   ejabberd_config:get_myname(), ?SQL("delete from route where node=%(Node)s")) of
 	{updated, _} ->
 	    ok;
 	Err ->
@@ -53,7 +53,7 @@ register_route(Domain, ServerHost, LocalHint, _, Pid) ->
     PidS = misc:encode_pid(Pid),
     LocalHintS = enc_local_hint(LocalHint),
     Node = erlang:atom_to_binary(node(Pid), latin1),
-    case ?SQL_UPSERT(?MYNAME, "route",
+    case ?SQL_UPSERT(ejabberd_config:get_myname(), "route",
 		     ["!domain=%(Domain)s",
 		      "!server_host=%(ServerHost)s",
 		      "!node=%(Node)s",
@@ -61,8 +61,7 @@ register_route(Domain, ServerHost, LocalHint, _, Pid) ->
 		      "local_hint=%(LocalHintS)s"]) of
 	ok ->
 	    ok;
-	Err ->
-	    ?ERROR_MSG("failed to update 'route' table: ~p", [Err]),
+	_ ->
 	    {error, db_failure}
     end.
 
@@ -70,19 +69,18 @@ unregister_route(Domain, _, Pid) ->
     PidS = misc:encode_pid(Pid),
     Node = erlang:atom_to_binary(node(Pid), latin1),
     case ejabberd_sql:sql_query(
-	   ?MYNAME,
+	   ejabberd_config:get_myname(),
 	   ?SQL("delete from route where domain=%(Domain)s "
 		"and pid=%(PidS)s and node=%(Node)s")) of
 	{updated, _} ->
 	    ok;
-	Err ->
-	    ?ERROR_MSG("failed to delete from 'route' table: ~p", [Err]),
+	_ ->
 	    {error, db_failure}
     end.
 
 find_routes(Domain) ->
     case ejabberd_sql:sql_query(
-	   ?MYNAME,
+	   ejabberd_config:get_myname(),
 	   ?SQL("select @(server_host)s, @(node)s, @(pid)s, @(local_hint)s "
 		"from route where domain=%(Domain)s")) of
 	{selected, Rows} ->
@@ -90,19 +88,17 @@ find_routes(Domain) ->
 		   fun(Row) ->
 			   row_to_route(Domain, Row)
 		   end, Rows)};
-	Err ->
-	    ?ERROR_MSG("failed to select from 'route' table: ~p", [Err]),
+	_ ->
 	    {error, db_failure}
     end.
 
 get_all_routes() ->
     case ejabberd_sql:sql_query(
-	   ?MYNAME,
+	   ejabberd_config:get_myname(),
 	   ?SQL("select @(domain)s from route where domain <> server_host")) of
 	{selected, Domains} ->
 	    {ok, [Domain || {Domain} <- Domains]};
-	Err ->
-	    ?ERROR_MSG("failed to select from 'route' table: ~p", [Err]),
+	_ ->
 	    {error, db_failure}
     end.
 
@@ -126,11 +122,11 @@ row_to_route(Domain, {ServerHost, NodeS, PidS, LocalHintS} = Row) ->
 		local_hint = dec_local_hint(LocalHintS)}]
     catch _:{bad_node, _} ->
 	    [];
-	  E:R ->
+	  ?EX_RULE(E, R, St) ->
 	    ?ERROR_MSG("failed to decode row from 'route' table:~n"
 		       "Row = ~p~n"
 		       "Domain = ~s~n"
 		       "Reason = ~p",
-		       [Row, Domain, {E, {R, erlang:get_stacktrace()}}]),
+		       [Row, Domain, {E, {R, ?EX_STACK(St)}}]),
 	    []
     end.

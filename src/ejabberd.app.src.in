@@ -5,8 +5,9 @@
   {vsn, "@PACKAGE_VERSION@"},
   {modules, []},
   {registered, []},
-  {applications, [kernel, stdlib]},
-  {env, []},
+  {applications, [kernel, stdlib, sasl, ssl]},
+  {included_applications, [os_mon, lager, mnesia, inets, p1_utils, fast_yaml, fast_tls, pkix, xmpp, cache_tab, eimp]},
+  {env, [{enabled_backends, [@enabled_backends@]}]},
   {mod, {ejabberd_app, []}}]}.
 
 
