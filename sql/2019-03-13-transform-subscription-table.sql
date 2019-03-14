@@ -10,9 +10,10 @@ SELECT
     SUBSTRING_INDEX(room, '@', 1),
     SUBSTRING_INDEX(room, '@', -1),
     jid,
+    SUBSTRING_INDEX(jid, '@', 1),
     '[<<"urn:xmpp:mucsub:nodes:messages">>,
-      <<"urn:xmpp:mucsub:nodes:affiliations">>,<<"urn:xmpp:mucsub:nodes:subject">>,
-      <<"urn:xmpp:mucsub:nodes:config">>]',
+  <<"urn:xmpp:mucsub:nodes:affiliations">>,<<"urn:xmpp:mucsub:nodes:subject">>,
+  <<"urn:xmpp:mucsub:nodes:config">>]',
     created_at
 FROM 
     subscription;
