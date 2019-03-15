@@ -85,6 +85,8 @@
 -include("mod_privacy.hrl").
 -include("ejabberd_sm.hrl").
 -include("xmpp.hrl").
+-include("mod_muc_room.hrl").
+-include("mod_mam.hrl").
 
 %%%
 %%% gen_mod
@@ -1532,6 +1534,38 @@ build_packet(Type, Subject, Body) ->
     #message{type = misc:binary_to_atom(Type),
 	     body = xmpp:mk_text(Body),
 	     subject = xmpp:mk_text(Subject)}.
+
+%% Taken from mod_muc_room
+-spec wrap(jid(), jid(), stanza(), binary()) -> message().
+wrap(From, To, Packet, Node) ->
+    El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
+    #message{
+       sub_els = [#ps_event{
+		     items = #ps_items{
+				node = Node,
+				items = [#ps_item{
+					    id = randoms:get_string(),
+					    xml_els = [El]}]}}]}.
+
+%% Kind of a bad hack.  We might want to add a funciton in mod_mam in the future
+%% to handle this case.
+spoof_muc_state(LServer, RoomJID) ->
+	#state{
+	   server_host = LServer,
+	   jid = RoomJID,
+	   config = #config{
+			mam = true}}.
+
+get_offline_user(To, From) ->
+	FromUser      = From#jid.user,
+	Room          = To#jid.user,
+	Users         = string:lexemes(Room, "-" ++ [[$\r,$\n]]),
+	[User1|User2] = Users,
+	NewUser       = case User1 of
+		FromUser -> hd(User2);
+		_        -> User1
+	end,
+	From#jid{user = NewUser, luser = NewUser}.
 
 send_stanza(FromString, ToString, Stanza) ->
     try
