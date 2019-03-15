@@ -17,7 +17,3 @@ SELECT
     created_at
 FROM 
     subscription;
-
-/* Clear table of results. */
-TRUNCATE TABLE subscription;
-DROP     TABLE subscription;
