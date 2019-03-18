@@ -146,7 +146,7 @@ DEPS:=$(sort $(shell $(REBAR) -q list-deps|$(SED) -ne '/ TAG / s/ .*// p; / REV 
 
 DEPS_FILES=$(call FILES_WILDCARD,$(foreach DEP,$(DEPS),deps/$(DEP)/ebin/*.beam deps/$(DEP)/ebin/*.app deps/$(DEP)/priv/* deps/$(DEP)/priv/lib/* deps/$(DEP)/priv/bin/* deps/$(DEP)/include/*.hrl deps/$(DEP)/COPY* deps/$(DEP)/LICENSE* deps/$(DEP)/lib/*/ebin/*.beam deps/$(DEP)/lib/*/ebin/*.app))
 
-BINARIES=deps/epam/priv/bin/epam deps/eimp/priv/bin/eimp deps/fs/priv/mac_listener
+BINARIES=deps/epam/priv/bin/epam deps/fs/priv/mac_listener
 
 DEPS_FILES_FILTERED=$(filter-out $(BINARIES) deps/elixir/ebin/elixir.app,$(DEPS_FILES))
 DEPS_DIRS=$(sort deps/ $(foreach DEP,$(DEPS),deps/$(DEP)/) $(dir $(DEPS_FILES)))
