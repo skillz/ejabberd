@@ -4,9 +4,9 @@
   **/
 
 /* Copy data. */
-INSERT INTO 
+INSERT INTO
     muc_room_subscribers (room, host, jid, nick, nodes, created_at)
-SELECT 
+SELECT
     SUBSTRING_INDEX(room, '@', 1),
     SUBSTRING_INDEX(room, '@', -1),
     jid,
@@ -15,5 +15,11 @@ SELECT
   <<"urn:xmpp:mucsub:nodes:affiliations">>,<<"urn:xmpp:mucsub:nodes:subject">>,
   <<"urn:xmpp:mucsub:nodes:config">>]',
     created_at
-FROM 
-    subscription;
+FROM
+    subscription
+ON DUPLICATE KEY UPDATE
+	nodes =
+'[<<"urn:xmpp:mucsub:nodes:messages">>,
+  <<"urn:xmpp:mucsub:nodes:affiliations">>,<<"urn:xmpp:mucsub:nodes:subject">>,
+  <<"urn:xmpp:mucsub:nodes:config">>]';
+
