@@ -5,7 +5,7 @@
 %%% Created : 19 Feb 2015 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2006-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2006-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -33,7 +33,7 @@
          available_command/0, available/0, available/1,
          installed_command/0, installed/0, installed/1,
          install/1, uninstall/1, upgrade/0, upgrade/1,
-         add_sources/2, del_sources/1, modules_dir/0,
+         add_sources/1, add_sources/2, del_sources/1, modules_dir/0,
          config_dir/0, opt_type/1, get_commands_spec/0]).
 
 -export([compile_erlang_file/2, compile_elixir_file/2]).
@@ -56,7 +56,8 @@ init([]) ->
     process_flag(trap_exit, true),
     [code:add_patha(module_ebin_dir(Module))
      || {Module, _} <- installed()],
-    p1_http:start(),
+    application:start(inets),
+    inets:start(httpc, [{profile, ext_mod}]),
     ejabberd_commands:register_commands(get_commands_spec()),
     {ok, #state{}}.
 
@@ -313,23 +314,22 @@ check(Package) when is_binary(Package) ->
 %% -- archives and variables functions
 
 geturl(Url) ->
-    geturl(Url, []).
-geturl(Url, UsrOpts) ->
-    geturl(Url, [], UsrOpts).
-geturl(Url, Hdrs, UsrOpts) ->
-    Host = case getenv("PROXY_SERVER", "", ":") of
-        [H, Port] -> [{proxy_host, H}, {proxy_port, list_to_integer(Port)}];
-        [H] -> [{proxy_host, H}, {proxy_port, 8080}];
-        _ -> []
+    case getenv("PROXY_SERVER", "", ":") of
+        [H, Port] ->
+            httpc:set_options([{proxy, {{H, list_to_integer(Port)}, []}}], ext_mod);
+        [H] ->
+            httpc:set_options([{proxy, {{H, 8080}, []}}], ext_mod);
+        _ ->
+            ok
     end,
     User = case getenv("PROXY_USER", "", [4]) of
-        [U, Pass] -> [{proxy_user, U}, {proxy_password, Pass}];
+        [U, Pass] -> [{proxy_auth, {U, Pass}}];
         _ -> []
     end,
-    case p1_http:request(get, Url, Hdrs, [], Host++User++UsrOpts++[{version, "HTTP/1.0"}]) of
-        {ok, 200, Headers, Response} ->
+    case httpc:request(get, {Url, []}, User, [{body_format, binary}], ext_mod) of
+        {ok, {{_, 200, _}, Headers, Response}} ->
             {ok, Headers, Response};
-        {ok, Code, _Headers, Response} ->
+        {ok, {{_, Code, _}, _Headers, Response}} ->
             {error, {Code, Response}};
         {error, Reason} ->
             {error, Reason}
@@ -680,8 +680,7 @@ format({Key, Val}) when is_binary(Val) ->
 format({Key, Val}) -> % TODO: improve Yaml parsing
     {Key, Val}.
 
--spec opt_type(allow_contrib_modules) -> fun((boolean()) -> boolean());
-	      (atom()) -> [atom()].
+-spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
 opt_type(allow_contrib_modules) ->
     fun (false) -> false;
         (no) -> false;

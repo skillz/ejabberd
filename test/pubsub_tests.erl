@@ -3,7 +3,7 @@
 %%% Created : 16 Nov 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -108,7 +108,7 @@ test_configure(Config) ->
 			    [{title, NodeTitle}]),
     set_node_config(Config, Node, MyNodeConfig),
     NewNodeConfig = get_node_config(Config, Node),
-    NodeTitle = proplists:get_value(title, NewNodeConfig),
+    NodeTitle = proplists:get_value(title, NewNodeConfig, <<>>),
     disconnect(Config).
 
 test_default(Config) ->
@@ -122,7 +122,7 @@ test_create_configure(Config) ->
 				[{title, NodeTitle}]),
     Node = create_node(Config, <<>>, CustomNodeConfig),
     NodeConfig = get_node_config(Config, Node),
-    NodeTitle = proplists:get_value(title, NodeConfig),
+    NodeTitle = proplists:get_value(title, NodeConfig, <<>>),
     delete_node(Config, Node),
     disconnect(Config).
 
@@ -133,7 +133,7 @@ test_publish(Config) ->
     disconnect(Config).
 
 test_auto_create(Config) ->
-    Node = randoms:get_string(),
+    Node = p1_rand:get_string(),
     publish_item(Config, Node),
     delete_node(Config, Node),
     disconnect(Config).
@@ -217,7 +217,7 @@ master_slave_cases() ->
 publish_master(Config) ->
     Node = create_node(Config, <<>>),
     put_event(Config, Node),
-    wait_for_slave(Config),
+    ready = get_event(Config),
     #ps_item{id = ID} = publish_item(Config, Node),
     #ps_item{id = ID} = get_event(Config),
     delete_node(Config, Node),
@@ -226,7 +226,7 @@ publish_master(Config) ->
 publish_slave(Config) ->
     Node = get_event(Config),
     subscribe_node(Config, Node),
-    wait_for_master(Config),
+    put_event(Config, ready),
     #message{
        sub_els =
 	   [#ps_event{
@@ -287,7 +287,7 @@ affiliations_master(Config) ->
     lists:foreach(
       fun(Aff) ->
 	      Node = <<(atom_to_binary(Aff, utf8))/binary,
-		       $-, (randoms:get_string())/binary>>,
+		       $-, (p1_rand:get_string())/binary>>,
 	      create_node(Config, Node, default_node_config(Config)),
 	      #ps_item{id = I} = publish_item(Config, Node),
 	      ok = set_affiliations(Config, Node, [{Peer, Aff}]),
@@ -598,8 +598,8 @@ set_node_config(Config, Node, Options) ->
 
 publish_item(Config, Node) ->
     PJID = pubsub_jid(Config),
-    ItemID = randoms:get_string(),
-    Item = #ps_item{id = ItemID, xml_els = [xmpp:encode(#presence{id = ItemID})]},
+    ItemID = p1_rand:get_string(),
+    Item = #ps_item{id = ItemID, sub_els = [xmpp:encode(#presence{id = ItemID})]},
     case send_recv(Config,
 		   #iq{type = set, to = PJID,
 		       sub_els = [#pubsub{publish = #ps_publish{

@@ -5,7 +5,7 @@
 %%% Created : 29 Dec 2011 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -33,7 +33,6 @@
 	 transform_options/1, get_random_pid/0,
 	 host_up/1, config_reloaded/0, opt_type/1]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 
 -define(DEFAULT_POOL_SIZE, 10).
@@ -74,7 +73,7 @@ config_reloaded() ->
     end.
 
 is_riak_configured() ->
-    lists:any(fun is_riak_configured/1, ?MYHOSTS).
+    lists:any(fun is_riak_configured/1, ejabberd_config:get_myhosts()).
 
 is_riak_configured(Host) ->
     ServerConfigured = ejabberd_config:has_option({riak_server, Host}),
@@ -163,7 +162,7 @@ get_pids() ->
     [ejabberd_riak:get_proc(I) || I <- lists:seq(1, get_pool_size())].
 
 get_random_pid() ->
-    I = randoms:round_robin(get_pool_size()) + 1,
+    I = p1_rand:round_robin(get_pool_size()) + 1,
     ejabberd_riak:get_proc(I).
 
 transform_options(Opts) ->
@@ -174,14 +173,7 @@ transform_options({riak_server, {S, P}}, Opts) ->
 transform_options(Opt, Opts) ->
     [Opt|Opts].
 
--spec opt_type(riak_pool_size) -> fun((pos_integer()) -> pos_integer());
-	      (riak_port) -> fun((0..65535) -> 0..65535);
-	      (riak_server) -> fun((binary()) -> binary());
-	      (riak_start_interval) -> fun((pos_integer()) -> pos_integer());
-	      (riak_cacertfile) -> fun((binary()) -> binary());
-	      (riak_username) -> fun((binary()) -> binary());
-	      (riak_password) -> fun((binary()) -> binary());
-	      (atom()) -> [atom()].
+-spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
 opt_type(riak_pool_size) ->
     fun (N) when is_integer(N), N >= 1 -> N end;
 opt_type(riak_port) ->

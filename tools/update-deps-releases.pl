@@ -7,11 +7,13 @@ use warnings;
 use File::Slurp qw(slurp write_file);
 use File::stat;
 use File::Touch;
+use File::chdir;
+use File::Spec;
 use Data::Dumper qw(Dumper);
 use Carp;
 use Term::ANSIColor;
 use Term::ReadKey;
-use List::Util qw(first unpairs);
+use List::Util qw(first);
 use Clone qw(clone);
 
 sub get_deps {
@@ -167,7 +169,7 @@ sub update_app_src {
     my $app = ".deps-update/$dep/src/$dep.app.src";
     return if not -f $app;
     my $content = slurp($app);
-    $content =~ s/({\s*vsn\s*,\s*)".*"/$1"$version"/;
+    $content =~ s/(\{\s*vsn\s*,\s*)".*"/$1"$version"/;
     write_file($app, $content);
 }
 
@@ -233,6 +235,15 @@ sub deps_git_info {
             my $new_tag = $last_tag;
             $new_tag =~ s/(\d+)$/$1+1/e;
             chomp(@new);
+
+            my $cl = ".deps-update/$dep/CHANGELOG.md";
+            my $content = slurp($cl, err_mode => "quiet") // "";
+            if ($content =~ /^# Version (\S+)/) {
+                if (!grep({$_ eq $1} @tags) && $1 ne $new_tag) {
+                    $new_tag = $1;
+                }
+            }
+
             $info{$dep} = { last_tag => $last_tag, new_commits => \@new, new_tag => $new_tag };
         }
     }
@@ -250,12 +261,18 @@ sub show_commands {
         say color("red"), $_, color("reset"), ") $commands{$_}";
     }
     ReadMode(4);
+    my $wkey = "";
     while (1) {
         my $key = ReadKey(0);
+        $wkey = substr($wkey.$key, -2);
         if (defined $commands{uc($key)}) {
             ReadMode(0);
             say "";
             return uc($key);
+        } elsif (defined $commands{uc($wkey)}) {
+            ReadMode(0);
+            say "";
+            return uc($wkey);
         }
     }
 }
@@ -323,6 +340,44 @@ sub git_push {
     system("git", "-C", ".deps-update/$dep", "push", "--tags");
 }
 
+sub check_hex_files {
+    my ($dep) = @_;
+    my $app = ".deps-update/$dep/src/$dep.app.src";
+    return if not -f $app;
+    my $content = slurp($app);
+    my @paths;
+    if ($content =~ /{\s*files\s*,\s*\[([^\]]+)\]/) {
+        my $list = $1;
+        push @paths, $1 while $list =~ /"([^"]*?)"/g;
+    } else {
+        @paths = (
+            "src", "c_src", "include", "rebar.config.script", "priv",
+            "rebar.config", "rebar.lock", "README*", "readme*", "LICENSE*",
+            "license*", "NOTICE");
+    }
+    local $CWD = ".deps-update/$dep";
+    my @interesting_files = map {File::Spec->canonpath($_)} glob("rebar.config* src/*.erl src/*.app.src c_src/*.c c_src/*.cpp \
+        c_src/*.h c_src/*.hpp include/*.hrl");
+
+    my @matching_files;
+    for my $path (@paths) {
+        if (-d $path) {
+            push @matching_files, map {File::Spec->canonpath($_)} glob("$path/*");
+        } else {
+            push @matching_files, map {File::Spec->canonpath($_)} glob($path);
+        }
+    }
+    my %diff;
+    @diff{ @interesting_files } = undef;
+    delete @diff{ @matching_files };
+    my @diff = keys %diff;
+    if (@diff) {
+        print color("red"), "Dependency ", color("bold red"), $dep, color("reset"), color("red"), " files section doesn't match: ",
+            join(" ", @diff), color("reset"), "\n";
+
+    }
+}
+
 update_deps_repos();
 
 MAIN:
@@ -349,6 +404,10 @@ while (1) {
     }
     say "(none)" if not $changed_deps;
     say "";
+
+    for my $dep (sort keys %$top_deps) {
+        check_hex_files($dep);
+    }
 
     my $cmd = show_commands($old_deps ? (U => "Update dependency") : (),
         $changed_deps ? (T => "Tag new release") : (),
@@ -387,10 +446,17 @@ while (1) {
             my @deps_to_tag;
             my @od;
             my $idx = 1;
+            my $count = 0;
+            for my $dep (sort keys %$top_deps) {
+                next unless @{$git_info->{$dep}->{new_commits}};
+                $count++;
+            }
             for my $dep (sort keys %$top_deps) {
                 next unless @{$git_info->{$dep}->{new_commits}};
                 $od[$idx] = $dep;
-                push @deps_to_tag, $idx++, "Tag $dep with version $git_info->{$dep}->{new_tag}";
+                my $id = $idx++;
+                $id = sprintf "%02d", $id if $count > 9;
+                push @deps_to_tag, $id, "Tag $dep with version $git_info->{$dep}->{new_tag}";
             }
             last if $idx == 1;
             my $cmd = show_commands(@deps_to_tag, E => "Exit");
@@ -467,7 +533,7 @@ while (1) {
                 for my $op (@operations) {
                     update_changelog($op->{dep}, $op->{version}, @{$op->{reasons}})
                         if @{$op->{reasons}};
-                    update_deps_versions(".deps-update/$op->{dep}/rebar.config", unpairs(@{$op->{operations}}))
+                    update_deps_versions(".deps-update/$op->{dep}/rebar.config", map {@{$_}[0,1] } @{$op->{operations}})
                         if @{$op->{operations}};
                     if ($git_info->{$op->{dep}}->{last_tag} ne $op->{version}) {
                         update_app_src($op->{dep}, $op->{version});

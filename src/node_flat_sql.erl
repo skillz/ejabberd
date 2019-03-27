@@ -5,7 +5,7 @@
 %%% Created :  1 Dec 2007 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -53,12 +53,10 @@
     path_to_node/1,
     get_entity_subscriptions_for_send_last/2, get_last_items/3]).
 
--export([decode_jid/1, encode_jid/1,
-         encode_jid_like/1,
-    decode_affiliation/1, decode_subscriptions/1,
-    encode_affiliation/1, encode_subscriptions/1,
-         encode_host/1,
-         encode_host_like/1]).
+-export([decode_jid/1, encode_jid/1, encode_jid_like/1,
+         decode_affiliation/1, decode_subscriptions/1,
+         encode_affiliation/1, encode_subscriptions/1,
+         encode_host/1, encode_host_like/1]).
 
 init(_Host, _ServerHost, _Opts) ->
     %%pubsub_subscription_sql:init(Host, ServerHost, Opts),
@@ -243,20 +241,31 @@ publish_item(Nidx, Publisher, PublishModel, MaxItems, ItemId, Payload,
     if not ((PublishModel == open) or
 		    (PublishModel == publishers) and
 		    ((Affiliation == owner)
-			 or (Affiliation == publisher)
-			 or (Affiliation == publish_only))
+			or (Affiliation == publisher)
+			or (Affiliation == publish_only))
 		    or (Subscribed == true)) ->
 	    {error, xmpp:err_forbidden()};
 	true ->
 	    if MaxItems > 0 ->
-		    PubId = {p1_time_compat:timestamp(), SubKey},
-		    set_item(#pubsub_item{itemid = {ItemId, Nidx},
-			    creation = {p1_time_compat:timestamp(), GenKey},
-			    modification = PubId,
-			    payload = Payload}),
-		    Items = [ItemId | itemids(Nidx, GenKey) -- [ItemId]],
-		    {result, {_, OI}} = remove_extra_items(Nidx, MaxItems, Items),
-		    {result, {default, broadcast, OI}};
+		    Now = p1_time_compat:timestamp(),
+		    case get_item(Nidx, ItemId) of
+			{result, #pubsub_item{creation = {_, GenKey}} = OldItem} ->
+			    set_item(OldItem#pubsub_item{
+					modification = {Now, SubKey},
+					payload = Payload}),
+			    {result, {default, broadcast, []}};
+			{result, _} ->
+			    {error, xmpp:err_forbidden()};
+			_ ->
+			    Items = [ItemId | itemids(Nidx, GenKey)],
+			    {result, {_NI, OI}} = remove_extra_items(Nidx, MaxItems, Items),
+			    set_item(#pubsub_item{
+					itemid = {ItemId, Nidx},
+					creation = {Now, GenKey},
+					modification = {Now, SubKey},
+					payload = Payload}),
+			    {result, {default, broadcast, OI}}
+		    end;
 		true ->
 		    {result, {default, broadcast, []}}
 	    end
@@ -284,9 +293,23 @@ delete_item(Nidx, Publisher, PublishModel, ItemId) ->
     if not Allowed ->
 	    {error, xmpp:err_forbidden()};
 	true ->
-	    case del_item(Nidx, ItemId) of
-		{updated, 1} -> {result, {default, broadcast}};
-		_ -> {error, xmpp:err_item_not_found()}
+	    Items = itemids(Nidx, GenKey),
+	    case lists:member(ItemId, Items) of
+		true ->
+		    case del_item(Nidx, ItemId) of
+			{updated, 1} -> {result, {default, broadcast}};
+			_ -> {error, xmpp:err_item_not_found()}
+		    end;
+		false ->
+		    case Affiliation of
+			owner ->
+			    case del_item(Nidx, ItemId) of
+				{updated, 1} -> {result, {default, broadcast}};
+				_ -> {error, xmpp:err_item_not_found()}
+			    end;
+			_ ->
+			    {error, xmpp:err_forbidden()}
+		    end
 	    end
     end.
 
@@ -314,7 +337,7 @@ get_entity_affiliations(Host, Owner) ->
     J = encode_jid(GenKey),
     {result,
      case ejabberd_sql:sql_query_t(
-	    ?SQL("select @(node)s, @(type)s, @(i.nodeid)d, @(affiliation)s "
+	    ?SQL("select @(node)s, @(plugin)s, @(i.nodeid)d, @(affiliation)s "
 		 "from pubsub_state i, pubsub_node n where "
 		 "i.nodeid = n.nodeid and jid=%(J)s and host=%(H)s")) of
 	 {selected, RItems} ->
@@ -362,25 +385,21 @@ get_entity_subscriptions(Host, Owner) ->
     SubKey = jid:tolower(Owner),
     GenKey = jid:remove_resource(SubKey),
     H = encode_host(Host),
-    SJ = encode_jid(SubKey),
     GJ = encode_jid(GenKey),
-    GJLike = <<(encode_jid_like(GenKey))/binary, "/%">>,
-    Query =
-        case SubKey of
-            GenKey ->
-                ?SQL("select @(node)s, @(type)s, @(i.nodeid)d,"
-                     " @(jid)s, @(subscriptions)s "
-                     "from pubsub_state i, pubsub_node n "
-                     "where i.nodeid = n.nodeid and "
-                     "(jid=%(GJ)s or jid like %(GJLike)s escape '^')"
-                     " and host=%(H)s");
-            _ ->
-                ?SQL("select @(node)s, @(type)s, @(i.nodeid)d,"
-                     " @(jid)s, @(subscriptions)s "
-                     "from pubsub_state i, pubsub_node n "
-                     "where i.nodeid = n.nodeid and"
-                     " jid in (%(SJ)s, %(GJ)s) and host=%(H)s")
-        end,
+    Query = case SubKey of
+	      GenKey ->
+		GJLike = <<(encode_jid_like(GenKey))/binary, "/%">>,
+		?SQL("select @(node)s, @(plugin)s, @(i.nodeid)d, @(jid)s, @(subscriptions)s "
+		     "from pubsub_state i, pubsub_node n "
+		     "where i.nodeid = n.nodeid and "
+		     "(jid=%(GJ)s or jid like %(GJLike)s escape '^') and host=%(H)s");
+	      _ ->
+		SJ = encode_jid(SubKey),
+		?SQL("select @(node)s, @(plugin)s, @(i.nodeid)d, @(jid)s, @(subscriptions)s "
+		     "from pubsub_state i, pubsub_node n "
+		     "where i.nodeid = n.nodeid and "
+		     "jid in (%(SJ)s, %(GJ)s) and host=%(H)s")
+	    end,
     {result,
      case ejabberd_sql:sql_query_t(Query) of
 	 {selected, RItems} ->
@@ -388,15 +407,10 @@ get_entity_subscriptions(Host, Owner) ->
 	       fun({N, T, I, J, S}, Acc) ->
 		       Node = nodetree_tree_sql:raw_to_node(Host, {N, <<"">>, T, I}),
 		       Jid = decode_jid(J),
-		       case decode_subscriptions(S) of
-			   [] ->
-			       [{Node, none, Jid} | Acc];
-			   Subs ->
-			       lists:foldl(
-				 fun({Sub, SubId}, Acc2) ->
-					 [{Node, Sub, SubId, Jid} | Acc2]
-				 end, Acc, Subs)
-		       end
+		       lists:foldl(
+			 fun({Sub, SubId}, Acc2) ->
+			     [{Node, Sub, SubId, Jid} | Acc2]
+			 end, Acc, decode_subscriptions(S))
 	       end, [], RItems);
 	 _ ->
 	     []
@@ -413,27 +427,23 @@ get_entity_subscriptions_for_send_last(Host, Owner) ->
     SubKey = jid:tolower(Owner),
     GenKey = jid:remove_resource(SubKey),
     H = encode_host(Host),
-    SJ = encode_jid(SubKey),
     GJ = encode_jid(GenKey),
-    GJLike = <<(encode_jid_like(GenKey))/binary, "/%">>,
-    Query =
-        case SubKey of
-            GenKey ->
-                ?SQL("select @(node)s, @(type)s, @(i.nodeid)d,"
-                     " @(jid)s, @(subscriptions)s "
-                     "from pubsub_state i, pubsub_node n, pubsub_node_option o "
-                     "where i.nodeid = n.nodeid and n.nodeid = o.nodeid and name='send_last_published_item' "
-                     "and val='on_sub_and_presence' and "
-                     "(jid=%(GJ)s or jid like %(GJLike)s escape '^')"
-                     " and host=%(H)s");
-            _ ->
-                ?SQL("select @(node)s, @(type)s, @(i.nodeid)d,"
-                     " @(jid)s, @(subscriptions)s "
-                     "from pubsub_state i, pubsub_node n, pubsub_node_option o "
-                     "where i.nodeid = n.nodeid and n.nodeid = o.nodeid and name='send_last_published_item' "
-                     "and val='on_sub_and_presence' and"
-                     " jid in (%(SJ)s, %(GJ)s) and host=%(H)s")
-    end,
+    Query = case SubKey of
+	      GenKey ->
+		GJLike = <<(encode_jid_like(GenKey))/binary, "/%">>,
+		?SQL("select @(node)s, @(plugin)s, @(i.nodeid)d, @(jid)s, @(subscriptions)s "
+		     "from pubsub_state i, pubsub_node n, pubsub_node_option o "
+		     "where i.nodeid = n.nodeid and n.nodeid = o.nodeid and "
+		     "name='send_last_published_item' and val='on_sub_and_presence' and "
+		     "(jid=%(GJ)s or jid like %(GJLike)s escape '^') and host=%(H)s");
+	      _ ->
+		SJ = encode_jid(SubKey),
+		?SQL("select @(node)s, @(plugin)s, @(i.nodeid)d, @(jid)s, @(subscriptions)s "
+		     "from pubsub_state i, pubsub_node n, pubsub_node_option o "
+		     "where i.nodeid = n.nodeid and n.nodeid = o.nodeid and "
+		     "name='send_last_published_item' and val='on_sub_and_presence' and "
+		     "jid in (%(SJ)s, %(GJ)s) and host=%(H)s")
+	    end,
     {result,
      case ejabberd_sql:sql_query_t(Query) of
 	 {selected, RItems} ->
@@ -441,15 +451,10 @@ get_entity_subscriptions_for_send_last(Host, Owner) ->
 	       fun ({N, T, I, J, S}, Acc) ->
 		       Node = nodetree_tree_sql:raw_to_node(Host, {N, <<"">>, T, I}),
 		       Jid = decode_jid(J),
-		       case decode_subscriptions(S) of
-			   [] ->
-			       [{Node, none, Jid} | Acc];
-			   Subs ->
-			       lists:foldl(
-				 fun ({Sub, SubId}, Acc2) ->
-					 [{Node, Sub, SubId, Jid}| Acc2]
-				 end, Acc, Subs)
-		       end
+		       lists:foldl(
+			 fun ({Sub, SubId}, Acc2) ->
+			     [{Node, Sub, SubId, Jid}| Acc2]
+			 end, Acc, decode_subscriptions(S))
 	       end, [], RItems);
 	 _ ->
 	     []
@@ -464,15 +469,10 @@ get_node_subscriptions(Nidx) ->
 	     lists:foldl(
 	       fun ({J, S}, Acc) ->
 		       Jid = decode_jid(J),
-		       case decode_subscriptions(S) of
-			   [] ->
-			       [{Jid, none} | Acc];
-			   Subs ->
-			       lists:foldl(
-				 fun ({Sub, SubId}, Acc2) ->
-					 [{Jid, Sub, SubId} | Acc2]
-				 end, Acc, Subs)
-		       end
+		       lists:foldl(
+			 fun ({Sub, SubId}, Acc2) ->
+			     [{Jid, Sub, SubId} | Acc2]
+			 end, Acc, decode_subscriptions(S))
 	       end, [], RItems);
 	 _ ->
 	     []
@@ -591,6 +591,7 @@ get_states(Nidx) ->
 	       fun({SJID, Aff, Subs}) ->
 		       JID = decode_jid(SJID),
 		       #pubsub_state{stateid = {JID, Nidx},
+				     nodeidx = Nidx,
 				     items = itemids(Nidx, JID),
 				     affiliation = decode_affiliation(Aff),
 				     subscriptions = decode_subscriptions(Subs)}
@@ -647,95 +648,54 @@ del_state(Nidx, JID) ->
                  " where jid=%(J)s and nodeid=%(Nidx)d")),
     ok.
 
-get_items(Nidx, From, undefined) ->
-    MaxItems = case ejabberd_sql:sql_query_t(
-		      ?SQL("select @(val)s from pubsub_node_option "
-			   "where nodeid=%(Nidx)d and name='max_items'")) of
-		   {selected, [{Value}]} ->
-		       misc:expr_to_term(Value);
-		   _ ->
-		       ?MAXITEMS
-	       end,
-    get_items(Nidx, From, #rsm_set{max = MaxItems});
+get_items(Nidx, _From, undefined) ->
+    SNidx = misc:i2l(Nidx),
+    case ejabberd_sql:sql_query_t(
+	   [<<"select itemid, publisher, creation, modification, payload",
+	      " from pubsub_item where nodeid='", SNidx/binary, "'",
+	      " order by creation asc">>]) of
+	{selected, _, AllItems} ->
+	    {result, {[raw_to_item(Nidx, RItem) || RItem <- AllItems], undefined}};
+	_ ->
+	    {result, {[], undefined}}
+    end;
 get_items(Nidx, _From, #rsm_set{max = Max, index = IncIndex,
 				'after' = After, before = Before}) ->
-    {Way, Order} = if After == <<>> -> {<<"is not">>, <<"desc">>};
-		      After /= undefined -> {<<"<">>, <<"desc">>};
-		      Before == <<>> -> {<<"is not">>, <<"asc">>};
-		      Before /= undefined -> {<<">">>, <<"asc">>};
-		      true -> {<<"is not">>, <<"desc">>}
-		   end,
-    SNidx = misc:i2l(Nidx),
-    I = if After /= undefined -> After;
-	   Before /= undefined -> Before;
-	   true -> undefined
-	end,
-    [AttrName, Id] =
-	case I of
-	    undefined when IncIndex =/= undefined ->
-		case ejabberd_sql:sql_query_t(
-		       [<<"select creation from pubsub_item pi "
-			  "where exists ( select count(*) as count1 "
-			  "from pubsub_item where nodeid='">>, SNidx,
-			<<"' and creation > pi.creation having count1 = ">>,
-			integer_to_binary(IncIndex), <<" );">>]) of
-		    {selected, [_], [[O]]} ->
-			[<<"creation">>, <<"'", O/binary, "'">>];
-		    _ ->
-			[<<"creation">>, <<"null">>]
-		end;
-	    undefined ->
-		[<<"creation">>, <<"null">>];
-	    <<>> ->
-		[<<"creation">>, <<"null">>];
-	    I ->
-		[A, B] = str:tokens(ejabberd_sql:escape(I), <<"@">>),
-		[A, <<"'", B/binary, "'">>]
-	end,
-    Count = case ejabberd_sql:sql_query_t(
-		   [<<"select count(*) from pubsub_item where nodeid='">>,
-		    SNidx, <<"';">>]) of
-		{selected, [_], [[C]]} -> binary_to_integer(C);
+    Count = case catch ejabberd_sql:sql_query_t(
+		    ?SQL("select @(count(itemid))d from pubsub_item"
+		         " where nodeid=%(Nidx)d")) of
+		{selected, [{C}]} -> C;
 		_ -> 0
 	    end,
+    Offset = case {IncIndex, Before, After} of
+		{I, undefined, undefined} when is_integer(I) -> I;
+		_ -> 0
+	     end,
+    Limit = case Max of
+		undefined -> ?MAXITEMS;
+		_ -> Max
+	    end,
+    Filters = rsm_filters(misc:i2l(Nidx), Before, After),
     Query = fun(mssql, _) ->
 		    ejabberd_sql:sql_query_t(
-		      [<<"select top ">>, integer_to_binary(Max),
-		       <<" itemid, publisher, creation, modification, payload "
-			 "from pubsub_item where nodeid='">>, SNidx,
-		       <<"' and ">>, AttrName, <<" ">>, Way, <<" ">>, Id, <<" order by ">>,
-		       AttrName, <<" ">>, Order, <<";">>]);
+		      [<<"select top ", (integer_to_binary(Limit))/binary,
+			 " itemid, publisher, creation, modification, payload",
+			 " from pubsub_item", Filters/binary>>]);
+			 %OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;
 	       (_, _) ->
 		    ejabberd_sql:sql_query_t(
-		      [<<"select itemid, publisher, creation, modification, payload "
-			 "from pubsub_item where nodeid='">>, SNidx,
-		       <<"' and ">>, AttrName, <<" ">>, Way, <<" ">>, Id, <<" order by ">>,
-		       AttrName, <<" ">>, Order, <<" limit ">>,
-		       integer_to_binary(Max), <<" ;">>])
+		      [<<"select itemid, publisher, creation, modification, payload",
+			 " from pubsub_item", Filters/binary,
+			 " limit ", (integer_to_binary(Limit))/binary,
+			 " offset ", (integer_to_binary(Offset))/binary>>])
 	    end,
     case ejabberd_sql:sql_query_t(Query) of
+	{selected, _, []} ->
+	    {result, {[], #rsm_set{count = Count}}};
 	{selected, [<<"itemid">>, <<"publisher">>, <<"creation">>,
 		    <<"modification">>, <<"payload">>], RItems} ->
-	    case RItems of
-		[[_, _, _, F, _]|_] ->
-		    Index = case catch ejabberd_sql:sql_query_t(
-					 [<<"select count(*) from pubsub_item "
-					    "where nodeid='">>, SNidx, <<"' and ">>,
-					  AttrName, <<" > '">>, F, <<"';">>]) of
-				{selected, [_], [[In]]} -> binary_to_integer(In);
-				_ -> 0
-			    end,
-		    [_, _, _, L, _] = lists:last(RItems),
-		    RsmOut = #rsm_set{count = Count,
-				      index = Index,
-				      first = #rsm_first{
-						 index = Index,
-						 data = <<"creation@", F/binary>>},
-				      last = <<"creation@", L/binary>>},
-		    {result, {[raw_to_item(Nidx, RItem) || RItem <- RItems], RsmOut}};
-		[] ->
-		    {result, {[], #rsm_set{count = Count}}}
-	    end;
+	    Rsm = rsm_page(Count, IncIndex, Offset, RItems),
+	    {result, {[raw_to_item(Nidx, RItem) || RItem <- RItems], Rsm}};
 	_ ->
 	    {result, {[], undefined}}
     end.
@@ -773,24 +733,24 @@ get_items(Nidx, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId, RSM
 	    get_items(Nidx, JID, RSM)
     end.
 
-get_last_items(Nidx, _From, Count) ->
-    Limit = misc:i2l(Count),
+get_last_items(Nidx, _From, Limit) ->
     SNidx = misc:i2l(Nidx),
     Query = fun(mssql, _) ->
 		    ejabberd_sql:sql_query_t(
-		      [<<"select top ">>, Limit,
-		       <<" itemid, publisher, creation, modification, payload "
-			 "from pubsub_item where nodeid='">>, SNidx,
-		       <<"' order by modification desc ;">>]);
+		      [<<"select top ", (integer_to_binary(Limit))/binary,
+			 " itemid, publisher, creation, modification, payload",
+			 " from pubsub_item where nodeid='", SNidx/binary,
+			 "' order by modification desc">>]);
 	       (_, _) ->
 		    ejabberd_sql:sql_query_t(
-		      [<<"select itemid, publisher, creation, modification, payload "
-			 "from pubsub_item where nodeid='">>, SNidx,
-		       <<"' order by modification desc limit ">>, Limit, <<";">>])
+		      [<<"select itemid, publisher, creation, modification, payload",
+			 " from pubsub_item where nodeid='", SNidx/binary,
+			 "' order by modification desc ",
+			 " limit ", (integer_to_binary(Limit))/binary>>])
 	    end,
     case catch ejabberd_sql:sql_query_t(Query) of
-	{selected,
-		    [<<"itemid">>, <<"publisher">>, <<"creation">>, <<"modification">>, <<"payload">>], RItems} ->
+	{selected, [<<"itemid">>, <<"publisher">>, <<"creation">>,
+		    <<"modification">>, <<"payload">>], RItems} ->
 	    {result, [raw_to_item(Nidx, RItem) || RItem <- RItems]};
 	_ ->
 	    {result, []}
@@ -798,16 +758,16 @@ get_last_items(Nidx, _From, Count) ->
 
 get_item(Nidx, ItemId) ->
     case catch ejabberd_sql:sql_query_t(
-                 ?SQL("select @(itemid)s, @(publisher)s, @(creation)s,"
-                      " @(modification)s, @(payload)s from pubsub_item"
-                      " where nodeid=%(Nidx)d and itemid=%(ItemId)s"))
+		 ?SQL("select @(itemid)s, @(publisher)s, @(creation)s,"
+		      " @(modification)s, @(payload)s from pubsub_item"
+		      " where nodeid=%(Nidx)d and itemid=%(ItemId)s"))
     of
 	{selected, [RItem]} ->
 	    {result, raw_to_item(Nidx, RItem)};
 	{selected, []} ->
 	    {error, xmpp:err_item_not_found()};
 	{'EXIT', _} ->
-	    {error, xmpp:err_internal_server_error(<<"Database failure">>, ?MYLANG)}
+	    {error, xmpp:err_internal_server_error(<<"Database failure">>, ejabberd_config:get_mylang())}
     end.
 
 get_item(Nidx, ItemId, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId) ->
@@ -850,11 +810,8 @@ set_item(Item) ->
     P = encode_jid(JID),
     Payload = Item#pubsub_item.payload,
     XML = str:join([fxml:element_to_binary(X) || X<-Payload], <<>>),
-    S = fun ({T1, T2, T3}) ->
-	    str:join([misc:i2l(T1, 6), misc:i2l(T2, 6), misc:i2l(T3, 6)], <<":">>)
-    end,
-    SM = S(M),
-    SC = S(C),
+    SM = encode_now(M),
+    SC = encode_now(C),
     ?SQL_UPSERT_T(
        "pubsub_item",
        ["!nodeid=%(Nidx)d",
@@ -1029,15 +986,54 @@ raw_to_item(Nidx, [ItemId, SJID, Creation, Modification, XML]) ->
     raw_to_item(Nidx, {ItemId, SJID, Creation, Modification, XML});
 raw_to_item(Nidx, {ItemId, SJID, Creation, Modification, XML}) ->
     JID = decode_jid(SJID),
-    ToTime = fun (Str) ->
-	    [T1, T2, T3] = str:tokens(Str, <<":">>),
-	    {misc:l2i(T1), misc:l2i(T2), misc:l2i(T3)}
-    end,
     Payload = case fxml_stream:parse_element(XML) of
 	{error, _Reason} -> [];
 	El -> [El]
     end,
     #pubsub_item{itemid = {ItemId, Nidx},
-	creation = {ToTime(Creation), jid:remove_resource(JID)},
-	modification = {ToTime(Modification), JID},
+	nodeidx = Nidx,
+	creation = {decode_now(Creation), jid:remove_resource(JID)},
+	modification = {decode_now(Modification), JID},
 	payload = Payload}.
+
+rsm_filters(SNidx, undefined, undefined) ->
+    <<" where nodeid='", SNidx/binary, "'",
+      " order by creation asc">>;
+rsm_filters(SNidx, undefined, After)  ->
+    <<" where nodeid='", SNidx/binary, "'",
+      " and creation>'", (encode_stamp(After))/binary, "'",
+      " order by creation asc">>;
+rsm_filters(SNidx, <<>>, undefined) ->
+    %% 2.5 Requesting the Last Page in a Result Set
+    <<" where nodeid='", SNidx/binary, "'",
+      " order by creation desc">>;
+rsm_filters(SNidx, Before, undefined) ->
+    <<" where nodeid='", SNidx/binary, "'",
+      " and creation<'", (encode_stamp(Before))/binary, "'",
+      " order by creation desc">>.
+
+rsm_page(Count, Index, Offset, Items) ->
+    First = decode_stamp(lists:nth(3, hd(Items))),
+    Last = decode_stamp(lists:nth(3, lists:last(Items))),
+    #rsm_set{count = Count, index = Index,
+	     first = #rsm_first{index = Offset, data = First},
+	     last = Last}.
+
+encode_stamp(Stamp) ->
+    case catch xmpp_util:decode_timestamp(Stamp) of
+	{MS,S,US} -> encode_now({MS,S,US});
+	_ -> Stamp
+    end.
+decode_stamp(Stamp) ->
+    case catch xmpp_util:encode_timestamp(decode_now(Stamp)) of
+	TimeStamp when is_binary(TimeStamp) -> TimeStamp;
+	_ -> Stamp
+    end.
+
+encode_now({T1, T2, T3}) ->
+    <<(misc:i2l(T1, 6))/binary, ":",
+      (misc:i2l(T2, 6))/binary, ":",
+      (misc:i2l(T3, 6))/binary>>.
+decode_now(NowStr) ->
+    [MS, S, US] = binary:split(NowStr, <<":">>, [global]),
+    {binary_to_integer(MS), binary_to_integer(S), binary_to_integer(US)}.

@@ -5,7 +5,7 @@
 %%% Created : 12 Dec 2004 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -42,7 +42,6 @@
 	 store_type/1, plain_password_required/1,
 	 opt_type/1]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 
 -include("eldap.hrl").
@@ -363,10 +362,7 @@ parse_options(Host) ->
 	   sfilter = SearchFilter, lfilter = LocalFilter,
 	   dn_filter = DNFilter, dn_filter_attrs = DNFilterAttrs}.
 
--spec opt_type(ldap_dn_filter) -> fun(([{binary(), binary()}]) ->
-				       [{binary(), binary()}]);
-	      (ldap_local_filter) -> fun((any()) -> any());
-	      (atom()) -> [atom()].
+-spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
 opt_type(ldap_dn_filter) ->
     fun ([{DNF, DNFA}]) ->
 	    NewDNFA = case DNFA of

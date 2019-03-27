@@ -5,7 +5,7 @@
 %%% Created : 21 Jul 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -38,9 +38,8 @@
 	 set_list/1, set_list/4, set_default_list/3,
 	 user_send_packet/1, user_receive_packet/1,
 	 import_start/2, import_stop/2, import/5, import_info/0,
-	 mod_opt_type/1, depends/2]).
+	 mod_opt_type/1, mod_options/1, depends/2]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 -include("xmpp.hrl").
 -include("mod_privacy.hrl").
@@ -70,7 +69,6 @@
 -optional_callbacks([use_cache/1, cache_nodes/1]).
 
 start(Host, Opts) ->
-    IQDisc = gen_mod:get_opt(iqdisc, Opts, gen_iq_handler:iqdisc(Host)),
     Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
     Mod:init(Host, Opts),
     init_cache(Mod, Host, Opts),
@@ -87,7 +85,7 @@ start(Host, Opts) ->
     ejabberd_hooks:add(remove_user, Host, ?MODULE,
 		       remove_user, 50),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host,
-				  ?NS_PRIVACY, ?MODULE, process_iq, IQDisc).
+				  ?NS_PRIVACY, ?MODULE, process_iq).
 
 stop(Host) ->
     ejabberd_hooks:delete(disco_local_features, Host, ?MODULE,
@@ -113,14 +111,7 @@ reload(Host, NewOpts, OldOpts) ->
        true ->
 	    ok
     end,
-    init_cache(NewMod, Host, NewOpts),
-    case gen_mod:is_equal_opt(iqdisc, NewOpts, OldOpts, gen_iq_handler:iqdisc(Host)) of
-	{false, IQDisc, _} ->
-	    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PRIVACY,
-					  ?MODULE, process_iq, IQDisc);
-	true ->
-	    ok
-    end.
+    init_cache(NewMod, Host, NewOpts).
 
 -spec disco_features({error, stanza_error()} | {result, [binary()]} | empty,
 		     jid(), jid(), binary(), binary()) ->
@@ -353,7 +344,7 @@ process_lists_set(#iq{from = #jid{luser = LUser, lserver = LServer} = From,
 		      lang = Lang} = IQ, Name, Items) ->
     case catch lists:map(fun decode_item/1, Items) of
 	{error, Why} ->
-	    Txt = xmpp:format_error(Why),
+	    Txt = xmpp:io_format_error(Why),
 	    xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang));
 	List ->
 	    case set_list(LUser, LServer, Name, List) of
@@ -373,7 +364,7 @@ push_list_update(From, Name) ->
       fun(R) ->
 	      To = jid:replace_resource(From, R),
 	      IQ = #iq{type = set, from = BareFrom, to = To,
-		       id = <<"push", (randoms:get_string())/binary>>,
+		       id = <<"push", (p1_rand:get_string())/binary>>,
 		       sub_els = [#privacy_query{
 				     lists = [#privacy_list{name = Name}]}]},
 	      ejabberd_router:route(IQ)
@@ -589,9 +580,10 @@ do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
 		   in -> jid:tolower(From);
 		   out -> jid:tolower(To)
 		 end,
-	  {Subscription, Groups} = ejabberd_hooks:run_fold(
-				     roster_get_jid_info, LServer,
-				     {none, []}, [LUser, LServer, LJID]),
+	  {Subscription, _Ask, Groups} = ejabberd_hooks:run_fold(
+					   roster_get_jid_info, LServer,
+					   {none, none, []},
+					   [LUser, LServer, LJID]),
 	  check_packet_aux(List, PType2, LJID, Subscription, Groups)
     end.
 
@@ -607,14 +599,10 @@ check_packet_aux([Item | List], PType, JID,
 		 Subscription, Groups) ->
     #listitem{type = Type, value = Value, action = Action} =
 	Item,
-    ?DEBUG("Hitting pre is_ptype_match Item: ~p  PType: ~p ~n", [Item, PType]),
     case is_ptype_match(Item, PType) of
       true ->
-        ?DEBUG("Hitting pre is_type_match 2: ~n", []),
 	    case is_type_match(Type, Value, JID, Subscription, Groups) of
-		true ->
-      ?DEBUG("Action returned: ~p~n", [Action]),
-      Action;
+		true -> Action;
 		false ->
 		    check_packet_aux(List, PType, JID, Subscription, Groups)
 	    end;
@@ -643,7 +631,6 @@ is_ptype_match(Item, PType) ->
 is_type_match(none, _Value, _JID, _Subscription, _Groups) ->
     true;
 is_type_match(jid, Value, JID, _Subscription, _Groups) ->
-    ?DEBUG("Hitting is_type_match jid: ~p  Jid: ~p ~n", [Value, JID]),
     case Value of
 	{<<"">>, Server, <<"">>} ->
 	    case JID of
@@ -653,7 +640,7 @@ is_type_match(jid, Value, JID, _Subscription, _Groups) ->
 	{User, Server, <<"">>} ->
 	    case JID of
 		{User, Server, _} -> true;
-    {_, _, User} -> true;
+		{_, _, User} -> true;
 		_ -> false
 	    end;
 	{<<"">>, Server, Resource} ->
@@ -664,10 +651,8 @@ is_type_match(jid, Value, JID, _Subscription, _Groups) ->
 	_ -> Value == JID
     end;
 is_type_match(subscription, Value, _JID, Subscription, _Groups) ->
-    ?DEBUG("Hitting subscription: ~p  Jid: ~p ~n", [Value, _JID]),
     Value == Subscription;
 is_type_match(group, Group, _JID, _Subscription, Groups) ->
-    ?DEBUG("Hitting group: ~p  Jid: ~p ~n", [Group, _JID]),
     lists:member(Group, Groups).
 
 -spec remove_user(binary(), binary()) -> ok.
@@ -689,7 +674,7 @@ remove_user(User, Server) ->
 init_cache(Mod, Host, Opts) ->
     case use_cache(Mod, Host) of
 	true ->
-	    CacheOpts = cache_opts(Host, Opts),
+	    CacheOpts = cache_opts(Opts),
 	    ets_cache:new(?PRIVACY_CACHE, CacheOpts),
 	    ets_cache:new(?PRIVACY_LIST_CACHE, CacheOpts);
 	false ->
@@ -697,17 +682,11 @@ init_cache(Mod, Host, Opts) ->
 	    ets_cache:delete(?PRIVACY_LIST_CACHE)
     end.
 
--spec cache_opts(binary(), gen_mod:opts()) -> [proplists:property()].
-cache_opts(Host, Opts) ->
-    MaxSize = gen_mod:get_opt(
-		cache_size, Opts,
-		ejabberd_config:cache_size(Host)),
-    CacheMissed = gen_mod:get_opt(
-		    cache_missed, Opts,
-		    ejabberd_config:cache_missed(Host)),
-    LifeTime = case gen_mod:get_opt(
-		      cache_life_time, Opts,
-		      ejabberd_config:cache_life_time(Host)) of
+-spec cache_opts(gen_mod:opts()) -> [proplists:property()].
+cache_opts(Opts) ->
+    MaxSize = gen_mod:get_opt(cache_size, Opts),
+    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
+    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
 		   infinity -> infinity;
 		   I -> timer:seconds(I)
 	       end,
@@ -717,10 +696,7 @@ cache_opts(Host, Opts) ->
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false ->
-	    gen_mod:get_module_opt(
-	      Host, ?MODULE, use_cache,
-	      ejabberd_config:use_cache(Host))
+	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].
@@ -853,5 +829,16 @@ depends(_Host, _Opts) ->
     [].
 
 mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(iqdisc) -> fun gen_iq_handler:check_type/1;
-mod_opt_type(_) -> [db_type, iqdisc].
+mod_opt_type(O) when O == cache_life_time; O == cache_size ->
+    fun (I) when is_integer(I), I > 0 -> I;
+        (infinity) -> infinity
+    end;
+mod_opt_type(O) when O == use_cache; O == cache_missed ->
+    fun (B) when is_boolean(B) -> B end.
+
+mod_options(Host) ->
+    [{db_type, ejabberd_config:default_db(Host, ?MODULE)},
+     {use_cache, ejabberd_config:use_cache(Host)},
+     {cache_size, ejabberd_config:cache_size(Host)},
+     {cache_missed, ejabberd_config:cache_missed(Host)},
+     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
