@@ -4104,10 +4104,10 @@ process_iq_mucsub(From, #iq{type = get, lang = Lang,
 		     fun(_, #subscriber{jid = J, nodes = Nodes}, Acc) ->
 			     [#muc_subscription{jid = J, events = Nodes}|Acc]
 		     end, [], StateData#state.subscribers),
-        NewStateData = case close_room_without_occupants(StateData) of
-            {stop, normal, _} -> stop;
-            {next_state, normal_state, SD} -> SD
-        end,
+	    NewStateData = case close_room_without_occupants(StateData) of
+	        {stop, normal, _} -> stop;
+	        {next_state, normal_state, SD} -> SD
+	    end,
 	    {result, #muc_subscriptions{list = Subs}, NewStateData};
        true ->
 	    Txt = <<"Moderator privileges required">>,
