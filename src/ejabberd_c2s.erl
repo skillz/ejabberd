@@ -672,7 +672,7 @@ process_presence_out(#{lserver := LServer, jid := JID,
 		    case is_privacy_allow(Pres, To) of
 			true ->
 			    ?DEBUG("Packet was allowed due to privacy list for roster out sub: ~p and To ~p", [Pres, To]),
-			    ejabberd_hooks:run(roster_out_subscription, LServer, [Pres]);
+			    ejabberd_hooks:run(roster_out_subscription, LServer, [User, Server, To Type]);
 			false ->
 			    ?DEBUG("Packet wasnt allowed due to privacy list for roster out sub: ~p", [Pres])
 		    end
