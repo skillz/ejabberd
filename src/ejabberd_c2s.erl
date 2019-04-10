@@ -656,7 +656,7 @@ route_probe_reply(_, _) ->
     ok.
 
 -spec process_presence_out(state(), presence()) -> state().
-process_presence_out(#{user := User, server := Server, lserver := LServer, jid := JID,
+process_presence_out(#{lserver := LServer, jid := JID,
 		       lang := Lang, pres_a := PresA} = State,
 		     #presence{from = From, to = To, type = Type} = Pres) ->
     if Type == subscribe; Type == subscribed;
@@ -672,7 +672,7 @@ process_presence_out(#{user := User, server := Server, lserver := LServer, jid :
 		    case is_privacy_allow(Pres, To) of
 			true ->
 			    ?DEBUG("Packet was allowed due to privacy list for roster out sub: ~p and To ~p", [Pres, To]),
-			    ejabberd_hooks:run(roster_out_subscription, LServer, [User, Server, To, Type]);
+			    ejabberd_hooks:run(roster_out_subscription, LServer, [Pres]);
 			false ->
 			    ?DEBUG("Packet wasnt allowed due to privacy list for roster out sub: ~p", [Pres])
 		    end
