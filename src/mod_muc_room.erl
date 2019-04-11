@@ -4511,7 +4511,7 @@ send_wrapped(From, To, Packet, Node, State) ->
 
 -spec wrap(jid(), jid(), stanza(), binary()) -> message().
 wrap(From, To, Packet, Node) ->
-    El = xmpp:set_from_to(Packet, From, To),
+    El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
     #message{
        sub_els = [#ps_event{
 		     items = #ps_items{
