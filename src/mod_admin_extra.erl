@@ -898,11 +898,17 @@ ban_account(User, Host, ReasonText) ->
     ok.
 
 kick_sessions(User, Server, Reason) ->
-    lists:map(
+    Results = lists:map(
       fun(Resource) ->
 	      kick_this_session(User, Server, Resource, Reason)
       end,
-      ejabberd_sm:get_user_resources(User, Server)).
+      ejabberd_sm:get_user_resources(User, Server)),
+
+    FilteredResults = lists:filter(fun(X) -> X /= ok end, Results),
+    case FilteredResults of
+        [] -> ok;
+        _ -> error
+    end.
 
 set_random_password(User, Server, Reason) ->
     NewPass = build_random_password(Reason),
