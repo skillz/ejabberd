@@ -685,10 +685,6 @@ proxy_jid(Config) ->
     Server = ?config(server, Config),
     jid:make(<<>>, <<"proxy.", Server/binary>>, <<>>).
 
-%upload_jid(Config) ->
-%    Server = ?config(server, Config),
-%    jid:make(<<>>, <<"upload.", Server/binary>>, <<>>).
-
 muc_jid(Config) ->
     Server = ?config(server, Config),
     jid:make(<<>>, <<"conference.", Server/binary>>, <<>>).
