@@ -85,7 +85,7 @@
 -define(EXTAUTH_VHOST, <<"extauth.localhost">>).
 -define(RIAK_VHOST, <<"riak.localhost">>).
 -define(S2S_VHOST, <<"s2s.localhost">>).
--define(UPLOAD_VHOST, <<"upload.localhost">>).
+%-define(UPLOAD_VHOST, <<"upload.localhost">>).
 
 insert(Val, N, Tuple) ->
     L = tuple_to_list(Tuple),
