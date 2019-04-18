@@ -2117,16 +2117,20 @@ get_history_upon_init(StateData) ->
     Room = StateData#state.room,
     Host = StateData#state.host,
     MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host),
-    NewStateData = lists:foldl(
-      fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
-        Conv = 1000000,
-        TimeStamp = {
-          TS div Conv div Conv,
-          TS div Conv rem Conv,
-          TS rem Conv},
-        add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD, TimeStamp)
-      end, StateData, MessageHistory),
-    NewStateData.
+    case MessageHistory of
+        {error, _} ->
+            StateData;
+        _ ->
+            lists:foldl(
+              fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
+                Conv = 1000000,
+                TimeStamp = {
+                  TS div Conv div Conv,
+                  TS div Conv rem Conv,
+                  TS rem Conv},
+                add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD, TimeStamp)
+              end, StateData, MessageHistory)
+    end.
 
 -spec get_history(binary(), stanza(), state()) -> lqueue().
 get_history(Nick, Packet, #state{history = History}) ->
