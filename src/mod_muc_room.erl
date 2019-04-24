@@ -3492,9 +3492,8 @@ set_config(Opts, Config, ServerHost, Lang) ->
 
 -spec change_config(#config{}, state()) -> {result, undefined, state()}.
 change_config(Config, StateData) ->
-    StateData0 = StateData#state{config = Config},
-    send_config_change_info(Config, StateData0),
-    StateData1 = remove_subscriptions(StateData0),
+    send_config_change_info(Config, StateData),
+    StateData1 = StateData#state{config = Config},
     StateData2 =
         case {(StateData#state.config)#config.persistent,
               Config#config.persistent} of
