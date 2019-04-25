@@ -86,7 +86,8 @@ defmodule Ejabberd.Mixfile do
      {:pkix, "~> 1.0"},
      {:ex_doc, ">= 0.0.0", only: :dev},
      {:base64url, "~> 0.0.1"},
-     {:jose, "~> 1.8"}]
+     {:jose, "~> 1.8"},
+     {:meck, "0.8.13", only: :test}]
     ++ cond_deps()
   end
 

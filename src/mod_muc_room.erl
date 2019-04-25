@@ -3997,9 +3997,9 @@ process_iq_vcard(_From, #iq{type = get}, StateData) ->
 	    {error, xmpp:err_item_not_found()}
     end;
 process_iq_vcard(From, #iq{type = set, lang = Lang, sub_els = [Pkt]},
-		 StateData) ->
-    case get_affiliation(From, StateData) of
-	Affiliation when Affiliation == owner, Affiliation == admin ->
+		 StateData) -> 
+	case get_affiliation(From, StateData) of 
+	owner ->
 	    SubEl = xmpp:encode(Pkt),
 	    VCardRaw = fxml:element_to_binary(SubEl),
 	    Hash = mod_vcard_xupdate:compute_hash(SubEl),
