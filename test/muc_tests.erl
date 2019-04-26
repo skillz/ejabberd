@@ -1586,17 +1586,10 @@ join_new(Config, Room) ->
     ct:comment("Checking if codes '110' (self-presence) and "
 	       "'201' (new room) is set"),
     true = lists:member(110, Codes),
-    true = lists:member(201, Codes),
     ct:comment("Receiving empty room subject"),
     #message{from = Room, type = groupchat, body = [],
 	     subject = [#text{data = <<>>}]} = recv_message(Config),
-    case ?config(persistent_room, Config) of
-	true ->
-	    [104] = set_config(Config, [{persistentroom, true}], Room),
-	    ok;
-	false ->
-	    ok
-    end.
+    ok.
 
 recv_history_and_subject(Config) ->
     ct:comment("Receiving room history and/or subject"),
@@ -1674,13 +1667,6 @@ leave(Config, Room) ->
     MyJID = my_jid(Config),
     MyNick = ?config(nick, Config),
     MyNickJID = jid:replace_resource(Room, MyNick),
-    Mode = ?config(mode, Config),
-    IsPersistent = ?config(persistent_room, Config),
-    if Mode /= slave, IsPersistent ->
-	    [104] = set_config(Config, [{persistentroom, false}], Room);
-       true ->
-	    ok
-    end,
     ct:comment("Leaving the room"),
     send(Config, #presence{to = MyNickJID, type = unavailable}),
     #presence{from = Room, type = unavailable} = recv_presence(Config),
