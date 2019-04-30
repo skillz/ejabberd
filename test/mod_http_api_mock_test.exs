@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "jsautret@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -21,11 +22,6 @@
 defmodule ModHttpApiMockTest do
 	use ExUnit.Case, async: false
 
-	@author "jsautret@process-one.net"
-
-	# Admin user
-	@admin "admin"
-	@adminpass "adminpass"
 	# Non admin user
 	@user "user"
 	@userpass "userpass"

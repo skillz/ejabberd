@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "mremond@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -32,7 +33,6 @@
 defmodule EjabberdHooksTest do
   use ExUnit.Case, async: false
   
-  @author "mremond@process-one.net"
   @host <<"domain.net">>
   @self __MODULE__
 

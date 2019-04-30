@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "jsautret@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -20,7 +21,6 @@
 
 defmodule EjabberdAuthMock do
 
-	@author "jsautret@process-one.net"
 	@agent __MODULE__
 
 	def init do

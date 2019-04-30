@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "pawel@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -19,7 +20,6 @@
 # ----------------------------------------------------------------------
 
 defmodule EjabberdCyrsaslTest do
-  @author "pawel@process-one.net"
 
   use ExUnit.Case, async: true
 
@@ -31,7 +31,7 @@ defmodule EjabberdCyrsaslTest do
     :ok = start_module(:stringprep)
     start_module(:jid)
     :ejabberd_hooks.start_link
-    :ok = :ejabberd_config.start(["domain1"], [])
+    #:ok = :ejabberd_config.start(["domain1"], [])
     {:ok, _} = :cyrsasl.start_link
     cyrstate = :cyrsasl.server_new("domain1", "domain1", "domain1", :ok, &get_password/1,
                                    &check_password/3, &check_password_digest/5)

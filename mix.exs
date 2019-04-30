@@ -87,7 +87,8 @@ defmodule Ejabberd.Mixfile do
      {:ex_doc, ">= 0.0.0", only: :dev},
      {:base64url, "~> 0.0.1"},
      {:jose, "~> 1.8"},
-     {:meck, "0.8.13", only: :test}]
+     {:meck, "0.8.13", only: :test},
+     {:mix_erlang_tasks, "0.1.0", only: :test}]
     ++ cond_deps()
   end
 

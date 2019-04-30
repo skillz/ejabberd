@@ -14,7 +14,7 @@ To help with troubleshooting Elixir tests, we have added a special macro in ejab
 
 To use this, in test file:
 
-1. in `setup_all, add:
+1. in `setup_all`, add:
 
     ```
     Application.start(:logger)

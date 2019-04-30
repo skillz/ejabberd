@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "jsautret@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -20,8 +21,6 @@
 
 defmodule EjabberdAdminTest do
 	use ExUnit.Case, async: false
-
-	@author "jsautret@process-one.net"
 
 	setup_all do
 		:mnesia.start

@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "mremond@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -19,7 +20,6 @@
 # ----------------------------------------------------------------------
 
 defmodule ModHttpApiTest do
-  @author "mremond@process-one.net"
 
   use ExUnit.Case, async: true
 
@@ -32,14 +32,14 @@ defmodule ModHttpApiTest do
     :ejabberd_mnesia.start
     :stringprep.start
     :ejabberd_hooks.start_link
-    :ok = :ejabberd_config.start(["localhost"], [])
+    #:ok = :ejabberd_config.start(["localhost"], [])
     :acl.start_link
     {:ok, _} = :ejabberd_access_permissions.start_link()
     {:ok, _} = :ejabberd_commands.start_link
-    :ok = :ejabberd_commands.register_commands(cmds)
+    :ok = :ejabberd_commands.register_commands(cmds())
     on_exit fn ->
       :meck.unload
-      unregister_commands(cmds) end
+      unregister_commands(cmds()) end
   end
 
   test "We can expose several commands to API at a time" do

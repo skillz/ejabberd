@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "jsautret@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -19,7 +20,6 @@
 # ----------------------------------------------------------------------
 
 defmodule EjabberdSmMock do
-  @author "jsautret@process-one.net"
 
 	require Record
 	Record.defrecord :session, Record.extract(:session, from_lib: "ejabberd/include/ejabberd_sm.hrl")
@@ -57,7 +57,7 @@ defmodule EjabberdSmMock do
 											 opts \\ [priority: 1, conn: :c2s]) do
 		Agent.update(@agent, fn sessions ->
 			session = %{user: user, domain: domain, resource: resource,
-									timestamp: :os.timestamp, pid: self, node: node,
+									timestamp: :os.timestamp, pid: self(), node: node(),
 									auth_module: :ejabberd_auth, ip: :undefined,
 									priority: opts[:priority], conn: opts[:conn]}
 			[session | sessions]

@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "mremond@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -19,7 +20,6 @@
 # ----------------------------------------------------------------------
 
 defmodule ACLTest do
-  @author "mremond@process-one.net"
 
   use ExUnit.Case, async: false
 
@@ -29,7 +29,7 @@ defmodule ACLTest do
     :jid.start
     :ejabberd_hooks.start_link
     :stringprep.start
-    :ok = :ejabberd_config.start(["domain1", "domain2"], [])
+    #:ok = :ejabberd_config.start(["domain1", "domain2"], [])
     {:ok, _} = :acl.start_link
     :ok
   end
