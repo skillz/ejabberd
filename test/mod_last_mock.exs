@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "jsautret@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -24,7 +25,6 @@ defmodule ModLastMock do
 	Record.defrecord :session, Record.extract(:session, from_lib: "ejabberd/include/ejabberd_sm.hrl")
 	Record.defrecord :jid, Record.extract(:jid, from_lib: "ejabberd/include/jlib.hrl")
 
-  @author "jsautret@process-one.net"
 	@agent __MODULE__
 
 	def init do
@@ -48,7 +48,7 @@ defmodule ModLastMock do
 	end
 
 	def set_last(user, domain, status) do
-		set_last(user, domain, status, now)
+		set_last(user, domain, status, now())
 	end
 
 	def set_last(user, domain, status, timestamp) do

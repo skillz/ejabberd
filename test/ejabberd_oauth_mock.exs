@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "jsautret@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -20,12 +21,10 @@
 
 defmodule EjabberdOauthMock do
 
-	@author "jsautret@process-one.net"
-
 	def init() do
 		:mnesia.start
 		:mnesia.create_table(:oauth_token,
-                         [ram_copies: [node],
+                         [ram_copies: [node()],
                           attributes: [:oauth_token, :us, :scope, :expire]])
     :application.start(:cache_tab)
     :cache_tab.new(:oauth_token,

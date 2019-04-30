@@ -5,7 +5,7 @@ defmodule Ejabberd.ConfigFile do
     [loglevel: 4,
      language: "en",
      hosts: ["localhost"],
-     shaper: shaper]
+     shaper: shaper()]
   end
 
   defp shaper do

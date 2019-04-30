@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "jsautret@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -19,7 +20,6 @@
 # ----------------------------------------------------------------------
 
 defmodule ModRosterMock do
-	@author "jsautret@process-one.net"
 
 	require Record
 	Record.defrecord :roster, Record.extract(:roster, from_lib: "ejabberd/include/mod_roster.hrl")

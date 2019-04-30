@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "jsautret@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -26,7 +27,6 @@ defmodule EjabberdModAdminExtraTest do
   require ModLastMock
   require ModRosterMock
 
-	@author "jsautret@process-one.net"
 
 	@user "user"
 	@domain "domain"
@@ -353,7 +353,7 @@ defmodule EjabberdModAdminExtraTest do
 	    :ejabberd_commands.execute_command2(name, args, %{:caller_module => :ejabberd_ctl})
 	end
 
-	defp call_command(name, args, mode) do
+	defp call_command(name, args, _mode) do
 	    call_command(name, args)
 	end
 

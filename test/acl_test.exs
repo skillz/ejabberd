@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "mremond@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -19,7 +20,6 @@
 # ----------------------------------------------------------------------
 
 defmodule ACLTest do
-  @author "mremond@process-one.net"
 
   use ExUnit.Case, async: false
 

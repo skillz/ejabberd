@@ -1,4 +1,5 @@
 # ----------------------------------------------------------------------
+# Author : "pawel@process-one.net"
 #
 # ejabberd, Copyright (C) 2002-2017   ProcessOne
 #
@@ -19,7 +20,6 @@
 # ----------------------------------------------------------------------
 
 defmodule EjabberdCyrsaslTest do
-  @author "pawel@process-one.net"
 
   use ExUnit.Case, async: true
 
