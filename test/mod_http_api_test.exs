@@ -32,7 +32,7 @@ defmodule ModHttpApiTest do
     :ejabberd_mnesia.start
     :stringprep.start
     :ejabberd_hooks.start_link
-    #:ok = :ejabberd_config.start(["localhost"], [])
+    :ok = :ejabberd_config.start(["localhost"], [])
     :acl.start_link
     {:ok, _} = :ejabberd_access_permissions.start_link()
     {:ok, _} = :ejabberd_commands.start_link
