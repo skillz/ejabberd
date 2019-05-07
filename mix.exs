@@ -5,16 +5,24 @@ defmodule Ejabberd.Mixfile do
     [app: :ejabberd,
      version: "19.2.0",
      description: description(),
-     elixir: "~> 1.4",
+     elixir: "~> 1.8",
      elixirc_paths: ["lib"],
      compile_path: ".",
      compilers: [:asn1] ++ Mix.compilers,
      erlc_options: erlc_options(),
      erlc_paths: ["asn1", "src"],
      # Elixir tests are starting the part of ejabberd they need
-     aliases: [test: "test --no-start"],
+     aliases: [test: "ct"],
      package: package(),
-     deps: deps()]
+     deps: deps(),
+     build_path: "ebin",
+     preferred_cli_env: [
+       coveralls: :test, 
+       "coveralls.json": :test
+     ],
+     test_coverage: [tool: ExCoveralls, test_task: "ct"],
+     cover_enabled: true,
+     cover_export_enabled: true]
   end
 
   def description do
@@ -87,7 +95,8 @@ defmodule Ejabberd.Mixfile do
      {:ex_doc, ">= 0.0.0", only: :dev},
      {:base64url, "~> 0.0.1"},
      {:jose, "~> 1.8"},
-     {:meck, "0.8.13", only: :test}]
+     {:meck, "0.8.13", only: :test},
+     {:excoveralls, "~> 0.11.0", only: :test},]
     ++ cond_deps()
   end
 
