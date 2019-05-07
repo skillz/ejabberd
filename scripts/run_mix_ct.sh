@@ -14,6 +14,4 @@ do
     DIRECTORIES="$DIRECTORIES $EBIN_DIR"
 done
 
-echo $DIRECTORIES
-
 CT_BACKENDS=mysql,mnesia elixir --erl "-pa $DIRECTORIES" -S mix coveralls

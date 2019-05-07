@@ -67,7 +67,7 @@ defmodule Mix.Tasks.Ct do
     dir       = Keyword.get(options, :dir, "#{cwd}/test")                       |> String.to_charlist
     logdir    = Keyword.get(options, :logdir, "#{cwd}/logs")                    |> String.to_charlist
     suite     = Keyword.get(options, :suite, "#{cwd}/test/ejabberd_SUITE.erl")  |> String.to_charlist
-    ct_hooks  = Keyword.get(options, :ct_hooks, {:cth_surefire, [{:path, "#{cwd}/junit_report.xml"}]})
+    ct_hooks  = Keyword.get(options, :ct_hooks, "cth_surefire")                 |> String.to_atom
     cover     = Keyword.get(options, :cover, "#{cwd}/cover.spec")               |> String.to_charlist
     label     = Keyword.get(options, :name, default_label)                      |> String.to_charlist
     include   = Keyword.get(options, :include, @default_includes |> Enum.join(","))

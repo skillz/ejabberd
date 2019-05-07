@@ -96,7 +96,7 @@ defmodule Ejabberd.Mixfile do
      {:base64url, "~> 0.0.1"},
      {:jose, "~> 1.8"},
      {:meck, "0.8.13", only: :test},
-     {:excoveralls, "~> 0.11.0", only: :test},]
+     {:excoveralls, "~> 0.11.0", only: :test}]
     ++ cond_deps()
   end
 
