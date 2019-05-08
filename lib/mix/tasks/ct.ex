@@ -66,15 +66,18 @@ defmodule Mix.Tasks.Ct do
     cwd       = File.cwd!
     child_cwd = "#{cwd}/apps/ejabberd" # TODO: kind of a hack.  this should be fixed forsure.
     dir       = Keyword.get(options, :dir, "#{child_cwd}/test")                       |> String.to_charlist
-    logdir    = Keyword.get(options, :logdir, "#{cwd}/logs")                    |> String.to_charlist
+    logdir    = Keyword.get(options, :logdir, "#{cwd}/logs")                          |> String.to_charlist
     suite     = Keyword.get(options, :suite, "#{child_cwd}/test/ejabberd_SUITE.erl")  |> String.to_charlist
-    ct_hooks  = Keyword.get(options, :ct_hooks, "cth_surefire")                 |> String.to_atom
+    ct_hooks  = Keyword.get(options, :ct_hooks, "cth_surefire")                       |> String.to_atom
     cover     = Keyword.get(options, :cover, "#{child_cwd}/cover.spec")               |> String.to_charlist
-    label     = Keyword.get(options, :name, default_label)                      |> String.to_charlist
-    include   = Keyword.get(options, :include, @default_includes |> Enum.join(","))
+    label     = Keyword.get(options, :name, default_label)                            |> String.to_charlist
+    include   = Keyword.get(options, :include, @default_includes                      |> Enum.join(","))
 
     # Create the logdir.
     File.mkdir(logdir)
+
+    # Create required ebin directory to placate ct.
+    File.mkdir("#{child_cwd}/ebin")
 
     # Convert all includes to charlists
     chars_include = 
