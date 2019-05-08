@@ -38,9 +38,9 @@ defmodule Mix.Tasks.Ct do
   @default_includes [
     "include/",
     "tools",
-    "deps/p1_utils/include",
-    "deps/fast_xml/include",
-    "deps/xmpp/include"
+    "../../deps/p1_utils/include",
+    "../../deps/fast_xml/include",
+    "../../deps/xmpp/include"
   ]
 
   def run(args) do
