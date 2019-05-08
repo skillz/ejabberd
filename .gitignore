@@ -27,7 +27,6 @@
 /doc/*.toc
 /doc/contributed_modules.tex
 /doc/version.tex
-/ebin/
 /ejabberd.init
 /ejabberd.service
 /ejabberdctl.example
