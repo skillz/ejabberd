@@ -63,7 +63,7 @@ defmodule Mix.Tasks.Ct do
     {:ok, hostname} = :inet.gethostname
     default_label   = "ct_test_run_#{datetime_string}_#{hostname}"
 
-    cwd       = File.cwd!
+    cwd       = "#{File.cwd!}/apps/ejabberd"
     dir       = Keyword.get(options, :dir, "#{cwd}/test")                       |> String.to_charlist
     logdir    = Keyword.get(options, :logdir, "#{cwd}/logs")                    |> String.to_charlist
     suite     = Keyword.get(options, :suite, "#{cwd}/test/ejabberd_SUITE.erl")  |> String.to_charlist
