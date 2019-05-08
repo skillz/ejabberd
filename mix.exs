@@ -19,7 +19,7 @@ defmodule Ejabberd.Mixfile do
 
      # Configuration for using this as an umbrella child app.
      build_path: "../../ebin",
-     #config_path: "../../config/config.exs",
+     config_path: "../../config/config.exs",
      deps_path: "../../deps",  # TODO: might need to fix deps_include in the future.
      lockfile: "../../mix.lock",
 
