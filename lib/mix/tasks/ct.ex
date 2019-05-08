@@ -63,12 +63,13 @@ defmodule Mix.Tasks.Ct do
     {:ok, hostname} = :inet.gethostname
     default_label   = "ct_test_run_#{datetime_string}_#{hostname}"
 
-    cwd       = "#{File.cwd!}/apps/ejabberd"
-    dir       = Keyword.get(options, :dir, "#{cwd}/test")                       |> String.to_charlist
+    cwd       = File.cwd!
+    child_cwd = "#{cwd}/apps/ejabberd" # TODO: kind of a hack.  this should be fixed forsure.
+    dir       = Keyword.get(options, :dir, "#{child_cwd}/test")                       |> String.to_charlist
     logdir    = Keyword.get(options, :logdir, "#{cwd}/logs")                    |> String.to_charlist
-    suite     = Keyword.get(options, :suite, "#{cwd}/test/ejabberd_SUITE.erl")  |> String.to_charlist
+    suite     = Keyword.get(options, :suite, "#{child_cwd}/test/ejabberd_SUITE.erl")  |> String.to_charlist
     ct_hooks  = Keyword.get(options, :ct_hooks, "cth_surefire")                 |> String.to_atom
-    cover     = Keyword.get(options, :cover, "#{cwd}/cover.spec")               |> String.to_charlist
+    cover     = Keyword.get(options, :cover, "#{child_cwd}/cover.spec")               |> String.to_charlist
     label     = Keyword.get(options, :name, default_label)                      |> String.to_charlist
     include   = Keyword.get(options, :include, @default_includes |> Enum.join(","))
 
@@ -80,7 +81,7 @@ defmodule Mix.Tasks.Ct do
       include
       |> String.split(",")
       |> Enum.map(fn x -> 
-        "#{cwd}/#{x}" |> String.to_charlist 
+        "#{child_cwd}/#{x}" |> String.to_charlist 
       end)
 
     result = :ct.run_test([
