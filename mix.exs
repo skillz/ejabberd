@@ -1,4 +1,4 @@
-defmodule Ejabberd.Mixfile do
+defmodule Ejabberd.MixProject do
   use Mix.Project
 
   def project do
@@ -11,11 +11,19 @@ defmodule Ejabberd.Mixfile do
      compilers: [:asn1] ++ Mix.compilers,
      erlc_options: erlc_options(),
      erlc_paths: ["asn1", "src"],
-     # Elixir tests are starting the part of ejabberd they need
-     aliases: [test: "ct"],
-     package: package(),
      deps: deps(),
-     build_path: "ebin",
+     package: package(),
+
+     # Re-aliasing this to use the ct mix task.
+     aliases: [test: "ct"],
+
+     # Configuration for using this as an umbrella child app.
+     build_path: "../../ebin",
+     config_path: "../../config/config.exs",
+     deps_path: "../../deps",  # TODO: might need to fix deps_include in the future.
+     lockfile: "../../mix.lock",
+
+     # Coveralls specific configuration
      preferred_cli_env: [
        coveralls: :test, 
        "coveralls.json": :test
@@ -23,6 +31,7 @@ defmodule Ejabberd.Mixfile do
      test_coverage: [tool: ExCoveralls, test_task: "ct"],
      cover_enabled: true,
      cover_export_enabled: true]
+
   end
 
   def description do
