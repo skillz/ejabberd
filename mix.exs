@@ -1,4 +1,4 @@
-defmodule Ejabberd.MixProject do
+defmodule Ejabberd.Mixfile do
   use Mix.Project
 
   def project do
