@@ -101,12 +101,10 @@ defmodule Mix.Tasks.Ct do
     case result do
       {:error, _} ->
         Mix.raise("Tests errored upon start")
-        :erlang.halt(1)
       {:ok, failed, {user_skipped, _auto_skipped}} ->
         Mix.raise("Test failures detected")
-        :erlang.halt(if (failed + user_skipped) == 0, do: 0, else: 1)
       _ ->
-        :erlang.halt(0)
+        :ok
     end
   end
 end
