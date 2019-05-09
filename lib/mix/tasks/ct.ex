@@ -38,9 +38,9 @@ defmodule Mix.Tasks.Ct do
   @default_includes [
     "include/",
     "tools",
-    "deps/p1_utils/include",
-    "deps/fast_xml/include",
-    "deps/xmpp/include"
+    "../../deps/p1_utils/include",
+    "../../deps/fast_xml/include",
+    "../../deps/xmpp/include"
   ]
 
   def run(args) do
@@ -64,23 +64,27 @@ defmodule Mix.Tasks.Ct do
     default_label   = "ct_test_run_#{datetime_string}_#{hostname}"
 
     cwd       = File.cwd!
-    dir       = Keyword.get(options, :dir, "#{cwd}/test")                       |> String.to_charlist
-    logdir    = Keyword.get(options, :logdir, "#{cwd}/logs")                    |> String.to_charlist
-    suite     = Keyword.get(options, :suite, "#{cwd}/test/ejabberd_SUITE.erl")  |> String.to_charlist
-    ct_hooks  = Keyword.get(options, :ct_hooks, "cth_surefire")                 |> String.to_atom
-    cover     = Keyword.get(options, :cover, "#{cwd}/cover.spec")               |> String.to_charlist
-    label     = Keyword.get(options, :name, default_label)                      |> String.to_charlist
-    include   = Keyword.get(options, :include, @default_includes |> Enum.join(","))
+    child_cwd = "#{cwd}/apps/ejabberd" # TODO: kind of a hack.  this should be fixed forsure.
+    dir       = Keyword.get(options, :dir, "#{child_cwd}/test")                       |> String.to_charlist
+    logdir    = Keyword.get(options, :logdir, "#{cwd}/logs")                          |> String.to_charlist
+    suite     = Keyword.get(options, :suite, "#{child_cwd}/test/ejabberd_SUITE.erl")  |> String.to_charlist
+    ct_hooks  = Keyword.get(options, :ct_hooks, "cth_surefire")                       |> String.to_atom
+    cover     = Keyword.get(options, :cover, "#{child_cwd}/cover.spec")               |> String.to_charlist
+    label     = Keyword.get(options, :name, default_label)                            |> String.to_charlist
+    include   = Keyword.get(options, :include, @default_includes                      |> Enum.join(","))
 
     # Create the logdir.
     File.mkdir(logdir)
+
+    # Create required ebin directory to placate ct.
+    File.mkdir("#{child_cwd}/ebin")
 
     # Convert all includes to charlists
     chars_include = 
       include
       |> String.split(",")
       |> Enum.map(fn x -> 
-        "#{cwd}/#{x}" |> String.to_charlist 
+        "#{child_cwd}/#{x}" |> String.to_charlist 
       end)
 
     result = :ct.run_test([
@@ -97,12 +101,10 @@ defmodule Mix.Tasks.Ct do
     case result do
       {:error, _} ->
         Mix.raise("Tests errored upon start")
-        :erlang.halt(1)
       {:ok, failed, {user_skipped, _auto_skipped}} ->
         Mix.raise("Test failures detected")
-        :erlang.halt(if (failed + user_skipped) == 0, do: 0, else: 1)
       _ ->
-        :erlang.halt(0)
+        :ok
     end
   end
 end
