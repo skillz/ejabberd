@@ -530,7 +530,7 @@ route_presence_change(From, OldItem, NewItem) ->
 		    ejabberd_router:route(PU)
 	    end;
        true ->
-    ?DEBUG("fallback behavior.", []),
+    ?DEBUG("fallback behavior. Old: ~p New: ~p", []),
 	    ok
     end.
 
