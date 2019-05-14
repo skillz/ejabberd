@@ -562,6 +562,7 @@ process_subscription(Direction, User, Server, JID1,
     LUser = jid:nodeprep(User),
     LServer = jid:nameprep(Server),
     LJID = jid:tolower(jid:remove_resource(JID1)),
+    ?DEBUG("Inside of process_subscription.", []),
     F = fun () ->
 		Item = get_roster_item(LUser, LServer, LJID),
 		NewState = case Direction of
@@ -603,9 +604,13 @@ process_subscription(Direction, User, Server, JID1,
 	end,
     case transaction(LUser, LServer, [LJID], F) of
 	{atomic, {Push, AutoReply}} ->
+	    ?DEBUG("mod_roster atomic transaction.", []),
 	    case AutoReply of
-		none -> ok;
+		none -> 
+            ?DEBUG("mod_roster auto reply is none.", []),
+                ok;
 		_ ->
+            ?DEBUG("mod_roster atomic routing.", []),
 		    ejabberd_router:route(
 		      #presence{type = AutoReply,
 				from = jid:make(User, Server),
@@ -615,12 +620,15 @@ process_subscription(Direction, User, Server, JID1,
 		{push, OldItem, NewItem} ->
 		    if NewItem#roster.subscription == none,
 		       NewItem#roster.ask == in ->
+                ?DEBUG("mod_roster not pushing, subscription is none or ask is in.", []),
 			    ok;
 		       true ->
+                ?DEBUG("mod_roster pushing out sub to in sub", []),
 			    push_item(jid:make(User, Server), OldItem, NewItem)
 		    end,
 		    true;
 		none ->
+            ?DEBUG("mod_roster is not pushing to in subscription", []),
 		    false
 	    end;
 	_ ->
