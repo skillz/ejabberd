@@ -606,7 +606,9 @@ process_subscription(Direction, User, Server, JID1,
 	{atomic, {Push, AutoReply}} ->
 	    ?DEBUG("mod_roster atomic transaction.", []),
 	    case AutoReply of
-		none -> ok;
+		none -> 
+            ?DEBUG("mod_roster auto reply is none.", []),
+                ok;
 		_ ->
             ?DEBUG("mod_roster atomic routing.", []),
 		    ejabberd_router:route(
