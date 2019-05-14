@@ -474,6 +474,7 @@ process_iq_set(#iq{from = _From, to = To,
     end.
 
 push_item(To, OldItem, NewItem) ->
+    ?DEBUG("Inside of push arity 3.", []),
     #jid{luser = LUser, lserver = LServer} = To,
     Ver = case roster_versioning_enabled(LServer) of
 	      true -> roster_version(LServer, LUser);
@@ -487,6 +488,7 @@ push_item(To, OldItem, NewItem) ->
       end, ejabberd_sm:get_user_resources(LUser, LServer)).
 
 push_item(To, OldItem, NewItem, Ver) ->
+    ?DEBUG("Inside of push arity 4.", []),
     route_presence_change(To, OldItem, NewItem),
     IQ = #iq{type = set, to = To,
 	     from = jid:remove_resource(To),
@@ -497,30 +499,38 @@ push_item(To, OldItem, NewItem, Ver) ->
 
 -spec route_presence_change(jid(), #roster{}, #roster{}) -> ok.
 route_presence_change(From, OldItem, NewItem) ->
+    ?DEBUG("Inside of route_presence_change.", []),
     OldSub = OldItem#roster.subscription,
     NewSub = NewItem#roster.subscription,
     To = jid:make(NewItem#roster.jid),
     NewIsFrom = NewSub == both orelse NewSub == from,
     OldIsFrom = OldSub == both orelse OldSub == from,
     if NewIsFrom andalso not OldIsFrom ->
+    ?DEBUG("Inside of weird logic part.", []),
 	    case ejabberd_sm:get_session_pid(
 		   From#jid.luser, From#jid.lserver, From#jid.lresource) of
 		none ->
+    ?DEBUG("Not resending presence.", []),
 		    ok;
 		Pid ->
+    ?DEBUG("Resending presence.", []),
 		    ejabberd_c2s:resend_presence(Pid, To)
 	    end;
        OldIsFrom andalso not NewIsFrom ->
+    ?DEBUG("should we route?.", []),
 	    PU = #presence{from = From, to = To, type = unavailable},
 	    case ejabberd_hooks:run_fold(
 		   privacy_check_packet, allow,
 		   [From, PU, out]) of
 		deny ->
+    ?DEBUG("presendce denied by privacy list.", []),
 		    ok;
 		allow ->
+    ?DEBUG("routing presence of unavailable.", []),
 		    ejabberd_router:route(PU)
 	    end;
        true ->
+    ?DEBUG("fallback behavior.", []),
 	    ok
     end.
 
