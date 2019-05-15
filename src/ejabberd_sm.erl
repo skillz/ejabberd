@@ -186,8 +186,12 @@ close_session(SID, User, Server, Resource) ->
 check_in_subscription(Acc, #presence{to = To}) ->
     #jid{user = User, server = Server} = To,
     case ejabberd_auth:user_exists(User, Server) of
-      true -> Acc;
-      false -> {stop, false}
+      true -> 
+    ?DEBUG("user exists in check_in_sub", []),
+            Acc;
+      false -> 
+    ?DEBUG("user does not exist check_in_sub", []),
+            {stop, false}
     end.
 
 -spec bounce_offline_message({bounce, message()} | any()) -> any().
