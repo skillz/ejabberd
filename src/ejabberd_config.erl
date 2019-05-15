@@ -956,9 +956,14 @@ is_behaviour(Behav, Mod) ->
 v_db(Mod, internal) -> v_db(Mod, mnesia);
 v_db(Mod, odbc) -> v_db(Mod, sql);
 v_db(Mod, Type) ->
+	case Type == http of
+		true ->
+			Type;
+		false ->
     case ets:member(ejabberd_db_modules, {Mod, Type}) of
 	true -> Type;
 	false -> erlang:error(badarg)
+	end
     end.
 
 -spec v_dbs(module()) -> [atom()].
