@@ -535,7 +535,7 @@ check_packet(_, JID, Packet, Dir) ->
 		?DEBUG("preparing to enter do_check_packet", []),
 	    do_check_packet(JID, List, Packet, Dir);
 	_ ->
-		?DEBUG("packet allowed", []),
+		?DEBUG("packet allowed inside check_packet", []),
 	    allow
     end.
 

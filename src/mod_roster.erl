@@ -555,6 +555,7 @@ transaction(LUser, LServer, LJIDs, F) ->
 -spec in_subscription(boolean(), presence()) -> boolean().
 in_subscription(_, #presence{from = JID, to = To,
 			     type = Type, status = Status}) ->
+    ?DEBUG("Inside of in_subscription.", []),
     #jid{user = User, server = Server} = To,
     Reason = if Type == subscribe -> xmpp:get_text(Status);
 		true -> <<"">>
