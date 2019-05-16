@@ -2117,16 +2117,20 @@ get_history_upon_init(StateData) ->
     Room = StateData#state.room,
     Host = StateData#state.host,
     MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host),
-    NewStateData = lists:foldl(
-      fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
-        Conv = 1000000,
-        TimeStamp = {
-          TS div Conv div Conv,
-          TS div Conv rem Conv,
-          TS rem Conv},
-        add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD, TimeStamp)
-      end, StateData, MessageHistory),
-    NewStateData.
+    case MessageHistory of
+        {error, _} ->
+            StateData;
+        _ ->
+            lists:foldl(
+              fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
+                Conv = 1000000,
+                TimeStamp = {
+                  TS div Conv div Conv,
+                  TS div Conv rem Conv,
+                  TS rem Conv},
+                add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD, TimeStamp)
+              end, StateData, MessageHistory)
+    end.
 
 -spec get_history(binary(), stanza(), state()) -> lqueue().
 get_history(Nick, Packet, #state{history = History}) ->
@@ -3488,9 +3492,8 @@ set_config(Opts, Config, ServerHost, Lang) ->
 
 -spec change_config(#config{}, state()) -> {result, undefined, state()}.
 change_config(Config, StateData) ->
-    StateData0 = StateData#state{config = Config},
-    send_config_change_info(Config, StateData0),
-    StateData1 = remove_subscriptions(StateData0),
+    send_config_change_info(Config, StateData),
+    StateData1 = StateData#state{config = Config},
     StateData2 =
         case {(StateData#state.config)#config.persistent,
               Config#config.persistent} of
@@ -3994,9 +3997,9 @@ process_iq_vcard(_From, #iq{type = get}, StateData) ->
 	    {error, xmpp:err_item_not_found()}
     end;
 process_iq_vcard(From, #iq{type = set, lang = Lang, sub_els = [Pkt]},
-		 StateData) ->
-    case get_affiliation(From, StateData) of
-	Affiliation when Affiliation == owner, Affiliation == admin ->
+		 StateData) -> 
+	case get_affiliation(From, StateData) of 
+	owner ->
 	    SubEl = xmpp:encode(Pkt),
 	    VCardRaw = fxml:element_to_binary(SubEl),
 	    Hash = mod_vcard_xupdate:compute_hash(SubEl),

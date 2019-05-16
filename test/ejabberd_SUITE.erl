@@ -55,8 +55,7 @@ init_per_suite(Config) ->
     {ok, _} = file:copy(ExtAuthScript, filename:join([CWD, "extauth.py"])),
     {ok, _} = ldap_srv:start(LDIFFile),
     inet_db:add_host({127,0,0,1}, [binary_to_list(?S2S_VHOST),
-				   binary_to_list(?MNESIA_VHOST),
-				   binary_to_list(?UPLOAD_VHOST)]),
+				   binary_to_list(?MNESIA_VHOST)]),
     inet_db:set_domain(binary_to_list(p1_rand:get_string())),
     inet_db:set_lookup([file, native]),
     start_ejabberd(NewConfig),
@@ -388,8 +387,7 @@ no_db_tests() ->
      muc_tests:master_slave_cases(),
      proxy65_tests:single_cases(),
      proxy65_tests:master_slave_cases(),
-     replaced_tests:master_slave_cases(),
-     upload_tests:single_cases()].
+     replaced_tests:master_slave_cases()].
 
 db_tests(riak) ->
     %% No support for mod_pubsub

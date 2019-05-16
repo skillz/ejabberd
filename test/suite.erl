@@ -62,9 +62,9 @@ init_config(Config) ->
 						    {password, Password},
                                                     {mysql_server, <<"localhost">>},
                                                     {mysql_port, 3306},
-                                                    {mysql_db, <<"ejabberd_test">>},
-                                                    {mysql_user, <<"ejabberd_test">>},
-                                                    {mysql_pass, <<"ejabberd_test">>},
+                                                    {mysql_db, <<"ejabberd">>},
+                                                    {mysql_user, <<"ejabberd">>},
+                                                    {mysql_pass, <<"ejabberd">>},
                                                     {pgsql_server, <<"localhost">>},
                                                     {pgsql_port, 5432},
                                                     {pgsql_db, <<"ejabberd_test">>},
@@ -684,10 +684,6 @@ pubsub_jid(Config) ->
 proxy_jid(Config) ->
     Server = ?config(server, Config),
     jid:make(<<>>, <<"proxy.", Server/binary>>, <<>>).
-
-upload_jid(Config) ->
-    Server = ?config(server, Config),
-    jid:make(<<>>, <<"upload.", Server/binary>>, <<>>).
 
 muc_jid(Config) ->
     Server = ?config(server, Config),

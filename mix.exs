@@ -5,16 +5,33 @@ defmodule Ejabberd.Mixfile do
     [app: :ejabberd,
      version: "19.2.0",
      description: description(),
-     elixir: "~> 1.4",
+     elixir: "~> 1.8",
      elixirc_paths: ["lib"],
      compile_path: ".",
      compilers: [:asn1] ++ Mix.compilers,
      erlc_options: erlc_options(),
      erlc_paths: ["asn1", "src"],
-     # Elixir tests are starting the part of ejabberd they need
-     aliases: [test: "test --no-start"],
+     deps: deps(),
      package: package(),
-     deps: deps()]
+
+     # Re-aliasing this to use the ct mix task.
+     aliases: [test: "ct"],
+
+     # Configuration for using this as an umbrella child app.
+     build_path: "../../ebin",
+     config_path: "../../config/config.exs",
+     deps_path: "../../deps",  # TODO: might need to fix deps_include in the future.
+     lockfile: "../../mix.lock",
+
+     # Coveralls specific configuration
+     preferred_cli_env: [
+       coveralls: :test, 
+       "coveralls.json": :test
+     ],
+     test_coverage: [tool: ExCoveralls, test_task: "ct"],
+     cover_enabled: true,
+     cover_export_enabled: true]
+
   end
 
   def description do
@@ -86,14 +103,20 @@ defmodule Ejabberd.Mixfile do
      {:pkix, "~> 1.0"},
      {:ex_doc, ">= 0.0.0", only: :dev},
      {:base64url, "~> 0.0.1"},
-     {:jose, "~> 1.8"}]
+     {:jose, "~> 1.8"},
+     {:meck, "0.8.13", only: :test},
+     {:excoveralls, "~> 0.11.0", only: :test}]
     ++ cond_deps()
   end
 
   defp deps_include(deps) do
-    base = case Mix.Project.deps_paths()[:ejabberd] do
-      nil -> "deps"
-      _ -> ".."
+    base = if Mix.Project.umbrella?() do
+       "../../deps"
+    else
+      case Mix.Project.deps_paths()[:ejabberd] do
+        nil -> "deps"
+        _ -> ".."
+      end
     end
     Enum.map(deps, fn dep -> base<>"/#{dep}/include" end)
   end
