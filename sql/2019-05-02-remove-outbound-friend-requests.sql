@@ -9,4 +9,4 @@ DELETE FROM
 WHERE
     ask != "N"
     AND subscription != "B"
-    AND (created_at BETWEEN "2019-04-08 00:00:00" AND "2019-04-24 00:00:00");
+    AND (created_at >= "2019-04-08 00:00:00");
