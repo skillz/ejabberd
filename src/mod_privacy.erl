@@ -514,17 +514,13 @@ set_default_list(LUser, LServer, Name) ->
 check_packet(Acc, #{jid := JID} = State, Packet, Dir) ->
     case maps:get(privacy_active_list, State, none) of
 	none ->
-		?DEBUG("Checking packet immediatly", []),
 	    check_packet(Acc, JID, Packet, Dir);
 	ListName ->
 	    #jid{luser = LUser, lserver = LServer} = JID,
 	    case get_user_list(LUser, LServer, ListName) of
 		{ok, {_, List}} ->
-		?DEBUG("entering check packet arity 4", []),
 		    do_check_packet(JID, List, Packet, Dir);
 		_ ->
-		    ?DEBUG("Non-existing active list '~s' is set "
-			   "for user '~s'", [ListName, jid:encode(JID)]),
 		    check_packet(Acc, JID, Packet, Dir)
 	    end
     end;
@@ -532,10 +528,8 @@ check_packet(_, JID, Packet, Dir) ->
     #jid{luser = LUser, lserver = LServer} = JID,
     case get_user_list(LUser, LServer, default) of
 	{ok, {_, List}} ->
-		?DEBUG("preparing to enter do_check_packet", []),
 	    do_check_packet(JID, List, Packet, Dir);
 	_ ->
-		?DEBUG("packet allowed inside check_packet", []),
 	    allow
     end.
 
@@ -544,7 +538,6 @@ check_packet(_, JID, Packet, Dir) ->
 %% If Dir = in, User@Server is the destination account (To).
 -spec do_check_packet(jid(), [listitem()], stanza(), in | out) -> allow | deny.
 do_check_packet(_, [], _, _) ->
-		?DEBUG("packet allowed", []),
     allow;
 do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
     From = xmpp:get_from(Packet),
@@ -553,22 +546,18 @@ do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
 	{#jid{luser = <<"">>, lserver = LServer},
 	 #jid{lserver = LServer}} when Dir == in ->
 	    %% Allow any packets from local server
-		?DEBUG("packet allowed", []),
 	    allow;
 	{#jid{lserver = LServer},
 	 #jid{luser = <<"">>, lserver = LServer}} when Dir == out ->
 	    %% Allow any packets to local server
-		?DEBUG("packet allowed", []),
     allow;
 	{#jid{luser = LUser, lserver = LServer, lresource = <<"">>},
 	 #jid{luser = LUser, lserver = LServer}} when Dir == in ->
 	    %% Allow incoming packets from user's bare jid to his full jid
-		?DEBUG("packet allowed", []),
     allow;
 	{#jid{luser = LUser, lserver = LServer},
 	 #jid{luser = LUser, lserver = LServer, lresource = <<"">>}} when Dir == out ->
 	    %% Allow outgoing packets from user's full jid to his bare JID
-		?DEBUG("packet allowed", []),
 	    allow;
       _ ->
 	  PType = case Packet of
@@ -603,7 +592,6 @@ do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
 %% Ptype = mesage | iq | presence_in | presence_out | other
 check_packet_aux([], _PType, _JID, _Subscription,
 		 _Groups) ->
-		?DEBUG("packet allowed", []),
     allow;
 check_packet_aux([Item | List], PType, JID,
 		 Subscription, Groups) ->

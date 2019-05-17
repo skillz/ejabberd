@@ -675,7 +675,6 @@ do_route(#presence{to = To, type = T} = Packet)
 		      ok
 	      end, get_sessions(Mod, LUser, LServer));
 	false ->
-        ?DEBUG("presence packet rejected due to privacy list or in sub hook", []),
 	    ok
     end;
 do_route(#presence{to = #jid{lresource = <<"">>} = To} = Packet) ->
