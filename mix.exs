@@ -43,7 +43,7 @@ defmodule Ejabberd.MixProject do
   def application do
     [mod: {:ejabberd_app, []},
      applications: [:kernel, :stdlib, :sasl, :ssl],
-     included_applications: [:lager, :mnesia, :inets, :p1_utils, :cache_tab,
+     included_applications: [:logger, :mnesia, :inets, :p1_utils, :cache_tab,
                              :fast_tls, :stringprep, :fast_xml, :xmpp,
                              :stun, :fast_yaml, :esip, :jiffy, :p1_oauth2,
                              :base64url, :jose, :pkix, :os_mon]
