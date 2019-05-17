@@ -19,7 +19,7 @@ defmodule Ejabberd.Mixfile do
 
      # Configuration for using this as an umbrella child app.
      build_path: "../../ebin",
-     config_path: "../../config/config.exs",
+     config_path: get_config_path(),
      deps_path: "../../deps",  # TODO: might need to fix deps_include in the future.
      lockfile: "../../mix.lock",
 
@@ -165,6 +165,14 @@ defmodule Ejabberd.Mixfile do
     end
   end
 
+  # Check if we're in a mix umbrella or not to check for our configuration
+  def get_config_path do
+    if File.exists?("../../config/config.exs") do
+      "../../config/config.exs"
+    else
+      "config/config.exs"
+    end
+  end
 end
 
 defmodule Mix.Tasks.Compile.Asn1 do
