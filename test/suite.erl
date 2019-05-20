@@ -70,6 +70,8 @@ init_config(Config) ->
                                                     {pgsql_db, <<"ejabberd_test">>},
                                                     {pgsql_user, <<"ejabberd_test">>},
                                                     {pgsql_pass, <<"ejabberd_test">>},
+                                                    {certfile, CertFile},
+                                                    {cafile, CAFile},
 						    {priv_dir, PrivDir}
 						   ]),
     HostTypes = re:split(CfgContent, "(\\s*- \"(.*)\\.localhost\")",
