@@ -1,20 +1,37 @@
-defmodule Ejabberd.Mixfile do
+defmodule Ejabberd.MixProject do
   use Mix.Project
 
   def project do
     [app: :ejabberd,
-     version: "17.8.0",
+     version: "19.2.0",
      description: description(),
-     elixir: "~> 1.4",
+     elixir: "~> 1.8",
      elixirc_paths: ["lib"],
      compile_path: ".",
      compilers: [:asn1] ++ Mix.compilers,
      erlc_options: erlc_options(),
      erlc_paths: ["asn1", "src"],
-     # Elixir tests are starting the part of ejabberd they need
-     aliases: [test: "test --no-start"],
+     deps: deps(),
      package: package(),
-     deps: deps()]
+
+     # Re-aliasing this to use the ct mix task.
+     aliases: [test: "ct"],
+
+     # Configuration for using this as an umbrella child app.
+     build_path: "../../ebin",
+     config_path: get_config_path(),
+     deps_path: "../../deps",  # TODO: might need to fix deps_include in the future.
+     lockfile: "../../mix.lock",
+
+     # Coveralls specific configuration
+     preferred_cli_env: [
+       coveralls: :test, 
+       "coveralls.json": :test
+     ],
+     test_coverage: [tool: ExCoveralls, test_task: "ct"],
+     cover_enabled: true,
+     cover_export_enabled: true]
+
   end
 
   def description do
@@ -25,61 +42,92 @@ defmodule Ejabberd.Mixfile do
 
   def application do
     [mod: {:ejabberd_app, []},
-     applications: [:ssl],
-     included_applications: [:lager, :mnesia, :inets, :p1_utils, :cache_tab,
+     applications: [:kernel, :stdlib, :sasl, :ssl],
+     included_applications: [:logger, :mnesia, :inets, :p1_utils, :cache_tab,
                              :fast_tls, :stringprep, :fast_xml, :xmpp,
-                             :stun, :fast_yaml, :esip, :jiffy, :p1_oauth2]
-                         ++ cond_apps()]
+                             :stun, :fast_yaml, :esip, :jiffy, :p1_oauth2,
+                             :base64url, :jose, :pkix, :os_mon]
+     ++ cond_apps()]
+  end
+
+  defp if_function_exported(mod, fun, arity, okResult) do
+    :code.ensure_loaded(mod)
+    if :erlang.function_exported(mod, fun, arity) do
+      okResult
+    else
+      []
+    end
+  end
+
+  defp if_version_above(ver, okResult) do
+    if :erlang.system_info(:otp_release) > ver do
+      okResult
+    else
+      []
+    end
   end
 
   defp erlc_options do
     # Use our own includes + includes from all dependencies
     includes = ["include"] ++ deps_include(["fast_xml", "xmpp", "p1_utils"])
-    [:debug_info, {:d, :ELIXIR_ENABLED}] ++ Enum.map(includes, fn(path) -> {:i, path} end)
+    [:debug_info, {:d, :ELIXIR_ENABLED}] ++ cond_options() ++ Enum.map(includes, fn(path) -> {:i, path} end) ++
+    if_version_above('20', [{:d, :DEPRECATED_GET_STACKTRACE}]) ++
+    if_function_exported(:crypto, :strong_rand_bytes, 1, [{:d, :STRONG_RAND_BYTES}]) ++
+    if_function_exported(:rand, :uniform, 1, [{:d, :RAND_UNIFORM}]) ++
+    if_function_exported(:gb_sets, :iterator_from, 2, [{:d, :GB_SETS_ITERATOR_FROM}]) ++
+    if_function_exported(:public_key, :short_name_hash, 1, [{:d, :SHORT_NAME_HASH}])
+  end
+
+  defp cond_options do
+    for {:true, option} <- [{config(:graphics), {:d, :GRAPHICS}}], do:
+    option
   end
 
   defp deps do
-    [{:lager, "~> 3.4.0"},
-     {:p1_utils, "~> 1.0.9"},
-     {:fast_xml, "~> 1.1.23", override: true},
-     # {:fast_xml, git: "https://github.com/processone/fast_xml", override: true},
-     # {:xmpp, "~> 1.1.13"},
-     {:xmpp, git: "https://github.com/processone/xmpp", override: true, tag: "1.1.14"},
-     # {:cache_tab, "~> 1.0.9"},
-     {:cache_tab, git: "https://github.com/processone/cache_tab", override: true},
-     {:fast_yaml, "~> 1.0.10"},
-     # {:fast_tls, "~> 1.0.13"},
-     {:fast_tls, git: "https://github.com/processone/fast_tls", override: true},
-     {:stun, "~> 1.0.12"},
-     {:esip, "~> 1.0.13"},
+    [{:lager, "~> 3.6.0"},
+     {:p1_utils, "~> 1.0"},
+     {:fast_xml, "~> 1.1"},
+     {:xmpp, "~> 1.3.0"},
+     {:cache_tab, "~> 1.0"},
+     {:stringprep, "~> 1.0"},
+     {:fast_yaml, "~> 1.0"},
+     {:fast_tls, "~> 1.1"},
+     {:stun, "~> 1.0"},
+     {:esip, "~> 1.0"},
+     {:p1_mysql, "~> 1.0"},
+     {:mqtree, "~> 1.0"},
+     {:p1_pgsql, "~> 1.1"},
      {:jiffy, "~> 0.14.7"},
      {:p1_oauth2, "~> 0.6.1"},
-     {:distillery, "~> 1.0"},
+     {:distillery, "~> 2.0"},
+     {:pkix, "~> 1.0"},
      {:ex_doc, ">= 0.0.0", only: :dev},
-     {:new_relic_agent, "~> 1.9.2"}]
+     {:base64url, "~> 0.0.1"},
+     {:jose, "~> 1.8"},
+     {:meck, "0.8.13", only: :test},
+     {:excoveralls, "~> 0.11.0", only: :test}]
     ++ cond_deps()
   end
 
   defp deps_include(deps) do
-    base = case Mix.Project.deps_paths()[:ejabberd] do
-      nil -> "deps"
-      _ -> ".."
+    base = if Mix.Project.umbrella?() do
+       "../../deps"
+    else
+      case Mix.Project.deps_paths()[:ejabberd] do
+        nil -> "deps"
+        _ -> ".."
+      end
     end
     Enum.map(deps, fn dep -> base<>"/#{dep}/include" end)
   end
 
   defp cond_deps do
-    for {:true, dep} <- [{config(:mysql), {:p1_mysql, "~> 1.0"}},
-                         {config(:pgsql), {:p1_pgsql, "~> 1.1"}},
-                         {config(:sqlite), {:sqlite3, "~> 1.1"}},
+    for {:true, dep} <- [{config(:sqlite), {:sqlite3, "~> 1.1"}},
                          {config(:riak), {:riakc, "~> 2.4"}},
                          {config(:redis), {:eredis, "~> 1.0"}},
                          {config(:zlib), {:ezlib, "~> 1.0"}},
-                         {config(:iconv), {:iconv, "~> 1.0"}},
                          {config(:pam), {:epam, "~> 1.0"}},
-                         {config(:tools), {:luerl, github: "rvirding/luerl", tag: "v0.2"}},
-                         {config(:tools), {:meck, "~> 0.8.4"}},
-                         {config(:tools), {:moka, github: "processone/moka", tag: "1.0.5c"}}], do:
+                         {config(:tools), {:luerl, "~> 0.3.1"}}], do:
       dep
   end
 
@@ -88,8 +136,7 @@ defmodule Ejabberd.Mixfile do
                          {config(:mysql), :p1_mysql},
                          {config(:pgsql), :p1_pgsql},
                          {config(:sqlite), :sqlite3},
-                         {config(:zlib), :ezlib},
-                         {config(:iconv), :iconv}], do:
+                         {config(:zlib), :ezlib}], do:
       app
   end
 
@@ -107,7 +154,7 @@ defmodule Ejabberd.Mixfile do
   defp vars do
     case :file.consult("vars.config") do
       {:ok,config} -> config
-      _ -> [zlib: true, iconv: true]
+      _ -> [zlib: true]
     end
   end
 
@@ -118,6 +165,14 @@ defmodule Ejabberd.Mixfile do
     end
   end
 
+  # Check if we're in a mix umbrella or not to check for our configuration
+  def get_config_path do
+    if File.exists?("../../config/config.exs") do
+      "../../config/config.exs"
+    else
+      "config/config.exs"
+    end
+  end
 end
 
 defmodule Mix.Tasks.Compile.Asn1 do
@@ -136,7 +191,12 @@ defmodule Mix.Tasks.Compile.Asn1 do
     mappings     = Enum.zip(source_paths, dest_paths)
     options      = project[:asn1_options] || []
 
-    Erlang.compile(manifest(), mappings, :asn1, :erl, opts[:force], fn
+    force = case opts[:force] do
+        :true -> [force: true]
+        _ -> [force: false]
+    end
+
+    Erlang.compile(manifest(), mappings, :asn1, :erl, force, fn
       input, output ->
         options = options ++ [:noobj, outdir: Erlang.to_erl_file(Path.dirname(output))]
         case :asn1ct.compile(Erlang.to_erl_file(input), options) do

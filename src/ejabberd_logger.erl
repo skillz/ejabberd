@@ -5,7 +5,7 @@
 %%% Created : 12 May 2013 by Evgeniy Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2013-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2013-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,9 +27,9 @@
 -behaviour(ejabberd_config).
 
 %% API
--export([start/0, reopen_log/0, rotate_log/0, get/0, set/1, get_log_path/0, opt_type/1]).
+-export([start/0, restart/0, reopen_log/0, rotate_log/0, get/0, set/1,
+	 get_log_path/0, opt_type/1]).
 
--include("ejabberd.hrl").
 
 -type loglevel() :: 0 | 1 | 2 | 3 | 4 | 5.
 
@@ -58,7 +58,7 @@ get_log_path() ->
 	undefined ->
 	    case os:getenv("EJABBERD_LOG_PATH") of
 		false ->
-		    ?LOG_PATH;
+		    "ejabberd.log";
 		Path ->
 		    Path
 	    end
@@ -102,6 +102,11 @@ get_string_env(Name, Default) ->
 
 %% @spec () -> ok
 start() ->
+    start(4).
+
+-spec start(loglevel()) -> ok.
+start(Level) ->
+    LLevel = get_lager_loglevel(Level),
     StartedApps = application:which_applications(5000),
     case lists:keyfind(logger, 1, StartedApps) of
         %% Elixir logger is started. We assume everything is in place
@@ -109,24 +114,24 @@ start() ->
         {logger, _, _} ->
             error_logger:info_msg("Ignoring ejabberd logger options, using Elixir Logger.", []),
             %% Do not start lager, we rely on Elixir Logger
-            do_start_for_logger();
+            do_start_for_logger(LLevel);
         _ ->
-            do_start()
+            do_start(LLevel)
     end.
 
-do_start_for_logger() ->
+do_start_for_logger(Level) ->
     application:load(sasl),
     application:set_env(sasl, sasl_error_logger, false),
     application:load(lager),
     application:set_env(lager, error_logger_redirect, false),
     application:set_env(lager, error_logger_whitelist, ['Elixir.Logger.ErrorHandler']),
     application:set_env(lager, crash_log, false),
-    application:set_env(lager, handlers, [{elixir_logger_backend, [{level, info}]}]),
+    application:set_env(lager, handlers, [{elixir_logger_backend, [{level, Level}]}]),
     ejabberd:start_app(lager),
     ok.
 
 %% Start lager
-do_start() ->
+do_start(Level) ->
     application:load(sasl),
     application:set_env(sasl, sasl_error_logger, false),
     application:load(lager),
@@ -138,11 +143,15 @@ do_start() ->
     LogRotateSize = get_integer_env(log_rotate_size, 10*1024*1024),
     LogRotateCount = get_integer_env(log_rotate_count, 1),
     LogRateLimit = get_integer_env(log_rate_limit, 100),
+    ConsoleLevel = case get_lager_version() >= "3.6.0" of
+		       true -> [{level, Level}];
+		       false -> Level
+		   end,
     application:set_env(lager, error_logger_hwm, LogRateLimit),
     application:set_env(
       lager, handlers,
-      [{lager_console_backend, info},
-       {lager_file_backend, [{file, ConsoleLog}, {level, info}, {date, LogRotateDate},
+      [{lager_console_backend, ConsoleLevel},
+       {lager_file_backend, [{file, ConsoleLog}, {level, Level}, {date, LogRotateDate},
                              {count, LogRotateCount}, {size, LogRotateSize}]},
        {lager_file_backend, [{file, ErrorLog}, {level, error}, {date, LogRotateDate},
                              {count, LogRotateCount}, {size, LogRotateSize}]}]),
@@ -155,6 +164,11 @@ do_start() ->
 			  lager:set_loghwm(Handler, LogRateLimit)
 		  end, gen_event:which_handlers(lager_event)),
     ok.
+
+restart() ->
+    Level = ejabberd_config:get_option(loglevel, 4),
+    application:stop(lager),
+    start(Level).
 
 %% @spec () -> ok
 reopen_log() ->
@@ -187,15 +201,7 @@ get() ->
 
 %% @spec (loglevel() | {loglevel(), list()}) -> {module, module()}
 set(LogLevel) when is_integer(LogLevel) ->
-    LagerLogLevel = case LogLevel of
-                        0 -> none;
-                        1 -> critical;
-                        2 -> error;
-                        3 -> warning;
-                        4 -> info;
-                        5 -> debug;
-			E ->  throw({wrong_loglevel, E})
-                    end,
+    LagerLogLevel = get_lager_loglevel(LogLevel),
     case get_lager_loglevel() of
         LagerLogLevel ->
             ok;
@@ -211,6 +217,10 @@ set(LogLevel) when is_integer(LogLevel) ->
                  (_) ->
                       ok
               end, gen_event:which_handlers(lager_event))
+    end,
+    case LogLevel of
+	5 -> xmpp:set_config([{debug, true}]);
+	_ -> xmpp:set_config([{debug, false}])
     end,
     {module, lager};
 set({_LogLevel, _}) ->
@@ -228,10 +238,28 @@ get_lager_loglevel() ->
                 end,
                 none, Handlers).
 
+get_lager_loglevel(LogLevel) ->
+    case LogLevel of
+	0 -> none;
+	1 -> critical;
+	2 -> error;
+	3 -> warning;
+	4 -> info;
+	5 -> debug;
+	E -> erlang:error({wrong_loglevel, E})
+    end.
+
 get_lager_handlers() ->
     case catch gen_event:which_handlers(lager_event) of
         {'EXIT',noproc} ->
             [];
         Result ->
             Result
+    end.
+
+get_lager_version() ->
+    Apps = application:loaded_applications(),
+    case lists:keyfind(lager, 1, Apps) of
+	{_, _, Vsn} -> Vsn;
+	false -> "0.0.0"
     end.

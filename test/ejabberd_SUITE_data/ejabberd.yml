@@ -52,7 +52,13 @@ host_config:
       mod_disco: []
       mod_ping: []
       mod_proxy65: []
+      mod_push:
+        db_type: sql
+        include_body: false
+      mod_push_keepalive: []
       mod_s2s_dialback: []
+      mod_stream_mgmt:
+        resume_timeout: 3
       mod_legacy_auth: []
       mod_register: 
         welcome_message: 
@@ -110,7 +116,13 @@ Welcome to this XMPP server."
       mod_disco: []
       mod_ping: []
       mod_proxy65: []
+      mod_push:
+        db_type: sql
+        include_body: false
+      mod_push_keepalive: []
       mod_s2s_dialback: []
+      mod_stream_mgmt:
+        resume_timeout: 3
       mod_legacy_auth: []
       mod_register: 
         welcome_message: 
@@ -173,7 +185,13 @@ Welcome to this XMPP server."
       mod_disco: []
       mod_ping: []
       mod_proxy65: []
+      mod_push:
+        db_type: sql
+        include_body: false
+      mod_push_keepalive: []
       mod_s2s_dialback: []
+      mod_stream_mgmt:
+        resume_timeout: 3
       mod_legacy_auth: []
       mod_register: 
         welcome_message: 
@@ -231,7 +249,8 @@ Welcome to this XMPP server."
       mod_disco: []
       mod_ping: []
       mod_proxy65: []
-      mod_push: []
+      mod_push:
+        include_body: false
       mod_push_keepalive: []
       mod_s2s_dialback: []
       mod_stream_mgmt:
@@ -294,7 +313,8 @@ Welcome to this XMPP server."
       mod_disco: []
       mod_ping: []
       mod_proxy65: []
-      mod_push: []
+      mod_push:
+        include_body: false
       mod_push_keepalive: []
       mod_s2s_dialback: []
       mod_stream_mgmt:
@@ -436,8 +456,8 @@ acl:
   local: 
     user_regexp: ""
 define_macro: 
-  CERTFILE: "cert.pem"
-  CAFILE: "ca.pem"
+  CERTFILE: "@@certfile@@"
+  CAFILE: "@@cafile@@"
 language: "en"
 listen: 
   - 
@@ -474,7 +494,6 @@ modules:
   mod_disco: []
   mod_ping: []
   mod_proxy65: []
-  mod_legacy: []
   mod_muc: []
   mod_muc_admin: []
   mod_register: 
@@ -499,6 +518,8 @@ outgoing_s2s_port: @@s2s_port@@
 shaper: 
   fast: 50000
   normal: 10000
+
+new_sql_schema: @@new_schema@@
 
 api_permissions:
   "public commands":

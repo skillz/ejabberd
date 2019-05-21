@@ -5,7 +5,7 @@
 %%% Created : 26 Jul 2016 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -34,13 +34,12 @@
          clean/1,
          opt_type/1]).
 
--include("ejabberd.hrl").
 -include("ejabberd_oauth.hrl").
 -include("logger.hrl").
 -include("jid.hrl").
 
 init() ->
-    rest:start(?MYNAME),
+    rest:start(ejabberd_config:get_myname()),
     ok.
 
 store(R) ->
@@ -50,7 +49,7 @@ store(R) ->
     SJID = jid:encode({User, Server, <<"">>}),
     case rest:with_retry(
            post,
-           [?MYNAME, Path, [],
+           [ejabberd_config:get_myname(), Path, [],
             {[{<<"token">>, R#oauth_token.token},
               {<<"user">>, SJID},
               {<<"scope">>, R#oauth_token.scope},
@@ -65,7 +64,7 @@ store(R) ->
 
 lookup(Token) ->
     Path = path(<<"lookup">>),
-    case rest:with_retry(post, [?MYNAME, Path, [],
+    case rest:with_retry(post, [ejabberd_config:get_myname(), Path, [],
                                 {[{<<"token">>, Token}]}],
                          2, 500) of
         {ok, 200, {Data}} ->
@@ -93,8 +92,7 @@ path(Path) ->
     <<Base/binary, "/", Path/binary>>.
 
 
--spec opt_type(ext_api_path_oauth) -> fun((binary()) -> binary());
-	      (atom()) -> [atom()].
+-spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
 opt_type(ext_api_path_oauth) ->
     fun (X) -> iolist_to_binary(X) end;
 opt_type(_) -> [ext_api_path_oauth].

@@ -3,7 +3,7 @@
 %%% Created :  6 Apr 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2017   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -32,7 +32,6 @@
 %% Supervisor callbacks
 -export([init/1]).
 
--include("ejabberd.hrl").
 -include("logger.hrl").
 
 -define(DEFAULT_POOL_SIZE, 10).
@@ -98,7 +97,7 @@ init([]) ->
 %%% Internal functions
 %%%===================================================================
 is_redis_configured() ->
-    lists:any(fun is_redis_configured/1, ?MYHOSTS).
+    lists:any(fun is_redis_configured/1, ejabberd_config:get_myhosts()).
 
 is_redis_configured(Host) ->
     ServerConfigured = ejabberd_config:has_option({redis_server, Host}),
@@ -127,14 +126,7 @@ get_pool_size() ->
 iolist_to_list(IOList) ->
     binary_to_list(iolist_to_binary(IOList)).
 
--spec opt_type(redis_connect_timeout) -> fun((pos_integer()) -> pos_integer());
-	      (redis_db) -> fun((non_neg_integer()) -> non_neg_integer());
-	      (redis_password) -> fun((binary()) -> binary());
-	      (redis_port) -> fun((0..65535) -> 0..65535);
-	      (redis_server) -> fun((binary()) -> binary());
-	      (redis_pool_size) -> fun((pos_integer()) -> pos_integer());
-	      (redis_queue_type) -> fun((ram | file) -> ram | file);
-	      (atom()) -> [atom()].
+-spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
 opt_type(redis_connect_timeout) ->
     fun (I) when is_integer(I), I > 0 -> I end;
 opt_type(redis_db) ->
