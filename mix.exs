@@ -18,10 +18,10 @@ defmodule Ejabberd.MixProject do
      aliases: [test: "ct"],
 
      # Configuration for using this as an umbrella child app.
-     build_path: "../../ebin",
      config_path: get_config_path(),
-     deps_path: "../../deps",  # TODO: might need to fix deps_include in the future.
-     lockfile: "../../mix.lock",
+     build_path: get_build_path(),
+     deps_path: get_deps_path(),
+     lockfile: get_lockfile(),
 
      # Coveralls specific configuration
      preferred_cli_env: [
@@ -167,10 +167,31 @@ defmodule Ejabberd.MixProject do
 
   # Check if we're in a mix umbrella or not to check for our configuration
   def get_config_path do
-    if File.exists?("../../config/config.exs") do
+    if Mix.Project.umbrella?() do
       "../../config/config.exs"
     else
       "config/config.exs"
+    end
+  end
+  def get_build_path do
+    if Mix.Project.umbrella?() do
+      "../../ebin"
+    else
+      "ebin"
+    end
+  end
+  def get_deps_path do
+    if Mix.Project.umbrella?() do
+      "../../deps"
+    else
+      "deps"
+    end
+  end
+  def get_lockfile do
+    if Mix.Project.umbrella?() do
+      "../../mix.lock"
+    else
+      "mix.lock"
     end
   end
 end
