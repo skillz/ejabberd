@@ -377,6 +377,7 @@ get_password_with_authmodule(User, Server) ->
 
 -spec user_exists(binary(), binary()) -> boolean().
 user_exists(_User, <<"">>) ->
+	?ERROR_MSG("Server is empty in user_exists auth call.", []),
     false;
 user_exists(User, Server) ->
     case validate_credentials(User, Server) of
@@ -610,19 +611,28 @@ db_user_exists(User, Server, Mod) ->
 			   cache_tab(Mod), {User, Server},
 			   fun() ->
 				   case Mod:user_exists(User, Server) of
-				       true -> {ok, exists};
-				       false -> error;
-				       {error, _} = Err -> Err;
+				       true -> 
+				           ?DEBUG("User exists in external module", []),
+				           {ok, exists};
+				       false -> 
+				           ?ERROR_MSG("User does not exist in external module, false returned.", []),
+				           error;
+				       {error, Error} = Err ->
+				           ?ERROR_MSG("User does not exist in external module error is: ~s", [Error]),
+				           Err;
 				       {CacheTag, true} -> {CacheTag, {ok, exists}};
 				       {CacheTag, false} -> {CacheTag, error};
 				       {_, {error, _}} = Err -> Err
 				   end
 			   end) of
 			{ok, _} ->
+				?DEBUG("User exists in cache or external", []),
 			    true;
 			error ->
+				?DEBUG("User does not exist exists in cache or external", []),
 			    false;
-			{error, _} = Err ->
+			{error, Error} = Err ->
+				?DEBUG("User does not exist exists in cache or external, error is ~s", [Error]),
 			    Err
 		    end;
 		{external, false} ->
