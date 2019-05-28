@@ -620,9 +620,15 @@ db_user_exists(User, Server, Mod) ->
 				       {error, Error} = Err ->
 				           ?ERROR_MSG("User does not exist in external module error is: ~s", [Error]),
 				           Err;
-				       {CacheTag, true} -> {CacheTag, {ok, exists}};
-				       {CacheTag, false} -> {CacheTag, error};
-				       {_, {error, _}} = Err -> Err
+				       {CacheTag, true} -> 
+				           ?DEBUG("User exists in cache tag block", []),
+				           {CacheTag, {ok, exists}};
+				       {CacheTag, false} -> 
+				           ?ERROR_MSG("User does not exist in cache tag block: ~s", [CacheTag]),
+				           {CacheTag, error};
+				       {_, {error, _}} = Err ->
+				           ?ERROR_MSG("General auth cache/backend error", []),
+                           Err
 				   end
 			   end) of
 			{ok, _} ->
