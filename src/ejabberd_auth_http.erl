@@ -161,8 +161,12 @@ get_password_s(User, Server) ->
 -spec user_exists(ejabberd:luser(), ejabberd:lserver()) -> boolean().
 user_exists(LUser, LServer) ->
     case make_req(get, <<"user_exists">>, LUser, LServer, <<"">>) of
-        {ok, <<"true">>} -> true;
-        _ -> false
+        {ok, <<"true">>} -> 
+            ?DEBUG("User exists in external http_auth user_exists request.", []),
+            true;
+        _ -> 
+            ?ERROR_MSG("User does not exist in external http_auth user_exists.", []),
+            false
     end.
 
 -spec remove_user(ejabberd:luser(), ejabberd:lserver()) -> ok | not_exists | not_allowed | bad_request.
