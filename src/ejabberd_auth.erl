@@ -612,22 +612,22 @@ db_user_exists(User, Server, Mod) ->
 			   fun() ->
 				   case Mod:user_exists(User, Server) of
 				       true -> 
-				           ?DEBUG("User exists in external module", []),
+				           ?DEBUG("User exists in external module, user: ~s", [User]),
 				           {ok, exists};
 				       false -> 
-				           ?ERROR_MSG("User does not exist in external module, false returned.", []),
+				           ?ERROR_MSG("User does not exist in external module, false returned, user: ~s", [User]),
 				           error;
 				       {error, Error} = Err ->
-				           ?ERROR_MSG("User does not exist in external module error is: ~s", [Error]),
+				           ?ERROR_MSG("User does not exist in external module error is: ~s, user: ~s", [Error, User]),
 				           Err;
 				       {CacheTag, true} -> 
-				           ?DEBUG("User exists in cache tag block", []),
+				           ?DEBUG("User exists in cache tag block, user: ~s", [User]),
 				           {CacheTag, {ok, exists}};
 				       {CacheTag, false} -> 
-				           ?ERROR_MSG("User does not exist in cache tag block: ~s", [CacheTag]),
+				           ?ERROR_MSG("User does not exist in cache tag block: ~s, user: ~s", [CacheTag, User]),
 				           {CacheTag, error};
 				       {_, {error, _}} = Err ->
-				           ?ERROR_MSG("General auth cache/backend error", []),
+				           ?ERROR_MSG("General auth cache/backend error, user: ~s", [User]),
                            Err
 				   end
 			   end) of
@@ -635,7 +635,7 @@ db_user_exists(User, Server, Mod) ->
 				?DEBUG("User exists in cache or external", []),
 			    true;
 			error ->
-				?DEBUG("User does not exist exists in cache or external", []),
+				?DEBUG("User does not exist exists in cache or external, user: ~s", [User]),
 			    false;
 			{error, Error} = Err ->
 				?DEBUG("User does not exist exists in cache or external, error is ~s", [Error]),
