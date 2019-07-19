@@ -175,9 +175,9 @@ defmodule Ejabberd.MixProject do
   end
   def get_build_path do
     if Mix.Project.umbrella?() do
-      "../../ebin"
+      "../../_build"
     else
-      "ebin"
+      "_build"
     end
   end
   def get_deps_path do
