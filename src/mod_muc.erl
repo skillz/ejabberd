@@ -255,12 +255,11 @@ init([Host, Opts]) ->
     % Create a new ets cache and load it with data from the user_affiliation sql table
     CacheOpts = [{max_size, infinity}, {cache_missed, false}, {life_time, infinity}],
     ets_cache:new(user_affiliation_cache, CacheOpts),
-    {ok, Affiliations} = Mod:get_affiliations(Host),
     AddToCache = fun(UserAffiliation) ->
         {UserId, Affiliation} = UserAffiliation,
-        ets_cache:insert(user_affiliation_cache, list_to_binary(integer_to_list(UserId)), Mod:decode_affiliation(Affiliation))
+        ets_cache:insert(user_affiliation_cache, integer_to_binary(UserId), Mod:decode_affiliation(Affiliation))
     end,
-    lists:foreach(AddToCache, Affiliations),
+    lists:foreach(AddToCache, Mod:get_affiliations(Host)),
     {ok, State}.
 
 handle_call(stop, _From, State) ->

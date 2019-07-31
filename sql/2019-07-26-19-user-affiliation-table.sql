@@ -7,12 +7,12 @@ CREATE TABLE user_affiliation (
    version       BIGINT        NOT NULL,
    enabled       BIT DEFAULT 1 NOT NULL,
    user_id       BIGINT        NOT NULL,
-   affiliation   VARCHAR(255)  NOT NULL,
+   affiliation   VARCHAR(255)  NOT NULL COLLATE utf8mb4_unicode_ci,
    date_created  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-   last_updated  DATETIME      NOT NULL,
+   last_updated  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
    PRIMARY KEY(id),
-   INDEX user_affiliation_id_enabled_idx (user_id, enabled),
+   INDEX user_affiliation_enabled_id_idx (enabled, user_Id),
    INDEX user_affiliation_date_created_idx (date_created)
 )
 ENGINE = InnoDB
-DEFAULT CHARSET = utf8;
+DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

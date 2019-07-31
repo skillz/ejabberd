@@ -1328,8 +1328,7 @@ set_affiliation(JID, Affiliation, StateData, Reason) ->
     none ->
         case ets_cache:lookup(user_affiliation_cache, LUser) of
         {ok, ExistingAffiliation} ->
-            Mod:disable_affiliation(ServerHost, LUser),
-            ets_cache:delete(user_affiliation_cache, LUser);
+            Mod:disable_affiliation(ServerHost, LUser);
         _ ->
             ok
         end;
@@ -1337,11 +1336,9 @@ set_affiliation(JID, Affiliation, StateData, Reason) ->
         case ets_cache:lookup(user_affiliation_cache, LUser) of
         {ok, ExistingAffiliation} ->
             Mod:disable_affiliation(ServerHost, LUser),
-            Mod:insert_affiliation(ServerHost, LUser, list_to_binary(atom_to_list(NewAffiliation))),
-            ets_cache:update(user_affiliation_cache, LUser, {ok, NewAffiliation}, fun() -> ok end);
+            Mod:insert_affiliation(ServerHost, LUser, NewAffiliation);
         _ ->
-            Mod:insert_affiliation(ServerHost, LUser, list_to_binary(atom_to_list(NewAffiliation))),
-            ets_cache:insert(user_affiliation_cache, LUser, NewAffiliation)
+            Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
         end
     end,
     StateData.
