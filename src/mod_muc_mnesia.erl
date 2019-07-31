@@ -36,7 +36,7 @@
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
 	 get_subscribed_rooms/3]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
-	 get_affiliations/3, get_affliations/1, search_affiliation/4,
+	 get_affiliations/3, get_affiliations/1, search_affiliation/4,
 	 disable_affiliation/2, insert_affiliation/3]).
 %% gen_server callbacks
 -export([start_link/2, init/1, handle_cast/2, handle_call/3, handle_info/2,
