@@ -39,7 +39,9 @@
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
 	 get_subscribed_rooms/3]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
-	 get_affiliations/3, search_affiliation/4]).
+	 get_affiliations/3, get_affiliations/1, search_affiliation/4,
+	 disable_affiliation/2, insert_affiliation/3]).
+-export([decode_affiliation/1]).
 
 -include("jid.hrl").
 -include("mod_muc.hrl").
@@ -236,6 +238,27 @@ set_nick(LServer, Host, From, Nick) ->
 	end,
     ejabberd_sql:sql_transaction(LServer, F).
 
+-spec decode_affiliation(Arg :: binary()) -> atom().
+decode_affiliation(<<"owner">>) -> owner;
+decode_affiliation(<<"member">>) -> member;
+decode_affiliation(<<"outcast">>) -> outcast;
+decode_affiliation(<<"muted">>) -> muted;
+decode_affiliation(_) -> none.
+
+disable_affiliation(_Host, _LUser) ->
+    ejabberd_sql:sql_query(_Host,
+        ?SQL("update user_affiliation "
+        "set version = version + 1, enabled = 0, last_updated = now() "
+        "where user_id = %(_LUser)d and enabled = 1")),
+    ok.
+
+insert_affiliation(_Host, _LUser, _Affiliation) ->
+    ejabberd_sql:sql_query(_Host,
+            ?SQL("insert into user_affiliation "
+            "(version, enabled, user_id, affiliation, date_created, last_updated) "
+            "values (0, 1, %(_LUser)d, %(_Affiliation)s, now(), now())")),
+    ok.
+
 set_affiliation(_ServerHost, _Room, _Host, _JID, _Affiliation, _Reason) ->
     {error, not_implemented}.
 
@@ -244,6 +267,17 @@ set_affiliations(_ServerHost, _Room, _Host, _Affiliations) ->
 
 get_affiliation(_ServerHost, _Room, _Host, _LUser, _LServer) ->
     {error, not_implemented}.
+
+get_affiliations(_Host) ->
+    case ejabberd_sql:sql_query(_Host,
+            ?SQL("select @(user_id)d, @(affiliation)s "
+                 "from user_affiliation "
+                 "where enabled=1")) of
+        {selected, Affiliations} ->
+            {ok, Affiliations};
+        _ ->
+            {ok, []}
+        end.
 
 get_affiliations(_ServerHost, _Room, _Host) ->
     {error, not_implemented}.
