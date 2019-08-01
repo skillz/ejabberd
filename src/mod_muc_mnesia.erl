@@ -158,7 +158,7 @@ get_affiliations(_ServerHost, _Room, _Host) ->
     {error, not_implemented}.
 
 get_affiliations(_Host) ->
-    {error, not_implemented}.
+    [].
 
 insert_affiliation(_Host, _LUser, _Affiliation) ->
     {error, not_implemented}.
