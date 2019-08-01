@@ -283,11 +283,11 @@ get_affiliations(Host) ->
             ?SQL("select @(user_id)d, @(affiliation)s "
                  "from user_affiliation "
                  "where enabled = 1")) of
-        {selected, Affiliations} ->
-            Affiliations;
-        _ ->
-            []
-        end.
+    {selected, Affiliations} ->
+        Affiliations;
+    _ ->
+        []
+    end.
 
 get_affiliations(_ServerHost, _Room, _Host) ->
     {error, not_implemented}.

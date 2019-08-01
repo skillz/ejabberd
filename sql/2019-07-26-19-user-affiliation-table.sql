@@ -11,7 +11,7 @@ CREATE TABLE user_affiliation (
    date_created  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
    last_updated  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
    PRIMARY KEY(id),
-   INDEX user_affiliation_enabled_id_idx (enabled, user_Id),
+   INDEX user_affiliation_enabled_id_idx (enabled, user_id),
    INDEX user_affiliation_date_created_idx (date_created)
 )
 ENGINE = InnoDB
