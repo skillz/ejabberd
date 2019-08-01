@@ -1332,7 +1332,7 @@ set_affiliation(JID, Affiliation, StateData, Reason) ->
         _ ->
             ok
         end;
-     _ ->
+    _ ->
         case ets_cache:lookup(user_affiliation_cache, LUser) of
         {ok, ExistingAffiliation} ->
             Mod:disable_affiliation(ServerHost, LUser),
