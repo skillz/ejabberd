@@ -463,3 +463,19 @@ CREATE TABLE mqtt_pub (
     expiry int unsigned NOT NULL,
     UNIQUE KEY i_mqtt_topic (topic(191))
 );
+
+CREATE TABLE user_affiliation (
+   id            BIGINT        NOT NULL AUTO_INCREMENT,
+   version       BIGINT        NOT NULL,
+   enabled       BIT DEFAULT 1 NOT NULL,
+   user_id       BIGINT        NOT NULL,
+   affiliation   VARCHAR(255)  NOT NULL COLLATE utf8mb4_unicode_ci,
+   date_created  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   last_updated  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   PRIMARY KEY(id),
+   INDEX user_affiliation_enabled_id_idx (enabled, user_id),
+   INDEX user_affiliation_date_created_idx (date_created)
+)
+ENGINE = InnoDB
+DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+

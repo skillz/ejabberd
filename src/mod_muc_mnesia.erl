@@ -36,7 +36,8 @@
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
 	 get_subscribed_rooms/3]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
-	 get_affiliations/3, search_affiliation/4]).
+	 get_affiliations/3, get_affiliations/1, search_affiliation/4,
+	 disable_affiliation/2, insert_affiliation/3]).
 %% gen_server callbacks
 -export([start_link/2, init/1, handle_cast/2, handle_call/3, handle_info/2,
 	 terminate/2, code_change/3]).
@@ -154,6 +155,15 @@ get_affiliation(_ServerHost, _Room, _Host, _LUser, _LServer) ->
     {error, not_implemented}.
 
 get_affiliations(_ServerHost, _Room, _Host) ->
+    {error, not_implemented}.
+
+get_affiliations(_Host) ->
+    [].
+
+insert_affiliation(_Host, _LUser, _Affiliation) ->
+    {error, not_implemented}.
+
+disable_affiliation(_Host, _LUser) ->
     {error, not_implemented}.
 
 search_affiliation(_ServerHost, _Room, _Host, _Affiliation) ->
