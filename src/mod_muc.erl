@@ -257,7 +257,7 @@ init([Host, Opts]) ->
     ets_cache:new(user_affiliation_cache, CacheOpts),
     AddToCache = fun(UserAffiliation) ->
         {UserId, Affiliation} = UserAffiliation,
-        ets_cache:insert(user_affiliation_cache, integer_to_binary(UserId), Mod:decode_affiliation(Affiliation))
+        ets_cache:insert(user_affiliation_cache, UserId, Mod:decode_affiliation(Affiliation))
     end,
     lists:foreach(AddToCache, Mod:get_affiliations(Host)),
     {ok, State}.

@@ -256,7 +256,7 @@ disable_affiliation(Host, LUser) ->
     ejabberd_sql:sql_query(Host,
         ?SQL("update user_affiliation "
         "set version = version + 1, enabled = 0, last_updated = now() "
-        "where user_id = %(LUser)d and enabled = 1")),
+        "where user_id = %(LUser)s and enabled = 1")),
     ets_cache:delete(user_affiliation_cache, LUser),
     ok.
 
@@ -265,7 +265,7 @@ insert_affiliation(Host, LUser, Affiliation) ->
     ejabberd_sql:sql_query(Host,
         ?SQL("insert into user_affiliation "
         "(version, enabled, user_id, affiliation, date_created, last_updated) "
-        "values (0, 1, %(LUser)d, %(AffiliationBinary)s, now(), now())")),
+        "values (0, 1, %(LUser)s, %(AffiliationBinary)s, now(), now())")),
     ets_cache:update(user_affiliation_cache, LUser, {ok, Affiliation}, fun() -> ok end),
     ok.
 
@@ -280,7 +280,7 @@ get_affiliation(_ServerHost, _Room, _Host, _LUser, _LServer) ->
 
 get_affiliations(Host) ->
     case ejabberd_sql:sql_query(Host,
-            ?SQL("select @(user_id)d, @(affiliation)s "
+            ?SQL("select @(user_id)s, @(affiliation)s "
                  "from user_affiliation "
                  "where enabled = 1")) of
     {selected, Affiliations} ->
