@@ -1318,9 +1318,15 @@ set_affiliation(JID, Affiliation, StateData, Reason) ->
     Host = StateData#state.host,
     Mod = gen_mod:db_mod(ServerHost, mod_muc),
     LUser = JID#jid.luser,
+    RoomJID = StateData#state.jid,
+    To = jid:replace_resource(RoomJID, LUser),
     NewAffiliation = case {Affiliation, Reason} of
     {outcast, <<"muted">>} ->
+        set_role(To, visitor, StateData),
         muted;
+    {outcast, _} ->
+        set_role(To, visitor, StateData),
+        Affiliation;
     _ ->
         Affiliation
     end,
