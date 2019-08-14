@@ -187,10 +187,10 @@ check_in_subscription(Acc, #presence{to = To}) ->
     #jid{user = User, server = Server} = To,
     case ejabberd_auth:user_exists(User, Server) of
       true -> 
-    ?DEBUG("user exists in check_in_sub", []),
+            ?DEBUG("user exists in check_in_sub", []),
             Acc;
       false -> 
-    ?DEBUG("user does not exist check_in_sub", []),
+            ?DEBUG("user does not exist check_in_sub", []),
             {stop, false}
     end.
 
@@ -675,7 +675,6 @@ do_route(#presence{to = To, type = T} = Packet)
 		      ok
 	      end, get_sessions(Mod, LUser, LServer));
 	false ->
-        ?DEBUG("presence packet rejected due to privacy list or in sub hook", []),
 	    ok
     end;
 do_route(#presence{to = #jid{lresource = <<"">>} = To} = Packet) ->

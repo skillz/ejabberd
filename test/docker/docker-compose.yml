@@ -1,0 +1,18 @@
+version: '3.5'
+
+services:
+  mysql:
+    image: mysql:latest
+    container_name: ejabberd-mysql
+    volumes:
+      - ./db/mysql/data:/var/lib/mysql
+      - ./db/mysql/initdb:/docker-entrypoint-initdb.d:ro
+    command: --default-authentication-plugin=mysql_native_password
+    restart: always
+    ports:
+      - 3306:3306
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ejabberd
+      MYSQL_USER: ejabberd
+      MYSQL_PASSWORD: ejabberd

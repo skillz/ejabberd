@@ -52,7 +52,6 @@
 -include("scram.hrl").
 -include("logger.hrl").
 
--define(AUTH_CACHE, auth_cache).
 -define(SALT_LENGTH, 16).
 
 -record(state, {host_modules = #{} :: map()}).
@@ -378,6 +377,7 @@ get_password_with_authmodule(User, Server) ->
 
 -spec user_exists(binary(), binary()) -> boolean().
 user_exists(_User, <<"">>) ->
+	?ERROR_MSG("Server is empty in user_exists auth call.", []),
     false;
 user_exists(User, Server) ->
     case validate_credentials(User, Server) of
@@ -546,14 +546,14 @@ db_try_register(User, Server, Password, Mod) ->
 	    case use_cache(Mod, Server) of
 		true ->
 		    case ets_cache:update(
-			   ?AUTH_CACHE, {User, Server}, {ok, Password},
+			   cache_tab(Mod), {User, Server}, {ok, Password},
 			   fun() -> Mod:try_register(User, Server, Password1) end,
 			   cache_nodes(Mod, Server)) of
 			{ok, _} -> ok;
 			{error, _} = Err -> Err
 		    end;
 		false ->
-		    Mod:try_register(User, Server, Password1)
+		    ets_cache:untag(Mod:try_register(User, Server, Password1))
 	    end;
 	false ->
 	    {error, not_allowed}
@@ -569,14 +569,14 @@ db_set_password(User, Server, Password, Mod) ->
 	    case use_cache(Mod, Server) of
 		true ->
 		    case ets_cache:update(
-			   ?AUTH_CACHE, {User, Server}, {ok, Password},
+			   cache_tab(Mod), {User, Server}, {ok, Password},
 			   fun() -> Mod:set_password(User, Server, Password1) end,
 			   cache_nodes(Mod, Server)) of
 			{ok, _} -> ok;
 			{error, _} = Err -> Err
 		    end;
 		false ->
-		    Mod:set_password(User, Server, Password1)
+		    ets_cache:untag(Mod:set_password(User, Server, Password1))
 	    end;
 	false ->
 	    {error, not_allowed}
@@ -586,7 +586,7 @@ db_get_password(User, Server, Mod) ->
     UseCache = use_cache(Mod, Server),
     case erlang:function_exported(Mod, get_password, 2) of
 	false when UseCache ->
-	    case ets_cache:lookup(?AUTH_CACHE, {User, Server}) of
+	    case ets_cache:lookup(cache_tab(Mod), {User, Server}) of
 		{ok, exists} -> error;
 		Other -> Other
 	    end;
@@ -594,10 +594,10 @@ db_get_password(User, Server, Mod) ->
 	    error;
 	true when UseCache ->
 	    ets_cache:lookup(
-	      ?AUTH_CACHE, {User, Server},
+	      cache_tab(Mod), {User, Server},
 	      fun() -> Mod:get_password(User, Server) end);
 	true ->
-	    Mod:get_password(User, Server)
+	    ets_cache:untag(Mod:get_password(User, Server))
     end.
 
 db_user_exists(User, Server, Mod) ->
@@ -608,23 +608,41 @@ db_user_exists(User, Server, Mod) ->
 	    case {Mod:store_type(Server), use_cache(Mod, Server)} of
 		{external, true} ->
 		    case ets_cache:lookup(
-			   ?AUTH_CACHE, {User, Server},
+			   cache_tab(Mod), {User, Server},
 			   fun() ->
 				   case Mod:user_exists(User, Server) of
-				       true -> {ok, exists};
-				       false -> error;
-				       {error, _} = Err -> Err
+				       true -> 
+				           ?DEBUG("User exists in external module, user: ~s", [User]),
+				           {ok, exists};
+				       false -> 
+				           ?ERROR_MSG("User does not exist in external module, false returned, user: ~s", [User]),
+				           error;
+				       {error, Error} = Err ->
+				           ?ERROR_MSG("User does not exist in external module error is: ~s, user: ~s", [Error, User]),
+				           Err;
+				       {CacheTag, true} -> 
+				           ?DEBUG("User exists in cache tag block, user: ~s", [User]),
+				           {CacheTag, {ok, exists}};
+				       {CacheTag, false} -> 
+				           ?ERROR_MSG("User does not exist in cache tag block: ~s, user: ~s", [CacheTag, User]),
+				           {CacheTag, error};
+				       {_, {error, _}} = Err ->
+				           ?ERROR_MSG("General auth cache/backend error, user: ~s", [User]),
+                           Err
 				   end
 			   end) of
 			{ok, _} ->
+				?DEBUG("User exists in cache or external", []),
 			    true;
 			error ->
+				?DEBUG("User does not exist exists in cache or external, user: ~s", [User]),
 			    false;
-			{error, _} = Err ->
+			{error, Error} = Err ->
+				?DEBUG("User does not exist exists in cache or external, error is ~s", [Error]),
 			    Err
 		    end;
 		{external, false} ->
-		    Mod:user_exists(User, Server);
+		    ets_cache:untag(Mod:user_exists(User, Server));
 		_ ->
 		    false
 	    end
@@ -639,14 +657,14 @@ db_check_password(User, AuthzId, Server, ProvidedPassword,
 	    case {Mod:store_type(Server), use_cache(Mod, Server)} of
 		{external, true} ->
 		    case ets_cache:update(
-			   ?AUTH_CACHE, {User, Server}, {ok, ProvidedPassword},
+			   cache_tab(Mod), {User, Server}, {ok, ProvidedPassword},
 			   fun() ->
 				   case Mod:check_password(
 					  User, AuthzId, Server, ProvidedPassword) of
-				       true ->
-					   {ok, ProvidedPassword};
-				       false ->
-					   error
+				       true -> {ok, ProvidedPassword};
+				       false -> error;
+				       {CacheTag, true} -> {CacheTag, {ok, ProvidedPassword}};
+				       {CacheTag, false} -> {CacheTag, error}
 				   end
 			   end) of
 			{ok, _} ->
@@ -655,7 +673,8 @@ db_check_password(User, AuthzId, Server, ProvidedPassword,
 			    false
 		    end;
 		{external, false} ->
-		    Mod:check_password(User, AuthzId, Server, ProvidedPassword);
+		    ets_cache:untag(
+		      Mod:check_password(User, AuthzId, Server, ProvidedPassword));
 		_ ->
 		    false
 	    end
@@ -664,11 +683,11 @@ db_check_password(User, AuthzId, Server, ProvidedPassword,
 db_remove_user(User, Server, Mod) ->
     case erlang:function_exported(Mod, remove_user, 2) of
 	true ->
-	    case Mod:remove_user(User, Server) of
+	    case ets_cache:untag(Mod:remove_user(User, Server)) of
 		ok ->
 		    case use_cache(Mod, Server) of
 			true ->
-			    ets_cache:delete(?AUTH_CACHE, {User, Server},
+			    ets_cache:delete(cache_tab(Mod), {User, Server},
 					     cache_nodes(Mod, Server));
 			false ->
 			    ok
@@ -683,7 +702,7 @@ db_remove_user(User, Server, Mod) ->
 db_get_users(Server, Opts, Mod) ->
     case erlang:function_exported(Mod, get_users, 2) of
 	true ->
-	    Mod:get_users(Server, Opts);
+	    ets_cache:untag(Mod:get_users(Server, Opts));
 	false ->
 	    case use_cache(Mod, Server) of
 		true ->
@@ -692,7 +711,7 @@ db_get_users(Server, Opts, Mod) ->
 			      [{User, Server}|Users];
 			 (_, _, Users) ->
 			      Users
-		      end, [], ?AUTH_CACHE);
+		      end, [], cache_tab(Mod));
 		false ->
 		    []
 	    end
@@ -701,7 +720,7 @@ db_get_users(Server, Opts, Mod) ->
 db_count_users(Server, Opts, Mod) ->
     case erlang:function_exported(Mod, count_users, 2) of
 	true ->
-	    Mod:count_users(Server, Opts);
+	    ets_cache:untag(Mod:count_users(Server, Opts));
 	false ->
 	    case use_cache(Mod, Server) of
 		true ->
@@ -710,7 +729,7 @@ db_count_users(Server, Opts, Mod) ->
 			      Num + 1;
 			 (_, _, Num) ->
 			      Num
-		      end, 0, ?AUTH_CACHE);
+		      end, 0, cache_tab(Mod));
 		false ->
 		    0
 	    end
@@ -751,12 +770,16 @@ password_to_scram(Password, IterationCount) ->
 %%%----------------------------------------------------------------------
 -spec init_cache(map()) -> ok.
 init_cache(HostModules) ->
-    case use_cache(HostModules) of
-	true ->
-	    ets_cache:new(?AUTH_CACHE, cache_opts());
-	false ->
-	    ets_cache:delete(?AUTH_CACHE)
-    end.
+    CacheOpts = cache_opts(),
+    {True, False} = use_cache(HostModules),
+    lists:foreach(
+      fun(Module) ->
+	      ets_cache:new(cache_tab(Module), CacheOpts)
+      end, True),
+    lists:foreach(
+      fun(Module) ->
+	      ets_cache:delete(cache_tab(Module))
+      end, False).
 
 -spec cache_opts() -> [proplists:property()].
 cache_opts() ->
@@ -774,14 +797,22 @@ cache_opts() ->
 	       end,
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
--spec use_cache(map()) -> boolean().
+-spec use_cache(map()) -> {True :: [module()], False :: [module()]}.
 use_cache(HostModules) ->
-    lists:any(
-      fun({Host, Modules}) ->
-	      lists:any(fun(Module) ->
-				use_cache(Module, Host)
-			end, Modules)
-      end, maps:to_list(HostModules)).
+    {Enabled, Disabled} =
+	maps:fold(
+	  fun(Host, Modules, Acc) ->
+		  lists:foldl(
+		    fun(Module, {True, False}) ->
+			    case use_cache(Module, Host) of
+				true ->
+				    {sets:add_element(Module, True), False};
+				false ->
+				    {True, sets:add_element(Module, False)}
+			    end
+		    end, Acc, Modules)
+	  end, {sets:new(), sets:new()}, HostModules),
+    {sets:to_list(Enabled), sets:to_list(sets:subtract(Disabled, Enabled))}.
 
 -spec use_cache(module(), binary()) -> boolean().
 use_cache(Mod, LServer) ->
@@ -799,6 +830,10 @@ cache_nodes(Mod, LServer) ->
 	true -> Mod:cache_nodes(LServer);
 	false -> ejabberd_cluster:get_nodes()
     end.
+
+-spec cache_tab(module()) -> atom().
+cache_tab(Mod) ->
+    list_to_atom(atom_to_list(Mod) ++ "_cache").
 
 %%%----------------------------------------------------------------------
 %%% Internal functions

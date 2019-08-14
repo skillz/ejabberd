@@ -1,4 +1,4 @@
-defmodule Ejabberd.Mixfile do
+defmodule Ejabberd.MixProject do
   use Mix.Project
 
   def project do
@@ -18,10 +18,10 @@ defmodule Ejabberd.Mixfile do
      aliases: [test: "ct"],
 
      # Configuration for using this as an umbrella child app.
-     build_path: "../../ebin",
-     config_path: "../../config/config.exs",
-     deps_path: "../../deps",  # TODO: might need to fix deps_include in the future.
-     lockfile: "../../mix.lock",
+     config_path: get_config_path(),
+     build_path: get_build_path(),
+     deps_path: get_deps_path(),
+     lockfile: get_lockfile(),
 
      # Coveralls specific configuration
      preferred_cli_env: [
@@ -43,7 +43,7 @@ defmodule Ejabberd.Mixfile do
   def application do
     [mod: {:ejabberd_app, []},
      applications: [:kernel, :stdlib, :sasl, :ssl],
-     included_applications: [:lager, :mnesia, :inets, :p1_utils, :cache_tab,
+     included_applications: [:logger, :mnesia, :inets, :p1_utils, :cache_tab,
                              :fast_tls, :stringprep, :fast_xml, :xmpp,
                              :stun, :fast_yaml, :esip, :jiffy, :p1_oauth2,
                              :base64url, :jose, :pkix, :os_mon]
@@ -165,6 +165,35 @@ defmodule Ejabberd.Mixfile do
     end
   end
 
+  # Check if we're in a mix umbrella or not to check for our configuration
+  def get_config_path do
+    if Mix.Project.umbrella?() do
+      "../../config/config.exs"
+    else
+      "config/config.exs"
+    end
+  end
+  def get_build_path do
+    if Mix.Project.umbrella?() do
+      "../../_build"
+    else
+      "_build"
+    end
+  end
+  def get_deps_path do
+    if Mix.Project.umbrella?() do
+      "../../deps"
+    else
+      "deps"
+    end
+  end
+  def get_lockfile do
+    if Mix.Project.umbrella?() do
+      "../../mix.lock"
+    else
+      "mix.lock"
+    end
+  end
 end
 
 defmodule Mix.Tasks.Compile.Asn1 do

@@ -1317,12 +1317,31 @@ set_affiliation(JID, Affiliation, StateData, Reason) ->
     Room = StateData#state.room,
     Host = StateData#state.host,
     Mod = gen_mod:db_mod(ServerHost, mod_muc),
-    case Mod:set_affiliation(ServerHost, Room, Host, JID, Affiliation, Reason) of
-	ok ->
-	    StateData;
-	{error, _} ->
-	    set_affiliation_fallback(JID, Affiliation, StateData, Reason)
-    end.
+    LUser = JID#jid.luser,
+    NewAffiliation = case {Affiliation, Reason} of
+    {outcast, <<"muted">>} ->
+        muted;
+    _ ->
+        Affiliation
+    end,
+    case NewAffiliation of
+    none ->
+        case ets_cache:lookup(user_affiliation_cache, LUser) of
+        {ok, ExistingAffiliation} ->
+            Mod:disable_affiliation(ServerHost, LUser);
+        _ ->
+            ok
+        end;
+    _ ->
+        case ets_cache:lookup(user_affiliation_cache, LUser) of
+        {ok, ExistingAffiliation} ->
+            Mod:disable_affiliation(ServerHost, LUser),
+            Mod:insert_affiliation(ServerHost, LUser, NewAffiliation);
+        _ ->
+            Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
+        end
+    end,
+    StateData.
 
 -spec set_affiliation_fallback(jid(), affiliation(), state(), binary()) -> state().
 set_affiliation_fallback(JID, Affiliation, StateData, Reason) ->
@@ -1380,11 +1399,11 @@ do_get_affiliation(JID, StateData) ->
     LUser = JID#jid.luser,
     ServerHost = StateData#state.server_host,
     Mod = gen_mod:db_mod(ServerHost, mod_muc),
-    case Mod:get_affiliation(ServerHost, Room, Host, LUser, LServer) of
-	{error, _} ->
-	    do_get_affiliation_fallback(JID, StateData);
-	{ok, Affiliation} ->
-	    Affiliation
+    case ets_cache:lookup(user_affiliation_cache, LUser) of
+    {ok, Affiliation} ->
+        Affiliation;
+    _ ->
+        none
     end.
 
 -spec do_get_affiliation_fallback(jid(), state()) -> affiliation().
@@ -1497,6 +1516,7 @@ get_default_role(Affiliation, StateData) ->
       admin -> moderator;
       member -> participant;
       outcast -> none;
+      muted -> visitor;
       none ->
 	  case (StateData#state.config)#config.members_only of
 	    true -> none;
@@ -1953,6 +1973,14 @@ add_new_user(From, Nick, Packet, StateData) ->
 		  {error, Err}
 	  end;
       {_, _, _, Role} ->
+      RoomJID = StateData#state.jid,
+      To = jid:replace_resource(RoomJID, Nick),
+      case Role of
+      visitor ->
+        set_role(To, visitor, StateData);
+      _ ->
+        ok
+      end,
 	  case check_password(ServiceAffiliation, Affiliation,
 			      Packet, From, StateData)
 	      of
@@ -2779,12 +2807,12 @@ process_item_change(Item, SD, UJID) ->
 			SD1 = set_affiliation(JID, none, SD),
 			send_update_presence(JID, Reason, SD1, SD),
 			maybe_send_affiliation(JID, none, SD1),
-			SD1
+			set_role(JID, participant, SD1)
 		end;
 	    {JID, affiliation, outcast, Reason} ->
 		send_kickban_presence(UJID, JID, Reason, 301, outcast, SD),
 		maybe_send_affiliation(JID, outcast, SD),
-		set_affiliation(JID, outcast, set_role(JID, none, SD), Reason);
+		set_affiliation(JID, outcast, set_role(JID, visitor, SD), Reason);
 	    {JID, affiliation, A, Reason} when (A == admin) or (A == owner) ->
 		SD1 = set_affiliation(JID, A, SD, Reason),
 		SD2 = set_role(JID, moderator, SD1),
@@ -2933,6 +2961,26 @@ can_change_ra(FAffiliation, _FRole, outcast, _TRole,
 	   (FAffiliation == admin) ->
     true;
 can_change_ra(FAffiliation, _FRole, outcast, _TRole,
+          affiliation, muted, _ServiceAf)
+    when (FAffiliation == owner) or
+       (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, _FRole, none, _TRole,
+          affiliation, muted, _ServiceAf)
+    when (FAffiliation == owner) or
+       (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, _FRole, muted, _TRole,
+          affiliation, none, _ServiceAf)
+    when (FAffiliation == owner) or
+       (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, _FRole, muted, _TRole,
+          affiliation, outcast, _ServiceAf)
+    when (FAffiliation == owner) or
+       (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, _FRole, outcast, _TRole,
 	      affiliation, member, _ServiceAf)
     when (FAffiliation == owner) or
 	   (FAffiliation == admin) ->
@@ -3020,6 +3068,16 @@ can_change_ra(FAffiliation, subscriber, _TAffiliation,
 	      participant, role, visitor, _ServiceAf)
     when (FAffiliation == owner) or
 	   (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, muted, _TAffiliation,
+          visitor, role, none, _ServiceAf)
+    when (FAffiliation == owner) or
+       (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, subscriber, _TAffiliation,
+          _, role, _, _ServiceAf)
+    when (FAffiliation == owner) or
+       (FAffiliation == admin) ->
     true;
 can_change_ra(FAffiliation, _FRole, _TAffiliation,
 	      participant, role, moderator, _ServiceAf)

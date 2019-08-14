@@ -456,8 +456,8 @@ acl:
   local: 
     user_regexp: ""
 define_macro: 
-  CERTFILE: "cert.pem"
-  CAFILE: "ca.pem"
+  CERTFILE: "@@certfile@@"
+  CAFILE: "@@cafile@@"
 language: "en"
 listen: 
   - 

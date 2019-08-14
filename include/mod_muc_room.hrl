@@ -69,7 +69,7 @@
 -type config() :: #config{}.
 
 -type role() :: moderator | participant | visitor | none.
--type affiliation() :: admin | member | outcast | owner | none.
+-type affiliation() :: admin | member | outcast | muted | owner | none.
 
 -record(user,
 {

@@ -474,7 +474,6 @@ process_iq_set(#iq{from = _From, to = To,
     end.
 
 push_item(To, OldItem, NewItem) ->
-    ?DEBUG("Inside of push arity 3.", []),
     #jid{luser = LUser, lserver = LServer} = To,
     Ver = case roster_versioning_enabled(LServer) of
 	      true -> roster_version(LServer, LUser);
@@ -488,7 +487,6 @@ push_item(To, OldItem, NewItem) ->
       end, ejabberd_sm:get_user_resources(LUser, LServer)).
 
 push_item(To, OldItem, NewItem, Ver) ->
-    ?DEBUG("Inside of push arity 4.", []),
     route_presence_change(To, OldItem, NewItem),
     IQ = #iq{type = set, to = To,
 	     from = jid:remove_resource(To),
@@ -499,39 +497,30 @@ push_item(To, OldItem, NewItem, Ver) ->
 
 -spec route_presence_change(jid(), #roster{}, #roster{}) -> ok.
 route_presence_change(From, OldItem, NewItem) ->
-    ?DEBUG("Inside of route_presence_change.", []),
     OldSub = OldItem#roster.subscription,
     NewSub = NewItem#roster.subscription,
     To = jid:make(NewItem#roster.jid),
     NewIsFrom = NewSub == both orelse NewSub == from,
     OldIsFrom = OldSub == both orelse OldSub == from,
     if NewIsFrom andalso not OldIsFrom ->
-    ?DEBUG("Inside of weird logic part.", []),
 	    case ejabberd_sm:get_session_pid(
 		   From#jid.luser, From#jid.lserver, From#jid.lresource) of
 		none ->
-    ?DEBUG("Not resending presence.", []),
 		    ok;
 		Pid ->
-    ?DEBUG("Resending presence.", []),
 		    ejabberd_c2s:resend_presence(Pid, To)
 	    end;
        OldIsFrom andalso not NewIsFrom ->
-    ?DEBUG("should we route?.", []),
 	    PU = #presence{from = From, to = To, type = unavailable},
 	    case ejabberd_hooks:run_fold(
 		   privacy_check_packet, allow,
 		   [From, PU, out]) of
 		deny ->
-    ?DEBUG("presendce denied by privacy list.", []),
 		    ok;
 		allow ->
-    ?DEBUG("routing presence of unavailable.", []),
 		    ejabberd_router:route(PU)
 	    end;
-       true ->
-    ?DEBUG("fallback behavior. Old: ~p New: ~p", []),
-	    ok
+       true -> ok
     end.
 
 ask_to_pending(subscribe) -> out;
@@ -555,7 +544,6 @@ transaction(LUser, LServer, LJIDs, F) ->
 -spec in_subscription(boolean(), presence()) -> boolean().
 in_subscription(_, #presence{from = JID, to = To,
 			     type = Type, status = Status}) ->
-    ?DEBUG("Inside of in_subscription.", []),
     #jid{user = User, server = Server} = To,
     Reason = if Type == subscribe -> xmpp:get_text(Status);
 		true -> <<"">>
@@ -573,7 +561,6 @@ process_subscription(Direction, User, Server, JID1,
     LUser = jid:nodeprep(User),
     LServer = jid:nameprep(Server),
     LJID = jid:tolower(jid:remove_resource(JID1)),
-    ?DEBUG("Inside of process_subscription.", []),
     F = fun () ->
 		Item = get_roster_item(LUser, LServer, LJID),
 		NewState = case Direction of
@@ -615,13 +602,9 @@ process_subscription(Direction, User, Server, JID1,
 	end,
     case transaction(LUser, LServer, [LJID], F) of
 	{atomic, {Push, AutoReply}} ->
-	    ?DEBUG("mod_roster atomic transaction.", []),
 	    case AutoReply of
-		none -> 
-            ?DEBUG("mod_roster auto reply is none.", []),
-                ok;
+		none -> ok;
 		_ ->
-            ?DEBUG("mod_roster atomic routing.", []),
 		    ejabberd_router:route(
 		      #presence{type = AutoReply,
 				from = jid:make(User, Server),
@@ -631,15 +614,12 @@ process_subscription(Direction, User, Server, JID1,
 		{push, OldItem, NewItem} ->
 		    if NewItem#roster.subscription == none,
 		       NewItem#roster.ask == in ->
-                ?DEBUG("mod_roster not pushing, subscription is none or ask is in.", []),
 			    ok;
 		       true ->
-                ?DEBUG("mod_roster pushing out sub to in sub", []),
 			    push_item(jid:make(User, Server), OldItem, NewItem)
 		    end,
 		    true;
 		none ->
-            ?DEBUG("mod_roster is not pushing to in subscription", []),
 		    false
 	    end;
 	_ ->

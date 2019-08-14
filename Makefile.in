@@ -198,7 +198,9 @@ copy-files:
 
 copy-files-sub: copy-files-sub2
 
-install: all copy-files
+install: all copy-files install-configuration
+
+install-configuration: 
 	#
 	# Configuration files
 	$(INSTALL) -d -m 750 $(G_USER) $(ETCDIR)
