@@ -2956,7 +2956,9 @@ can_change_ra(_FAffiliation, _FRole, owner, _TRole,
 can_change_ra(_FAffiliation, _FRole, _TAffiliation,
 	      _TRole, _RoleorAffiliation, _Value, owner) ->
     %% Nobody can decrease MUC admin's role/affiliation
-    false;
+    %% But because we allow users to create MUC rooms (DMs), and they must be owners to do this,
+    %% we must allow decreasing the affiliation of an owner in order to ban/mute users that have created DMs
+    true;
 can_change_ra(_FAffiliation, _FRole, TAffiliation,
 	      _TRole, affiliation, Value, _ServiceAf)
     when TAffiliation == Value ->
