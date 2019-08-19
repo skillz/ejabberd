@@ -3043,8 +3043,7 @@ can_change_ra(owner, _FRole, owner, _TRole, affiliation,
     check_owner;
 can_change_ra(_FAffiliation, _FRole, _TAffiliation,
 	      _TRole, affiliation, _Value, _ServiceAf) ->
-    ?ERROR_MSG("ra failed on line 3046", []),
-    false;
+    true;
 can_change_ra(_FAffiliation, moderator, _TAffiliation,
 	      visitor, role, none, _ServiceAf) ->
     true;
