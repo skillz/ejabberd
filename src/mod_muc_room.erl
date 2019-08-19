@@ -3043,6 +3043,9 @@ can_change_ra(owner, _FRole, owner, _TRole, affiliation,
     check_owner;
 can_change_ra(_FAffiliation, _FRole, _TAffiliation,
 	      _TRole, affiliation, _Value, _ServiceAf) ->
+	% Originally, this returned false
+	% We require this to return true in order to ban users that have created DMs
+	% and are owners of their own room
     true;
 can_change_ra(_FAffiliation, moderator, _TAffiliation,
 	      visitor, role, none, _ServiceAf) ->
