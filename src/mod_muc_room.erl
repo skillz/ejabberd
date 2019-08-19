@@ -3043,6 +3043,7 @@ can_change_ra(owner, _FRole, owner, _TRole, affiliation,
     check_owner;
 can_change_ra(_FAffiliation, _FRole, _TAffiliation,
 	      _TRole, affiliation, _Value, _ServiceAf) ->
+    ?ERROR_MSG("ra failed on line 3046", []),
     false;
 can_change_ra(_FAffiliation, moderator, _TAffiliation,
 	      visitor, role, none, _ServiceAf) ->
@@ -3098,24 +3099,28 @@ can_change_ra(FAffiliation, _FRole, _TAffiliation,
     true;
 can_change_ra(_FAffiliation, _FRole, owner, moderator,
 	      role, visitor, _ServiceAf) ->
+    ?ERROR_MSG("ra failed on line 3102", []),
     false;
 can_change_ra(owner, _FRole, _TAffiliation, moderator,
 	      role, visitor, _ServiceAf) ->
     true;
 can_change_ra(_FAffiliation, _FRole, admin, moderator,
 	      role, visitor, _ServiceAf) ->
+    ?ERROR_MSG("ra failed on line 3109", []),
     false;
 can_change_ra(admin, _FRole, _TAffiliation, moderator,
 	      role, visitor, _ServiceAf) ->
     true;
 can_change_ra(_FAffiliation, _FRole, owner, moderator,
 	      role, participant, _ServiceAf) ->
+    ?ERROR_MSG("ra failed on line 3116", []),
     false;
 can_change_ra(owner, _FRole, _TAffiliation, moderator,
 	      role, participant, _ServiceAf) ->
     true;
 can_change_ra(_FAffiliation, _FRole, admin, moderator,
 	      role, participant, _ServiceAf) ->
+    ?ERROR_MSG("ra failed on line 3123", []),
     false;
 can_change_ra(admin, _FRole, _TAffiliation, moderator,
 	      role, participant, _ServiceAf) ->
@@ -3140,6 +3145,7 @@ can_change_ra(admin, subscriber, TAffiliation,
     true;
 can_change_ra(_FAffiliation, _FRole, _TAffiliation,
 	      _TRole, role, _Value, _ServiceAf) ->
+    ?ERROR_MSG("ra failed on line 3148", []),
     false.
 
 -spec send_kickban_presence(undefined | jid(), jid(), binary(),
