@@ -1315,30 +1315,35 @@ set_affiliation(JID, Affiliation,
 set_affiliation(JID, Affiliation, StateData, Reason) ->
     ServerHost = StateData#state.server_host,
     Room = StateData#state.room,
-    Host = StateData#state.host,
-    Mod = gen_mod:db_mod(ServerHost, mod_muc),
-    LUser = JID#jid.luser,
-    NewAffiliation = case {Affiliation, Reason} of
-    {outcast, <<"muted">>} ->
-        muted;
-    _ ->
-        Affiliation
-    end,
-    case NewAffiliation of
-    none ->
-        case ets_cache:lookup(user_affiliation_cache, LUser) of
-        {ok, ExistingAffiliation} ->
-            Mod:disable_affiliation(ServerHost, LUser);
+    case lists:member($-, binary_to_list(Room)) of
+    true ->
+        set_affiliation_fallback(JID, Affiliation, StateData, Reason);
+    false ->
+        Host = StateData#state.host,
+        Mod = gen_mod:db_mod(ServerHost, mod_muc),
+        LUser = JID#jid.luser,
+        NewAffiliation = case {Affiliation, Reason} of
+        {outcast, <<"muted">>} ->
+            muted;
         _ ->
-            ok
-        end;
-    _ ->
-        case ets_cache:lookup(user_affiliation_cache, LUser) of
-        {ok, ExistingAffiliation} ->
-            Mod:disable_affiliation(ServerHost, LUser),
-            Mod:insert_affiliation(ServerHost, LUser, NewAffiliation);
+            Affiliation
+        end,
+        case NewAffiliation of
+        none ->
+            case ets_cache:lookup(user_affiliation_cache, LUser) of
+            {ok, ExistingAffiliation} ->
+                Mod:disable_affiliation(ServerHost, LUser);
+            _ ->
+                ok
+            end;
         _ ->
-            Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
+            case ets_cache:lookup(user_affiliation_cache, LUser) of
+            {ok, ExistingAffiliation} ->
+                Mod:disable_affiliation(ServerHost, LUser),
+                Mod:insert_affiliation(ServerHost, LUser, NewAffiliation);
+            _ ->
+                Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
+            end
         end
     end,
     StateData.
@@ -1394,16 +1399,21 @@ do_get_affiliation(JID, #state{config = #config{persistent = false}} = StateData
     do_get_affiliation_fallback(JID, StateData);
 do_get_affiliation(JID, StateData) ->
     Room = StateData#state.room,
-    Host = StateData#state.host,
-    LServer = JID#jid.lserver,
-    LUser = JID#jid.luser,
-    ServerHost = StateData#state.server_host,
-    Mod = gen_mod:db_mod(ServerHost, mod_muc),
-    case ets_cache:lookup(user_affiliation_cache, LUser) of
-    {ok, Affiliation} ->
-        Affiliation;
-    _ ->
-        none
+    case lists:member($-, binary_to_list(Room)) of
+    true ->
+        do_get_affiliation_fallback(JID, StateData);
+    false ->
+        Host = StateData#state.host,
+        LServer = JID#jid.lserver,
+        LUser = JID#jid.luser,
+        ServerHost = StateData#state.server_host,
+        Mod = gen_mod:db_mod(ServerHost, mod_muc),
+        case ets_cache:lookup(user_affiliation_cache, LUser) of
+        {ok, Affiliation} ->
+            Affiliation;
+        _ ->
+            none
+        end
     end.
 
 -spec do_get_affiliation_fallback(jid(), state()) -> affiliation().
@@ -2945,8 +2955,10 @@ can_change_ra(_FAffiliation, _FRole, owner, _TRole,
     true;
 can_change_ra(_FAffiliation, _FRole, _TAffiliation,
 	      _TRole, _RoleorAffiliation, _Value, owner) ->
-    %% Nobody can decrease MUC admin's role/affiliation
-    false;
+    %% Originally, nobody could decrease MUC admin's role/affiliation
+    %% But because we allow users to create MUC rooms (DMs), and they must be owners to do this,
+    %% we must allow decreasing the affiliation of an owner in order to ban/mute users that have created DMs
+    true;
 can_change_ra(_FAffiliation, _FRole, TAffiliation,
 	      _TRole, affiliation, Value, _ServiceAf)
     when TAffiliation == Value ->
@@ -3031,7 +3043,10 @@ can_change_ra(owner, _FRole, owner, _TRole, affiliation,
     check_owner;
 can_change_ra(_FAffiliation, _FRole, _TAffiliation,
 	      _TRole, affiliation, _Value, _ServiceAf) ->
-    false;
+    % Originally, this returned false
+    % We require this to return true in order to ban users that have created DMs
+    % and are owners of their own room
+    true;
 can_change_ra(_FAffiliation, moderator, _TAffiliation,
 	      visitor, role, none, _ServiceAf) ->
     true;
