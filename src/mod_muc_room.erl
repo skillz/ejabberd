@@ -1330,20 +1330,10 @@ set_affiliation(JID, Affiliation, StateData, Reason) ->
         end,
         case NewAffiliation of
         none ->
-            case ets_cache:lookup(user_affiliation_cache, LUser) of
-            {ok, ExistingAffiliation} ->
-                Mod:disable_affiliation(ServerHost, LUser);
-            _ ->
-                ok
-            end;
+            Mod:disable_affiliation(ServerHost, LUser);
         _ ->
-            case ets_cache:lookup(user_affiliation_cache, LUser) of
-            {ok, ExistingAffiliation} ->
-                Mod:disable_affiliation(ServerHost, LUser),
-                Mod:insert_affiliation(ServerHost, LUser, NewAffiliation);
-            _ ->
-                Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
-            end
+            Mod:disable_affiliation(ServerHost, LUser),
+            Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
         end
     end,
     StateData.
@@ -1408,12 +1398,7 @@ do_get_affiliation(JID, StateData) ->
         LUser = JID#jid.luser,
         ServerHost = StateData#state.server_host,
         Mod = gen_mod:db_mod(ServerHost, mod_muc),
-        case ets_cache:lookup(user_affiliation_cache, LUser) of
-        {ok, Affiliation} ->
-            Affiliation;
-        _ ->
-            none
-        end
+        Mod:get_affiliation(ServerHost, LUser)
     end.
 
 -spec do_get_affiliation_fallback(jid(), state()) -> affiliation().
