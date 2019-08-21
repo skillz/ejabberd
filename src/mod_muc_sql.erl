@@ -39,8 +39,8 @@
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
 	 get_subscribed_rooms/3]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
-	 get_affiliations/3, get_affiliations/1, search_affiliation/4,
-	 disable_affiliation/2, insert_affiliation/3]).
+	 get_affiliations/3, get_affiliations/1, get_affiliation/2,
+	 search_affiliation/4, disable_affiliation/2, insert_affiliation/3]).
 -export([decode_affiliation/1]).
 
 -include("jid.hrl").
@@ -257,7 +257,6 @@ disable_affiliation(Host, LUser) ->
         ?SQL("update user_affiliation "
         "set version = version + 1, enabled = 0, last_updated = now() "
         "where nick = %(LUser)s and enabled = 1")),
-    ets_cache:delete(user_affiliation_cache, LUser),
     ok.
 
 insert_affiliation(Host, LUser, Affiliation) ->
@@ -266,8 +265,18 @@ insert_affiliation(Host, LUser, Affiliation) ->
         ?SQL("insert into user_affiliation "
         "(version, enabled, nick, affiliation, date_created, last_updated) "
         "values (0, 1, %(LUser)s, %(AffiliationBinary)s, now(), now())")),
-    ets_cache:update(user_affiliation_cache, LUser, {ok, Affiliation}, fun() -> ok end),
     ok.
+
+get_affiliation(Host, LUser) ->
+    case ejabberd_sql:sql_query(Host,
+        ?SQL("select @(affiliation)s "
+             "from user_affiliation "
+             "where nick = %(LUser)s and enabled = 1")) of
+    {selected, [{AffiliationBinary}]} ->
+        decode_affiliation(AffiliationBinary);
+    _ ->
+        none
+    end.
 
 set_affiliation(_ServerHost, _Room, _Host, _JID, _Affiliation, _Reason) ->
     {error, not_implemented}.
