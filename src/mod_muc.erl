@@ -252,14 +252,6 @@ init([Host, Opts]) ->
 %	      load_permanent_rooms(MyHost, Host, Access, HistorySize,
 %				   RoomShaper, QueueType)
       end, MyHosts),
-    % Create a new ets cache and load it with data from the user_affiliation sql table
-    CacheOpts = [{max_size, infinity}, {cache_missed, false}, {life_time, infinity}],
-    ets_cache:new(user_affiliation_cache, CacheOpts),
-    AddToCache = fun(UserAffiliation) ->
-        {Nick, Affiliation} = UserAffiliation,
-        ets_cache:insert(user_affiliation_cache, Nick, Mod:decode_affiliation(Affiliation))
-    end,
-    lists:foreach(AddToCache, Mod:get_affiliations(Host)),
     {ok, State}.
 
 handle_call(stop, _From, State) ->
