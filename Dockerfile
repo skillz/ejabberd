@@ -1,45 +1,53 @@
-FROM phusion/baseimage:0.9.22
+FROM alpine:3.10
+FROM alpine:3.9
 
-# Use baseimage-docker's init system.
-CMD ["/sbin/my_init"]
+ARG CHATPATH=/tmp/ejabberd
+ARG CHATBUILDPATH=$CHATPATH/build
+ARG INSTALLPATH=/opt/ejabberd
+ARG MODULEPATH=$CHATBUILDPATH/.ejabberd-modules/
 
-# install dependencies
-RUN apt-get update \
-    && apt-get install -y \
-    make \
-    gcc \
-    expat \
-    wget \
-    libyaml-dev \
-    erlang \
-    erlang-p1-mysql \
-    openssl \
-    elixir \
-    zlib1g-dev \
-    libpng-dev \
-    libexpat-dev \
-    git \
-    automake \
-    libssl-dev \
-    g++
+ENV MIX_ENV prod
 
-# install ejabberd
-ARG EJABBERD_HOME=/root/ejabberd
-ARG MY_EJABBERD_HOME=/opt/ejabberd
+# Install required dependencies
+# RUN apk upgrade --update musl \
+#  && apk add build-base git zlib-dev openssl-dev yaml-dev expat-dev sqlite-dev \
+#             gd-dev jpeg-dev libpng-dev libwebp-dev autoconf automake bash \
+#             elixir erlang-dev erlang-crypto erlang-eunit erlang-mnesia erlang-erts erlang-hipe \
+#             erlang-tools erlang-os-mon erlang-syntax-tools erlang-parsetools \
+#             erlang-runtime-tools erlang-reltool file curl \
+#  && rm -rf /var/cache/apk/*
 
-RUN mkdir $EJABBERD_HOME
-RUN git clone https://github.com/skillz/ejabberd.git --branch development $EJABBERD_HOME
-COPY ejabberd.yml $EJABBERD_HOME/config/ejabberd.yml
-RUN cd $EJABBERD_HOME && ./autogen.sh
-RUN cd $EJABBERD_HOME && ./configure --prefix=$MY_EJABBERD_HOME --enable-elixir --enable-odbc --enable-mysql
-RUN cd $EJABBERD_HOME && make && make install
-COPY ejabberd.yml $MY_EJABBERD_HOME/etc/ejabberd/ejabberd.yml
+RUN apk upgrade --update musl \
+ && apk add build-base git zlib-dev openssl-dev yaml-dev expat-dev sqlite-dev \
+            gd-dev jpeg-dev libpng-dev libwebp-dev autoconf automake bash \
+            elixir= erlang-dev file curl \
+ && rm -rf /var/cache/apk/*
 
-# wrapper to start ejabberd
-ADD ./run.sh /sbin/run
-COPY 100_create_default_users.sh $EJABBERD_HOME
-ENTRYPOINT ["run"]
+# Install ejabberd
+COPY . $CHATPATH
 
-# Clean up APT.
-RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+WORKDIR $CHATPATH
+RUN ./autogen.sh
+RUN ./configure \
+ --enable-elixir \
+ --prefix=$CHATBUILDPATH \
+ --enable-mysql
+RUN make
+RUN make install
+RUN sed -i "s+$CHATBUILDPATH+$INSTALLPATH+g" $CHATBUILDPATH/sbin/ejabberdctl
 
+# TODO Install modules
+RUN mix local.hex --force
+RUN mix local.rebar --force
+
+# Move ejabberd to the final installation location
+WORKDIR $INSTALLPATH
+RUN cp -R $CHATBUILDPATH/* .
+RUN rm -rf $CHATPATH
+
+# COPY docker/ejabberd.yml /etc/ejabberd/
+
+EXPOSE 1883 4369-4399 5222 5269 5280 5443
+
+# ENTRYPOINT ["/opt/ejabberd/sbin/ejabberdctl"]
+# CMD ["foreground"]
