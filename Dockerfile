@@ -20,7 +20,7 @@ ENV MIX_ENV prod
 RUN apk upgrade --update musl \
  && apk add build-base git zlib-dev openssl-dev yaml-dev expat-dev sqlite-dev \
             gd-dev jpeg-dev libpng-dev libwebp-dev autoconf automake bash \
-            elixir= erlang-dev file curl \
+            elixir erlang-dev file curl \
  && rm -rf /var/cache/apk/*
 
 # Install ejabberd
