@@ -1,49 +1,52 @@
-# FROM alpine:3.10
-FROM alpine:3.9
+FROM ubuntu:19.10
 
 ARG CHATPATH=/tmp/ejabberd
 ARG CHATBUILDPATH=$CHATPATH/build
 ARG INSTALLPATH=/opt/ejabberd
 ARG MODULEPATH=$CHATBUILDPATH/.ejabberd-modules/
 
+ENV DEBIAN_FRONTEND=noninteractive
 ENV MIX_ENV prod
 
 # Install required dependencies
-# RUN apk upgrade --update musl \
-#  && apk add build-base git zlib-dev openssl-dev yaml-dev expat-dev sqlite-dev \
-#             gd-dev jpeg-dev libpng-dev libwebp-dev autoconf automake bash \
-#             elixir erlang-dev erlang-crypto erlang-eunit erlang-mnesia erlang-erts erlang-hipe \
-#             erlang-tools erlang-os-mon erlang-syntax-tools erlang-parsetools \
-#             erlang-runtime-tools erlang-reltool file curl \
-#  && rm -rf /var/cache/apk/*
+## Just updates
+RUN apt-get update && apt-get upgrade -y
+## Everything else
+# RUN apt-get update && apt-get install git -y
+# RUN apt-get update && apt-get install make -y
+# RUN apt-get update && apt-get install automake -y
+# RUN apt-get update && apt-get install autoconf -y
+# RUN apt-get update && apt-get install g++ -y
+# RUN apt-get update && apt-get install gcc -y
+# RUN apt-get update && apt-get install build-essential -y
+# RUN apt-get update && apt-get install expat -y
+# RUN apt-get update && apt-get install libssl-dev -y
+# RUN apt-get update && apt-get install libyaml-dev -y
+# RUN apt-get update && apt-get install rebar -y
+# RUN apt-get update && apt-get install zlib1g-dev -y
+# RUN apt-get update && apt-get upgrade -y
 
-RUN apk upgrade --update musl \
- && apk add build-base git zlib-dev openssl-dev yaml-dev expat-dev sqlite-dev \
-            gd-dev jpeg-dev libpng-dev libwebp-dev autoconf automake bash \
-            elixir erlang-dev file curl \
- && rm -rf /var/cache/apk/*
+WORKDIR /
+RUN apt-get update && apt-get install elixir expat g++ gcc libexpat-dev libpng-dev libssl-dev libyaml-dev zlib1g-dev -y
+
+WORKDIR /tmp/erlang
+RUN apt-get update && apt-get install wget -y
+RUN apt-get update && apt-get install gnupg gnupg1 gnupg2 -y
+RUN wget https://packages.erlang-solutions.com/erlang-solutions_1.0_all.deb
+RUN dpkg -i erlang-solutions_1.0_all.deb
+RUN wget https://packages.erlang-solutions.com/ubuntu/erlang_solutions.asc
+RUN apt-key add erlang_solutions.asc
+RUN apt-get update && apt-get install esl-erlang -y
 
 # Install ejabberd
-COPY . $CHATPATH
-
-WORKDIR $CHATPATH
-RUN ./autogen.sh
-RUN ./configure \
- --enable-elixir \
- --prefix=$CHATBUILDPATH \
- --enable-mysql
-RUN make
-RUN make install
-RUN sed -i "s+$CHATBUILDPATH+$INSTALLPATH+g" $CHATBUILDPATH/sbin/ejabberdctl
-
-# TODO Install modules
-RUN mix local.hex --force
-RUN mix local.rebar --force
+WORKDIR $CHATBUILDPATH
+COPY skillz-ejabberd-dev_0.3.174_amd64.deb .
+RUN dpkg -i skillz-ejabberd-dev_0.3.174_amd64.deb
 
 # Move ejabberd to the final installation location
-WORKDIR $INSTALLPATH
-RUN cp -R $CHATBUILDPATH/* .
-RUN rm -rf $CHATPATH
+# WORKDIR $INSTALLPATH
+# RUN cp -R $CHATBUILDPATH/* .
+# RUN rm -rf $CHATPATH
 
 # COPY docker/ejabberd.yml /etc/ejabberd/
 
