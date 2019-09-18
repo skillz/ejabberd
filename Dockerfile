@@ -32,19 +32,31 @@ WORKDIR $CHATBUILDPATH
 COPY skillz-ejabberd-dev_${VERSION}_amd64.deb .
 RUN dpkg -i skillz-ejabberd-dev_0.3.174_amd64.deb
 
-# RUN apt-get install erlang-p1-iconv -y
+# Install rebar
+WORKDIR /
+RUN wget https://s3.amazonaws.com/rebar3/rebar3 -O /usr/bin/rebar3
+RUN chmod +x /usr/bin/rebar3
+
+# Install iconv library
+WORKDIR /tmp/iconv
+RUN wget https://github.com/processone/iconv/archive/1.0.10.tar.gz
+RUN tar xvzf 1.0.10.tar.gz
+WORKDIR /tmp/iconv/iconv-1.0.10
+RUN rebar3 compile
+WORKDIR /tmp/iconv/iconv-1.0.10/_build/default/lib/
+RUN ls -la iconv
+RUN mkdir /usr/lib/erlang/lib/iconv-1.0.10
+RUN cp -Lr iconv/ebin iconv/priv iconv/src /usr/lib/erlang/lib/iconv-1.0.10
+RUN mkdir /usr/lib/erlang/lib/p1_utils_iconv-1.0.10
+RUN cp -Lr p1_utils/LICENSE.txt p1_utils/README.md p1_utils/ebin p1_utils/include p1_utils/src /usr/lib/erlang/lib/p1_utils_iconv-1.0.10
 
 # Set up ejabberd user
 RUN useradd -s /bin/bash -M -d /opt/ejabberd-${VERSION} ejabberd
 RUN chown -R ejabberd /opt/ejabberd-${VERSION}
-# RUN chmod -R u+rX /opt/ejabberd-${VERSION}
-
-RUN cp -r /opt/ejabberd-${VERSION}/.ejabberd-modules/sources/mod_pottymouth/deps/iconv /usr/lib/erlang/lib
 
 USER ejabberd
 WORKDIR /opt/ejabberd-${VERSION}
 
-# ENV HOME /opt/ejabberd-0.3.174
 ENV EJABBERD_HOME /opt/ejabberd-${VERSION}
 ENV CONTRIB_MODULES_PATH /opt/ejabberd-${VERSION}/.ejabberd_modules
 
@@ -55,5 +67,5 @@ ENV LC_ALL=C.UTF-8 \
 
 EXPOSE 1883 4369-4399 5222 5269 5280 5443
 
-# ENTRYPOINT ["./sbin/ejabberdctl"]
-# CMD ["foreground"]
+ENTRYPOINT ["./sbin/ejabberdctl"]
+CMD ["foreground"]
