@@ -1,4 +1,4 @@
-FROM ubuntu:19.10
+FROM ubuntu:14.04
 
 ARG CHATPATH=/tmp/ejabberd
 ARG CHATBUILDPATH=$CHATPATH/build
@@ -27,16 +27,17 @@ RUN apt-get update && apt-get upgrade -y
 # RUN apt-get update && apt-get upgrade -y
 
 WORKDIR /
-RUN apt-get update && apt-get install elixir expat g++ gcc libexpat-dev libpng-dev libssl-dev libyaml-dev zlib1g-dev -y
+RUN apt-get update && apt-get install expat g++ gcc libexpat-dev libpng-dev libssl-dev libyaml-dev zlib1g-dev -y
 
 WORKDIR /tmp/erlang
 RUN apt-get update && apt-get install wget -y
-RUN apt-get update && apt-get install gnupg gnupg1 gnupg2 -y
+RUN apt-get update && apt-get install gnupg -y
 RUN wget https://packages.erlang-solutions.com/erlang-solutions_1.0_all.deb
 RUN dpkg -i erlang-solutions_1.0_all.deb
 RUN wget https://packages.erlang-solutions.com/ubuntu/erlang_solutions.asc
 RUN apt-key add erlang_solutions.asc
 RUN apt-get update && apt-get install esl-erlang -y
+RUN apt-get install elixir -y
 
 # Install ejabberd
 WORKDIR $CHATBUILDPATH
