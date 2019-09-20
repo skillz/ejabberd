@@ -54,12 +54,35 @@ FROM alpine AS runtime
 
 # Install required dependencies
 RUN apk upgrade --update musl \
-    && apk add build-base zlib openssl yaml expat sqlite sqlite-libs \
-        gd jpeg libpng libwebp \
-        elixir erlang-dev erlang-crypto erlang-eunit erlang-mnesia erlang-erts erlang-hipe \
-        erlang-tools erlang-os-mon erlang-syntax-tools erlang-parsetools \
-        erlang-runtime-tools erlang-reltool \
-    && rm -rf /var/cache/apk/*
+ && apk add \
+    expat \
+    gd \
+    jpeg \
+    libgd \
+    libpng \
+    libstdc++ \
+    libwebp \
+    ncurses-libs \
+    openssl \
+    sqlite \
+    sqlite-libs \
+    unixodbc \
+    yaml \
+    zlib \
+    elixir \
+    erlang-dev \
+    erlang-crypto \
+    erlang-eunit \
+    erlang-mnesia \
+    erlang-erts \
+    erlang-hipe \
+    erlang-tools \
+    erlang-os-mon \
+    erlang-syntax-tools \
+    erlang-parsetools \
+    erlang-runtime-tools \
+    erlang-reltool \
+ && rm -rf /var/cache/apk/*
 
 # Install iconv erlang/elixir library
 COPY --from=builder /usr/lib/erlang/lib/iconv-* /usr/lib/erlang/lib/
