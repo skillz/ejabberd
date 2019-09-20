@@ -52,3 +52,4 @@ XmppAddr.hrl
 mix.lock
 ejabberd.iml
 *log/
+.ejabberd_modules
