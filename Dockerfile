@@ -49,6 +49,27 @@ RUN ./autogen.sh \
 RUN mix local.hex --force \
     && mix local.rebar --force
 
+# Module push skillz
+WORKDIR /opt/chat-service/.ejabberd-modules/sources
+COPY .ejabberd_modules/sources/mod_push_skillz mod_push_skillz
+WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_push_skillz
+RUN mix deps.get \
+    && mix module_install ModPushSkillz
+
+# Module pottymouth
+WORKDIR /opt/chat-service/.ejabberd-modules/sources
+COPY .ejabberd_modules/sources/mod_pottymouth mod_pottymouth
+WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_pottymouth
+RUN mix deps.get \
+    && mix module_install ModPottymouth
+
+# Module beam stats
+WORKDIR /opt/chat-service/.ejabberd-modules/sources
+COPY .ejabberd_modules/sources/mod_beam_stats mod_beam_stats
+WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_beam_stats
+RUN mix deps.get \
+    && mix module_install ModBeamStats
+
 
 FROM alpine AS runtime
 
