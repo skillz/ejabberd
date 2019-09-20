@@ -10,11 +10,37 @@ ENV MIX_ENV prod
 
 # Install required dependencies from package manager
 RUN apk upgrade --update musl \
-    && apk add build-base git zlib-dev openssl-dev yaml-dev expat-dev sqlite-dev \
-        gd-dev jpeg-dev libpng-dev libwebp-dev autoconf automake bash \
-        elixir erlang-dev erlang-crypto erlang-eunit erlang-mnesia erlang-erts erlang-hipe \
-        erlang-tools erlang-os-mon erlang-syntax-tools erlang-parsetools \
-        erlang-runtime-tools erlang-reltool file curl wget \
+    && apk add \
+        build-base \
+        git \
+        zlib-dev \
+        openssl-dev \
+        yaml-dev \
+        expat-dev \
+        sqlite-dev \
+        gd-dev \
+        jpeg-dev \
+        libpng-dev \
+        libwebp-dev \
+        autoconf \
+        automake \
+        bash \
+        elixir \
+        erlang-dev \
+        erlang-crypto \
+        erlang-eunit \
+        erlang-mnesia \
+        erlang-erts \
+        erlang-hipe \
+        erlang-tools \
+        erlang-os-mon \
+        erlang-syntax-tools \
+        erlang-parsetools \
+        erlang-runtime-tools \
+        erlang-reltool \
+        file \
+        curl \
+        wget \
     && rm -rf /var/cache/apk/*
 
 # Install rebar
