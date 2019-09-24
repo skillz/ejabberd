@@ -5,8 +5,9 @@ RUN addgroup ejabberd -g 9000 \
 
 FROM alpine AS builder
 
+ARG REBAR_VERSION=2.6.4
 ARG ICONV_VERSION=1.0.10
-ENV MIX_ENV prod
+ENV MIX_ENV dev
 
 # Install required dependencies from package manager
 RUN apk upgrade --update musl \
@@ -30,10 +31,15 @@ RUN apk upgrade --update musl \
         wget \
     && rm -rf /var/cache/apk/*
 
-# Install rebar
+# Install rebar3
 WORKDIR /
-RUN wget https://s3.amazonaws.com/rebar3/rebar3 -O /usr/bin/rebar3
-RUN chmod +x /usr/bin/rebar3
+RUN wget https://s3.amazonaws.com/rebar3/rebar3 -O /usr/bin/rebar3 \
+    && chmod +x /usr/bin/rebar3
+
+# Install rebar (now deprecated)
+WORKDIR /tmp/rebar
+RUN wget https://github.com/rebar/rebar/wiki/rebar -O /usr/bin/rebar \
+    && chmod +x /usr/bin/rebar
 
 # Build iconv erlang/elixir library
 WORKDIR /tmp/iconv
@@ -58,9 +64,31 @@ RUN ./autogen.sh \
         --enable-mysql \
     && make && make install
 
-# TODO Build chat service modules
+# Build chat service modules
+RUN mkdir -p /opt/chat-service/.ejabberd-modules/sources
 RUN mix local.hex --force \
     && mix local.rebar --force
+
+# Module push skillz
+WORKDIR /opt/chat-service/.ejabberd-modules/sources
+COPY .ejabberd_modules/sources/mod_push_skillz mod_push_skillz
+WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_push_skillz
+RUN mix deps.get \
+    && mix module_install ModPushSkillz
+
+# Module pottymouth
+WORKDIR /opt/chat-service/.ejabberd-modules/sources
+COPY .ejabberd_modules/sources/mod_pottymouth mod_pottymouth
+WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_pottymouth
+RUN mix deps.get \
+    && mix module_install ModPottymouth
+
+# Module beam stats
+WORKDIR /opt/chat-service/.ejabberd-modules/sources
+COPY .ejabberd_modules/sources/mod_beam_stats mod_beam_stats
+WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_beam_stats
+RUN mix deps.get \
+    && mix module_install ModBeamStats
 
 FROM alpine AS runtime
 
