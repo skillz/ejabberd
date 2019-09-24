@@ -1,4 +1,4 @@
-FROM alpine:3.9 AS alpine
+FROM elixir:1.8-otp-22-alpine AS alpine
 RUN addgroup ejabberd -g 9000 \
     && adduser -D -G ejabberd ejabberd -u 9000
 
@@ -25,19 +25,6 @@ RUN apk upgrade --update musl \
         autoconf \
         automake \
         bash \
-        elixir \
-        erlang-dev \
-        erlang-crypto \
-        erlang-eunit \
-        erlang-mnesia \
-        erlang-erts \
-        erlang-hipe \
-        erlang-tools \
-        erlang-os-mon \
-        erlang-syntax-tools \
-        erlang-parsetools \
-        erlang-runtime-tools \
-        erlang-reltool \
         file \
         curl \
         wget \
@@ -55,10 +42,10 @@ RUN wget https://github.com/processone/iconv/archive/${ICONV_VERSION}.tar.gz \
 WORKDIR /tmp/iconv/iconv-${ICONV_VERSION}
 RUN rebar3 compile
 WORKDIR /tmp/iconv/iconv-${ICONV_VERSION}/_build/default/lib/
-RUN mkdir /usr/lib/erlang/lib/iconv-${ICONV_VERSION} \
-    && cp -Lr iconv/ebin iconv/priv iconv/src /usr/lib/erlang/lib/iconv-${ICONV_VERSION} \
-    && mkdir /usr/lib/erlang/lib/p1_utils_iconv-${ICONV_VERSION} \
-    && cp -Lr p1_utils/LICENSE.txt p1_utils/README.md p1_utils/ebin p1_utils/include p1_utils/src /usr/lib/erlang/lib/p1_utils_iconv-${ICONV_VERSION}
+RUN mkdir /usr/local/lib/erlang/lib/iconv-${ICONV_VERSION} \
+    && cp -Lr iconv/ebin iconv/priv iconv/src /usr/local/lib/erlang/lib/iconv-${ICONV_VERSION} \
+    && mkdir /usr/local/lib/erlang/lib/p1_utils_iconv-${ICONV_VERSION} \
+    && cp -Lr p1_utils/LICENSE.txt p1_utils/README.md p1_utils/ebin p1_utils/include p1_utils/src /usr/local/lib/erlang/lib/p1_utils_iconv-${ICONV_VERSION}
 
 # Build chat service
 COPY . /tmp/chat-service
@@ -94,24 +81,11 @@ RUN apk upgrade --update musl \
     unixodbc \
     yaml \
     zlib \
-    elixir \
-    erlang-dev \
-    erlang-crypto \
-    erlang-eunit \
-    erlang-mnesia \
-    erlang-erts \
-    erlang-hipe \
-    erlang-tools \
-    erlang-os-mon \
-    erlang-syntax-tools \
-    erlang-parsetools \
-    erlang-runtime-tools \
-    erlang-reltool \
  && rm -rf /var/cache/apk/*
 
 # Install iconv erlang/elixir library
-COPY --from=builder /usr/lib/erlang/lib/iconv-* /usr/lib/erlang/lib/
-COPY --from=builder /usr/lib/erlang/lib/p1_utils_iconv-* /usr/lib/erlang/lib/
+COPY --from=builder /usr/local/lib/erlang/lib/iconv-* /usr/local/lib/erlang/lib/
+COPY --from=builder /usr/local/lib/erlang/lib/p1_utils_iconv-* /usr/local/lib/erlang/lib/
 
 # Install chat service
 WORKDIR /opt/chat-service
