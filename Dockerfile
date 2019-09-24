@@ -36,7 +36,8 @@ WORKDIR /
 RUN wget https://s3.amazonaws.com/rebar3/rebar3 -O /usr/bin/rebar3 \
     && chmod +x /usr/bin/rebar3
 
-# Install rebar (now deprecated)
+# Install rebar (now deprecated in favor of rebar3)
+# iconv compilation can use rebar3 but modules explicitly use rebar
 WORKDIR /tmp/rebar
 RUN wget https://github.com/rebar/rebar/wiki/rebar -O /usr/bin/rebar \
     && chmod +x /usr/bin/rebar
@@ -89,6 +90,9 @@ COPY .ejabberd_modules/sources/mod_beam_stats mod_beam_stats
 WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_beam_stats
 RUN mix deps.get \
     && mix module_install ModBeamStats
+
+# Clean up chat service module sources
+RUN rm -rf /opt/chat-service/.ejabberd-modules/sources
 
 FROM alpine AS runtime
 
