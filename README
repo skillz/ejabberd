@@ -1,6 +1,6 @@
 # Ejabberd Skillz Fork
 
-- See [ejabberd original](https://github.com/processone/ejabberd) for information about the original.
+- See [ejabberd original](https://github.com/processone/ejabberd) for information about the original; it's recommended that you use it instead
 
 ## Staging/Produciton troubleshooting guide
 
@@ -72,3 +72,4 @@ make && sudo make install
 - Admins can now re-create rooms.  See [this](https://github.com/skillz/ejabberd/pull/33) PR.
 - A new SQL table is created for subscriptions.  Subscriptions used to only reside in the muc objects, and when they were removed we lost subscriptions.  See [this](https://github.com/skillz/ejabberd/pull/56) PR.
 - When all occupants leave a muc room, it is now removed from memory.  See [this](https://github.com/skillz/ejabberd/pull/57) PR.
+- Dockerfile refers to private modules that must exist in `.ejabberd_modules`
