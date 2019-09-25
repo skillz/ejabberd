@@ -22,11 +22,6 @@ RUN apk upgrade --update musl \
         automake \
     && rm -rf /var/cache/apk/*
 
-# Install rebar3
-# WORKDIR /
-# RUN wget https://s3.amazonaws.com/rebar3/rebar3 -O /usr/bin/rebar3 \
-#     && chmod +x /usr/bin/rebar3
-
 # Install rebar (now deprecated in favor of rebar3)
 # iconv compilation can use rebar3 but modules explicitly use rebar
 WORKDIR /tmp/rebar
