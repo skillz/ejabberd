@@ -18,23 +18,14 @@ RUN apk upgrade --update musl \
         openssl-dev \
         yaml-dev \
         expat-dev \
-        sqlite-dev \
-        gd-dev \
-        jpeg-dev \
-        libpng-dev \
-        libwebp-dev \
         autoconf \
         automake \
-        bash \
-        file \
-        curl \
-        wget \
     && rm -rf /var/cache/apk/*
 
 # Install rebar3
-WORKDIR /
-RUN wget https://s3.amazonaws.com/rebar3/rebar3 -O /usr/bin/rebar3 \
-    && chmod +x /usr/bin/rebar3
+# WORKDIR /
+# RUN wget https://s3.amazonaws.com/rebar3/rebar3 -O /usr/bin/rebar3 \
+#     && chmod +x /usr/bin/rebar3
 
 # Install rebar (now deprecated in favor of rebar3)
 # iconv compilation can use rebar3 but modules explicitly use rebar
@@ -100,17 +91,8 @@ FROM alpine AS runtime
 RUN apk upgrade --update musl \
  && apk add \
     expat \
-    gd \
-    jpeg \
-    libgd \
-    libpng \
     libstdc++ \
-    libwebp \
-    ncurses-libs \
     openssl \
-    sqlite \
-    sqlite-libs \
-    unixodbc \
     yaml \
     zlib \
  && rm -rf /var/cache/apk/*
