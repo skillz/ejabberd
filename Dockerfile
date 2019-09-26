@@ -1,12 +1,13 @@
-FROM alpine:3.9 AS alpine
+FROM elixir:1.8-otp-22-alpine AS alpine
 RUN addgroup ejabberd -g 9000 \
     && adduser -D -G ejabberd ejabberd -u 9000
 
 
 FROM alpine AS builder
 
+ARG REBAR_VERSION=2.6.4
 ARG ICONV_VERSION=1.0.10
-ENV MIX_ENV prod
+ENV MIX_ENV dev
 
 # Install required dependencies from package manager
 RUN apk upgrade --update musl \
@@ -17,36 +18,15 @@ RUN apk upgrade --update musl \
         openssl-dev \
         yaml-dev \
         expat-dev \
-        sqlite-dev \
-        gd-dev \
-        jpeg-dev \
-        libpng-dev \
-        libwebp-dev \
         autoconf \
         automake \
-        bash \
-        elixir \
-        erlang-dev \
-        erlang-crypto \
-        erlang-eunit \
-        erlang-mnesia \
-        erlang-erts \
-        erlang-hipe \
-        erlang-tools \
-        erlang-os-mon \
-        erlang-syntax-tools \
-        erlang-parsetools \
-        erlang-runtime-tools \
-        erlang-reltool \
-        file \
-        curl \
-        wget \
     && rm -rf /var/cache/apk/*
 
-# Install rebar
-WORKDIR /
-RUN wget https://s3.amazonaws.com/rebar3/rebar3 -O /usr/bin/rebar3
-RUN chmod +x /usr/bin/rebar3
+# Install rebar (now deprecated in favor of rebar3)
+# iconv compilation can use rebar3 but modules explicitly use rebar
+WORKDIR /tmp/rebar
+RUN wget https://github.com/rebar/rebar/wiki/rebar -O /usr/bin/rebar \
+    && chmod +x /usr/bin/rebar
 
 # Build iconv erlang/elixir library
 WORKDIR /tmp/iconv
@@ -55,10 +35,10 @@ RUN wget https://github.com/processone/iconv/archive/${ICONV_VERSION}.tar.gz \
 WORKDIR /tmp/iconv/iconv-${ICONV_VERSION}
 RUN rebar3 compile
 WORKDIR /tmp/iconv/iconv-${ICONV_VERSION}/_build/default/lib/
-RUN mkdir /usr/lib/erlang/lib/iconv-${ICONV_VERSION} \
-    && cp -Lr iconv/ebin iconv/priv iconv/src /usr/lib/erlang/lib/iconv-${ICONV_VERSION} \
-    && mkdir /usr/lib/erlang/lib/p1_utils_iconv-${ICONV_VERSION} \
-    && cp -Lr p1_utils/LICENSE.txt p1_utils/README.md p1_utils/ebin p1_utils/include p1_utils/src /usr/lib/erlang/lib/p1_utils_iconv-${ICONV_VERSION}
+RUN mkdir /usr/local/lib/erlang/lib/iconv-${ICONV_VERSION} \
+    && cp -Lr iconv/ebin iconv/priv iconv/src /usr/local/lib/erlang/lib/iconv-${ICONV_VERSION} \
+    && mkdir /usr/local/lib/erlang/lib/p1_utils_iconv-${ICONV_VERSION} \
+    && cp -Lr p1_utils/LICENSE.txt p1_utils/README.md p1_utils/ebin p1_utils/include p1_utils/src /usr/local/lib/erlang/lib/p1_utils_iconv-${ICONV_VERSION}
 
 # Build chat service
 COPY . /tmp/chat-service
@@ -71,9 +51,34 @@ RUN ./autogen.sh \
         --enable-mysql \
     && make && make install
 
-# TODO Build chat service modules
+# Build chat service modules
+RUN mkdir -p /opt/chat-service/.ejabberd-modules/sources
 RUN mix local.hex --force \
     && mix local.rebar --force
+
+# Module push skillz
+WORKDIR /opt/chat-service/.ejabberd-modules/sources
+COPY .ejabberd_modules/sources/mod_push_skillz mod_push_skillz
+WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_push_skillz
+RUN mix deps.get \
+    && mix module_install ModPushSkillz
+
+# Module pottymouth
+WORKDIR /opt/chat-service/.ejabberd-modules/sources
+COPY .ejabberd_modules/sources/mod_pottymouth mod_pottymouth
+WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_pottymouth
+RUN mix deps.get \
+    && mix module_install ModPottymouth
+
+# Module beam stats
+WORKDIR /opt/chat-service/.ejabberd-modules/sources
+COPY .ejabberd_modules/sources/mod_beam_stats mod_beam_stats
+WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_beam_stats
+RUN mix deps.get \
+    && mix module_install ModBeamStats
+
+# Clean up chat service module sources
+RUN rm -rf /opt/chat-service/.ejabberd-modules/sources
 
 FROM alpine AS runtime
 
@@ -81,37 +86,15 @@ FROM alpine AS runtime
 RUN apk upgrade --update musl \
  && apk add \
     expat \
-    gd \
-    jpeg \
-    libgd \
-    libpng \
     libstdc++ \
-    libwebp \
-    ncurses-libs \
     openssl \
-    sqlite \
-    sqlite-libs \
-    unixodbc \
     yaml \
     zlib \
-    elixir \
-    erlang-dev \
-    erlang-crypto \
-    erlang-eunit \
-    erlang-mnesia \
-    erlang-erts \
-    erlang-hipe \
-    erlang-tools \
-    erlang-os-mon \
-    erlang-syntax-tools \
-    erlang-parsetools \
-    erlang-runtime-tools \
-    erlang-reltool \
  && rm -rf /var/cache/apk/*
 
 # Install iconv erlang/elixir library
-COPY --from=builder /usr/lib/erlang/lib/iconv-* /usr/lib/erlang/lib/
-COPY --from=builder /usr/lib/erlang/lib/p1_utils_iconv-* /usr/lib/erlang/lib/
+COPY --from=builder /usr/local/lib/erlang/lib/iconv-* /usr/local/lib/erlang/lib/
+COPY --from=builder /usr/local/lib/erlang/lib/p1_utils_iconv-* /usr/local/lib/erlang/lib/
 
 # Install chat service
 WORKDIR /opt/chat-service
