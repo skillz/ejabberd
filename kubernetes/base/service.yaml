@@ -4,7 +4,6 @@ metadata:
   labels:
     app: chat-service
   name: chat-service
-  namespace: server
 spec:
   selector:
     app: chat-service

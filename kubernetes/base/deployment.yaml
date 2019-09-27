@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chat-service
-  namespace: server
   labels:
     app: chat-service
 spec:
@@ -18,6 +17,9 @@ spec:
       containers:
       - image: localhost:5000/ejabberd-dev:latest
         name: chat-service
+        envFrom:
+        - secretRef:
+            name: chat-service-users
         ports:
         - containerPort: 5280
           name: http
