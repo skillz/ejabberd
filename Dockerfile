@@ -80,6 +80,7 @@ RUN mix deps.get \
 # Clean up chat service module sources
 RUN rm -rf /opt/chat-service/.ejabberd-modules/sources
 
+
 FROM alpine AS runtime
 
 # Install required dependencies
@@ -99,11 +100,14 @@ COPY --from=builder /usr/local/lib/erlang/lib/p1_utils_iconv-* /usr/local/lib/er
 # Install chat service
 WORKDIR /opt/chat-service
 COPY --from=builder /opt/chat-service .
+COPY --from=builder /tmp/chat-service/scripts scripts
 
 USER ejabberd
 WORKDIR /home/ejabberd
 
+ENV EJABBERD_HOME /opt/chat-service
+ENV EJABBERDCTL /opt/chat-service/sbin/ejabberdctl
+
 EXPOSE 1883 4369-4399 5222 5269 5280 5443
 
-ENTRYPOINT ["/opt/chat-service/sbin/ejabberdctl"]
-CMD ["foreground"]
+ENTRYPOINT ["/opt/chat-service/scripts/run.sh"]
