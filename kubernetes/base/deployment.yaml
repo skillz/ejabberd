@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-service
+  namespace: server
+  labels:
+    app: chat-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chat-service
+  template:
+    metadata:
+      labels:
+        app: chat-service
+    spec:
+      containers:
+      - image: localhost:5000/ejabberd-dev:latest
+        name: chat-service
+        ports:
+        - containerPort: 5280
+          name: http
+        - containerPort: 5269
+          name: s2s-in
+        - containerPort: 5222
+          name: c2s
+        resources: {}
