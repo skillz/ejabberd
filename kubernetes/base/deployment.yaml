@@ -15,7 +15,7 @@ spec:
         app: chat-service
     spec:
       containers:
-      - image: localhost:5000/ejabberd-dev:latest
+      - image: docker.dev.skillz.com:5000/ejabberd:latest
         name: chat-service
         envFrom:
         - secretRef:
