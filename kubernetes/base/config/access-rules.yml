@@ -1,0 +1,36 @@
+###.  ============
+###'  ACCESS RULES
+access_rules:
+  ## This rule allows access only for local users:
+  local:
+    - allow: local
+  ## Only non-blocked users can use c2s connections:
+  c2s:
+    - deny: blocked
+    - allow
+  ## Only admins can send announcement messages:
+  announce:
+    - allow: admin
+  ## Only admins can use the configuration interface:
+  configure:
+    - allow: admin
+  ## Only accounts of the local ejabberd server can create rooms:
+  muc_create:
+    - allow: local
+  ## Only accounts on the local ejabberd server can create Pubsub nodes:
+  ## pubsub_createnode:
+  ##  - allow: local
+  ## In-band registration allows registration of any possible username.
+  ## To disable in-band registration, replace 'allow' with 'deny'.
+  register:
+    - deny
+  ## Only allow to register from localhost
+  trusted_network:
+    - allow: loopback
+  ## Do not establish S2S connections with bad servers
+  ## s2s:
+  ##   - deny:
+  ##     - ip: "XXX.XXX.XXX.XXX/32"
+  ##   - deny:
+  ##     - ip: "XXX.XXX.XXX.XXX/32"
+  ##   - allow

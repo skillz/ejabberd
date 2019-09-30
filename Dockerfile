@@ -52,33 +52,33 @@ RUN ./autogen.sh \
     && make && make install
 
 # Build chat service modules
-RUN mkdir -p /opt/chat-service/.ejabberd-modules/sources
+WORKDIR /home/ejabberd
+RUN mkdir -p .ejabberd-modules/sources
 RUN mix local.hex --force \
     && mix local.rebar --force
 
 # Module push skillz
-WORKDIR /opt/chat-service/.ejabberd-modules/sources
+WORKDIR /home/ejabberd/.ejabberd-modules/sources
 COPY .ejabberd_modules/sources/mod_push_skillz mod_push_skillz
-WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_push_skillz
+WORKDIR /home/ejabberd/.ejabberd-modules/sources/mod_push_skillz
 RUN mix deps.get \
     && mix module_install ModPushSkillz
 
 # Module pottymouth
-WORKDIR /opt/chat-service/.ejabberd-modules/sources
+WORKDIR /home/ejabberd/.ejabberd-modules/sources
 COPY .ejabberd_modules/sources/mod_pottymouth mod_pottymouth
-WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_pottymouth
+WORKDIR /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth
 RUN mix deps.get \
     && mix module_install ModPottymouth
 
 # Module beam stats
-WORKDIR /opt/chat-service/.ejabberd-modules/sources
+WORKDIR /home/ejabberd/.ejabberd-modules/sources
 COPY .ejabberd_modules/sources/mod_beam_stats mod_beam_stats
-WORKDIR /opt/chat-service/.ejabberd-modules/sources/mod_beam_stats
+WORKDIR /home/ejabberd/.ejabberd-modules/sources/mod_beam_stats
 RUN mix deps.get \
     && mix module_install ModBeamStats
 
-# Clean up chat service module sources
-RUN rm -rf /opt/chat-service/.ejabberd-modules/sources
+RUN ls /home/ejabberd/.ejabberd-modules
 
 
 FROM alpine AS runtime
@@ -101,9 +101,11 @@ COPY --from=builder /usr/local/lib/erlang/lib/p1_utils_iconv-* /usr/local/lib/er
 WORKDIR /opt/chat-service
 COPY --from=builder /opt/chat-service .
 COPY --from=builder /tmp/chat-service/scripts scripts
+WORKDIR /home/ejabberd/.ejabberd-modules
+COPY --from=builder /home/ejabberd/.ejabberd-modules .
 
-USER ejabberd
 WORKDIR /home/ejabberd
+USER ejabberd
 
 ENV EJABBERD_HOME /opt/chat-service
 ENV EJABBERDCTL /opt/chat-service/sbin/ejabberdctl
