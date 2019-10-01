@@ -16,7 +16,6 @@ spec:
     spec:
       containers:
       - image: docker.dev.skillz.com:5000/ejabberd:latest
-        imagePullPolicy: Never
         name: chat-service
         envFrom:
         - secretRef:
