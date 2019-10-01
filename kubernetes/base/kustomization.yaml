@@ -4,3 +4,20 @@ resources:
 - secret.yaml
 - deployment.yaml
 - service.yaml
+configMapGenerator:
+- name: ejabberd-config
+  files:
+  - config/ejabberdctl.cfg
+  - config/inetrc
+  - config/ejabberd.yml
+  - config/log.yml
+  - config/hosts.yml
+  - config/listen.yml
+  - config/api-permissions.yml
+  - config/access-rules.yml
+  - config/access-control-lists.yml
+  - config/modules.yml
+secretGenerator:
+- name: ejabberd-config-secret
+  files:
+  - secret/authentication.yml

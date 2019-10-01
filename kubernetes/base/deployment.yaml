@@ -28,3 +28,56 @@ spec:
         - containerPort: 5222
           name: c2s
         resources: {}
+        readinessProbe:
+          tcpSocket:
+            port: c2s
+          initialDelaySeconds: 30
+          timeoutSeconds: 1
+        livenessProbe:
+          tcpSocket:
+            port: c2s
+          initialDelaySeconds: 30
+          timeoutSeconds: 1
+        # Switch to using a projected volume (https://kubernetes.io/docs/concepts/storage/volumes/#projected) once the feature comes out of beta
+        volumeMounts:
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/ejabberdctl.cfg
+            subPath: ejabberdctl.cfg
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/inetrc
+            subPath: inetrc
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/ejabberd.yml
+            subPath: ejabberd.yml
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/log.yml
+            subPath: log.yml
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/hosts.yml
+            subPath: hosts.yml
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/listen.yml
+            subPath: listen.yml
+          - name: ejabberd-config-secret
+            mountPath: /opt/chat-service/etc/ejabberd/authentication.yml
+            subPath: authentication.yml
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/api-permissions.yml
+            subPath: api-permissions.yml
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/access-rules.yml
+            subPath: access-rules.yml
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/access-control-lists.yml
+            subPath: access-control-lists.yml
+          - name: ejabberd-config
+            mountPath: /opt/chat-service/etc/ejabberd/modules.yml
+            subPath: modules.yml
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: ejabberd-config
+        configMap:
+          name: ejabberd-config
+      - name: ejabberd-config-secret
+        secret:
+          secretName: ejabberd-config-secret

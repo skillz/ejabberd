@@ -1,0 +1,34 @@
+listen:
+  - 
+    port: 5222
+    module: ejabberd_c2s
+    starttls: true
+    starttls_required: false
+    tls_compression: false
+    protocol_options:
+      - "no_sslv2"
+      - "no_sslv3"
+      - "no_tlsv1"
+      - "no_tlsv1_1"
+    ciphers: "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256"
+    max_stanza_size: 65536
+    shaper: c2s_shaper
+    access: c2s
+  - 
+    port: 5269
+    module: ejabberd_s2s_in
+    max_stanza_size: 131072
+    shaper: s2s_shaper
+  -
+    port: 5280
+    module: ejabberd_http
+    request_handlers:
+      "/websocket": ejabberd_http_ws
+    http_bind: true
+  -
+    port: 5290
+    module: ejabberd_http
+    web_admin: true
+    request_handlers:
+      "/api": mod_http_api
+    http_bind: true
