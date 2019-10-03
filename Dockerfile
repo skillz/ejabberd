@@ -7,7 +7,6 @@ FROM alpine AS builder
 
 ARG REBAR_VERSION=2.6.4
 ARG ICONV_VERSION=1.0.10
-ENV MIX_ENV dev
 
 # Install required dependencies from package manager
 RUN apk upgrade --update musl \
@@ -61,6 +60,9 @@ RUN mix local.hex --force \
 WORKDIR /home/ejabberd/.ejabberd-modules/sources
 COPY .ejabberd_modules/sources/mod_push_skillz mod_push_skillz
 WORKDIR /home/ejabberd/.ejabberd-modules/sources/mod_push_skillz
+RUN export MIX_ENV=test \
+    && mix deps.get \
+    && mix test
 RUN mix deps.get \
     && mix module_install ModPushSkillz
 
@@ -77,8 +79,6 @@ COPY .ejabberd_modules/sources/mod_beam_stats mod_beam_stats
 WORKDIR /home/ejabberd/.ejabberd-modules/sources/mod_beam_stats
 RUN mix deps.get \
     && mix module_install ModBeamStats
-
-RUN ls /home/ejabberd/.ejabberd-modules
 
 
 FROM alpine AS runtime
