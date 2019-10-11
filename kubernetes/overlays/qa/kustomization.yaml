@@ -5,10 +5,10 @@ configMapGenerator:
 - name: ejabberd-config
   behavior: merge
   files:
-  - config/hosts.yml
-  - config/access-control-lists.yml
+  - config/hosts.yaml
+  - config/access-control-lists.yaml
 secretGenerator:
 - name: ejabberd-config-secret
   behavior: merge
   files:
-  - secret/authentication.yml
+  - secret/authentication.yaml
