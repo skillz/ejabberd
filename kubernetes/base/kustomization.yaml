@@ -1,23 +1,28 @@
 namespace: server
 resources:
+- deployment.yaml
 - namespace.yaml
 - secret.yaml
-- deployment.yaml
+- service-account.yaml
 - service.yaml
 configMapGenerator:
 - name: ejabberd-config
   files:
   - config/ejabberdctl.cfg
   - config/inetrc
-  - config/ejabberd.yml
-  - config/log.yml
-  - config/hosts.yml
-  - config/listen.yml
-  - config/api-permissions.yml
-  - config/access-rules.yml
-  - config/access-control-lists.yml
-  - config/modules.yml
+  - config/ejabberd.yaml
+  - config/log.yaml
+  - config/hosts.yaml
+  - config/listen.yaml
+  - config/api-permissions.yaml
+  - config/access-rules.yaml
+  - config/access-control-lists.yaml
+  - config/modules.yaml
+- name: ejabberd-vault-config
+  files:
+  - config/consul-template-config.hcl
+  - config/vault-agent-config.hcl
 secretGenerator:
 - name: ejabberd-config-secret
   files:
-  - secret/authentication.yml
+  - secret/authentication.yaml
