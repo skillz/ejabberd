@@ -1,0 +1,5 @@
+varReference:
+- kind: Service
+  path: metadata/name
+- kind: StatefulSet
+  path: spec/serviceName

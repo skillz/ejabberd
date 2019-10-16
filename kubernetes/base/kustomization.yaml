@@ -1,14 +1,21 @@
 namespace: server
+configurations:
+- varconfig.yaml
 resources:
-- deployment.yaml
+- stateful-set.yaml
 - namespace.yaml
 - secret.yaml
 - service-account.yaml
-- service.yaml
+- service-external.yaml
+- service-internal-discovery.yaml
 configMapGenerator:
+- name: chat-service-config
+  literals:
+  - num_ejabberd_replicas=3
+  - service_name_external=chat-service-external
+  - service_name_internal=chat-service-internal
 - name: ejabberd-config
   files:
-  - config/ejabberdctl.cfg
   - config/inetrc
   - config/ejabberd.yaml
   - config/log.yaml
@@ -22,7 +29,25 @@ configMapGenerator:
   files:
   - config/consul-template-config.hcl
   - config/vault-agent-config.hcl
-secretGenerator:
-- name: ejabberd-config-secret
-  files:
-  - secret/authentication.yaml
+vars:
+- name: NUM_REPLICAS
+  objref:
+    kind: ConfigMap
+    name: chat-service-config
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.num_ejabberd_replicas
+- name: SVC_NAME_INTERNAL
+  objref:
+    kind: ConfigMap
+    name: chat-service-config
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.service_name_internal
+- name: SVC_NAME_EXTERNAL
+  objref:
+    kind: ConfigMap
+    name: chat-service-config
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.service_name_external
