@@ -53,3 +53,4 @@ mix.lock
 ejabberd.iml
 *log/
 .ejabberd_modules
+**generated.yaml

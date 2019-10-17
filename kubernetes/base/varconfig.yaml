@@ -3,3 +3,7 @@ varReference:
   path: metadata/name
 - kind: StatefulSet
   path: spec/serviceName
+- kind: ConfigMap
+  path: data
+- kind: StatefulSet
+  path: spec/template/spec/containers/image
