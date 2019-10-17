@@ -2,7 +2,7 @@
 set -e
 
 # Erlang Node configuration from assigned FQDN
-export ERLANG_NODE="ejabberd@(hostname -f)"
+export ERLANG_NODE="ejabberd@$(hostname -f)"
 cat << EOF > ${EJABBERD_HOME}/etc/ejabberd/ejabberdctl.cfg
 POLL=true
 ERL_MAX_ETS_TABLES=20000

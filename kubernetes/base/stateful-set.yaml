@@ -87,13 +87,15 @@ spec:
         - name: EJABBERD_POD_PREFIX
           valueFrom:
             fieldRef:
-              fieldPath: metadata.name
+              fieldPath: metadata.labels['app']
         - name: EJABBERD_INTERNAL_SVC
           value: $(SVC_NAME_INTERNAL)
         - name: EJABBERD_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: ERLANG_COOKIE
+          value: DOYOULIKEIT
         - name: EJABBERD_K8S_AUTOCLUSTER
           value: 'true'
         - name: NUM_K8S_REPLICAS
