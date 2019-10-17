@@ -2,7 +2,7 @@ namespace: server
 configurations:
 - varconfig.yaml
 resources:
-- stateful-set.yaml
+- statefulset.yaml
 - namespace.yaml
 - secret.yaml
 - service-account.yaml
@@ -14,7 +14,7 @@ configMapGenerator:
   - num_ejabberd_replicas=3
   - service_name_external=chat-service-external
   - service_name_internal=chat-service-internal
-  - docker_registry=docker.dev.skillz.com:5000
+  - docker_repository=docker.dev.skillz.com:5000/ejabberd
 - name: ejabberd-config
   files:
   - config/inetrc
@@ -52,10 +52,10 @@ vars:
     apiVersion: v1
   fieldref:
     fieldpath: data.service_name_external
-- name: DOCKER_REGISTRY
+- name: DOCKER_REPOSITORY
   objref:
     kind: ConfigMap
     name: chat-service-config
     apiVersion: v1
   fieldref:
-    fieldpath: data.docker_registry
+    fieldpath: data.docker_repository

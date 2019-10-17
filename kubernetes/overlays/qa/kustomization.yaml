@@ -10,10 +10,8 @@ configMapGenerator:
   - config/hosts.yaml
   - config/access-control-lists.yaml
   - config/authentication.yaml
-- name: chat-service-config
-  behavior: merge
-  literals:
-  - docker_registry=058716573031.dkr.ecr.us-west-2.amazonaws.com # Requires cluster authentication with ECR
+patchesStrategicMerge:
+- statefulset.yaml
 vars:
 - name: PUBLIC_DNS_ZONE_NAME
   objref:
@@ -50,3 +48,17 @@ vars:
     name: tf-ejabberd-external
   fieldref:
     fieldpath: data.rds_endpoint
+- name: ECR_REPOSITORY
+  objref:
+    apiVersion: v1
+    kind: ConfigMap
+    name: tf-ejabberd-external
+  fieldref:
+    fieldpath: data.ecr_repository
+- name: IAM_ROLE
+  objref:
+    apiVersion: v1
+    kind: ConfigMap
+    name: tf-ejabberd-external
+  fieldref:
+    fieldpath: data.iam_role

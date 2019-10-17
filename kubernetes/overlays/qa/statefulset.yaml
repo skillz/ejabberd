@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chat-service
+spec:
+  template:
+    metadata:
+      annotations:
+        iam.amazonaws.com/role: $(IAM_ROLE)
+    spec:
+      containers:
+      - name: ejabberd
+        image: $(ECR_REPOSITORY):latest
