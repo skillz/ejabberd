@@ -54,3 +54,4 @@ ejabberd.iml
 *log/
 .ejabberd_modules
 **generated.yaml
+/kubernetes/**external-tf-map.yaml
