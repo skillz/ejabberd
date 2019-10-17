@@ -90,6 +90,8 @@ spec:
               key: CHAT_SERVICE_USERS
         ports:
         - containerPort: 5280
+          name: websocket
+        - containerPort: 5290
           name: http
         - containerPort: 5269
           name: s2s-in

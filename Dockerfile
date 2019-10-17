@@ -114,6 +114,6 @@ ENV EJABBERD_HOME /opt/chat-service
 ENV EJABBERDCTL /opt/chat-service/sbin/ejabberdctl
 ENV EJABBERD_CONFIG_PATH /opt/chat-service/etc/ejabberd/ejabberd.yaml
 
-EXPOSE 4369 5222 5269 5280
+EXPOSE 4369 5222 5269 5280 5290
 
 ENTRYPOINT ["/opt/chat-service/scripts/run.sh"]
