@@ -11,13 +11,13 @@ template {
     contents = <<EOH
     {{- with secret "kv/data/ejabberd/mysql" }}
     define_macro:
-        'MYSQL_USERNAME': {{ .Data.data.username }}
-        'MYSQL_PASSWORD': {{ .Data.data.password }}
+        'MYSQL_USERNAME': "{{ .Data.data.username }}"
+        'MYSQL_PASSWORD': "{{ .Data.data.password }}"
     {{ end }}
 
     {{- with secret "kv/data/ejabberd/rabbitmq" }}
     define_macro:
-        'RABBITMQ_AUTH': {{ .Data.data.username }}:{{ .Data.data.password }}
+        'RABBITMQ_AUTH': "amqp://{{ .Data.data.username }}:{{ .Data.data.password }}@rabbit.$(PUBLIC_DNS_ZONE_NAME):5672/skillz"
     {{ end }}
     EOH
 }

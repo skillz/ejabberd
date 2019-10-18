@@ -15,8 +15,8 @@ modules:
     blacklists:
       default: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/blacklist_en.txt
       en: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/blacklist_en.txt
-  # ModPushSkillz:
-  #   rabbit_url: "amqp://RABBITMQ_AUTH@rabbit.qa.skillz.com:5672/skillz" # Populated by a secret macro
+  ModPushSkillz:
+    rabbit_url: RABBITMQ_AUTH # Populated by a secret macro
   mod_admin_extra: {}
   mod_fail2ban:
     c2s_auth_ban_lifetime: 10

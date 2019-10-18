@@ -4,11 +4,12 @@ metadata:
   name: $(SVC_NAME_EXTERNAL)
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-internal: "false"
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: $(PUBLIC_ELB_SG)
 spec:
   ports: # Basically only keep the websocket port
-  - name: http
+  - port: 80
     $patch: delete
-  - name: c2s
+  - port: 5222
     $patch: delete
-  - name: s2s-in
+  - port: 5269
     $patch: delete

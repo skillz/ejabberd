@@ -11,7 +11,6 @@ resources:
 configMapGenerator:
 - name: chat-service-config
   literals:
-  - num_ejabberd_replicas=3
   - service_name_external=chat-service-external
   - service_name_internal=chat-service-internal
   - docker_repository=docker.dev.skillz.com:5000/ejabberd
@@ -31,13 +30,16 @@ configMapGenerator:
   - config/consul-template-config.hcl
   - config/vault-agent-config.hcl
 vars:
+# Using statefulset.chat-service.spec.replicas as the source of truth for the number
+# of replicas because it is an integer and we cannot define integer values in ConfigMaps
+# or parse a string value from a kustomize variable into an int
 - name: NUM_REPLICAS
   objref:
-    kind: ConfigMap
-    name: chat-service-config
-    apiVersion: v1
+    kind: StatefulSet
+    name: chat-service
+    apiVersion: apps/v1
   fieldref:
-    fieldpath: data.num_ejabberd_replicas
+    fieldpath: spec.replicas
 - name: SVC_NAME_INTERNAL
   objref:
     kind: ConfigMap

@@ -5,7 +5,7 @@ metadata:
   labels:
     app: chat-service
 spec:
-  replicas: $(SVC_NUM_REPLICAS)
+  replicas: 3
   serviceName: $(SVC_NAME_INTERNAL)
   selector:
     matchLabels:
@@ -65,7 +65,7 @@ spec:
       # ejabberd is the core chat-service process
       - name: ejabberd
         image: $(DOCKER_REPOSITORY):latest
-        imagePullPolicy: Never
+        imagePullPolicy: IfNotPresent
         env:
         - name: EJABBERD_POD_PREFIX
           valueFrom:

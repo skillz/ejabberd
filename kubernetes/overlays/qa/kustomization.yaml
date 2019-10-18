@@ -8,9 +8,11 @@ configMapGenerator:
 - name: ejabberd-config
   behavior: merge
   files:
-  - config/hosts.yaml
   - config/access-control-lists.yaml
   - config/authentication.yaml
+  - config/ejabberd.yaml
+  - config/hosts.yaml
+  - config/modules.yaml
 - name: chat-service-config
   behavior: merge
   literals:

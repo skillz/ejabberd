@@ -6,6 +6,7 @@ metadata:
   name: $(SVC_NAME_ADMIN)
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: $(PRIVATE_ELB_SG)
     external-dns.alpha.kubernetes.io/hostname: $(SVC_NAME_ADMIN).$(PRIVATE_DNS_ZONE_NAME)
 spec:
   selector:
