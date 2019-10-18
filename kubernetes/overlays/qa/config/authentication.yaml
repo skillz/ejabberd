@@ -18,7 +18,7 @@ append_host_config:
   "chat.qa.skillz.com":
     auth_method: http
     auth_opts:
-      host: "http://api-gateway-internal.islay:10010"
+      host: "http://api-gateway-internal-islay.qa.us-west-2:10010" # Because qa-app-us-west-2 relies on vpc peering, we cannot resolve .islay records and this alias was created manually
       connection_pool_size: 8
       connection_opts: []
       path_prefix: "/chat-auth/"
@@ -26,7 +26,7 @@ append_host_config:
 default_db: sql
 
 sql_type: mysql
-sql_server: "mysql-ejabberd.qa.skillz.com"
+sql_server: "$(RDS_DB_ENDPOINT)"
 
 sql_port: 3306
 sql_database: "ejabberd"

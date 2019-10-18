@@ -1,14 +1,21 @@
 namespace: server
+configurations:
+- varconfig.yaml
 resources:
-- deployment.yaml
+- statefulset.yaml
 - namespace.yaml
 - secret.yaml
 - service-account.yaml
-- service.yaml
+- service-external.yaml
+- service-internal-discovery.yaml
 configMapGenerator:
+- name: chat-service-config
+  literals:
+  - service_name_external=chat-service-external
+  - service_name_internal=chat-service-internal
+  - docker_repository=docker.dev.skillz.com:5000/ejabberd
 - name: ejabberd-config
   files:
-  - config/ejabberdctl.cfg
   - config/inetrc
   - config/ejabberd.yaml
   - config/log.yaml
@@ -22,7 +29,35 @@ configMapGenerator:
   files:
   - config/consul-template-config.hcl
   - config/vault-agent-config.hcl
-secretGenerator:
-- name: ejabberd-config-secret
-  files:
-  - secret/authentication.yaml
+vars:
+# Using statefulset.chat-service.spec.replicas as the source of truth for the number
+# of replicas because it is an integer and we cannot define integer values in ConfigMaps
+# or parse a string value from a kustomize variable into an int
+- name: NUM_REPLICAS
+  objref:
+    kind: StatefulSet
+    name: chat-service
+    apiVersion: apps/v1
+  fieldref:
+    fieldpath: spec.replicas
+- name: SVC_NAME_INTERNAL
+  objref:
+    kind: ConfigMap
+    name: chat-service-config
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.service_name_internal
+- name: SVC_NAME_EXTERNAL
+  objref:
+    kind: ConfigMap
+    name: chat-service-config
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.service_name_external
+- name: DOCKER_REPOSITORY
+  objref:
+    kind: ConfigMap
+    name: chat-service-config
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.docker_repository

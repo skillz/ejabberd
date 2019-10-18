@@ -10,12 +10,13 @@ modules:
   mod_privacy: {}
   mod_vcard:
     search: true
-  # If we set up rabbitmq in the dev environment we can re-enable ModPushSkillz in base
   ModBeamStats: {}
   mod_pottymouth:
     blacklists:
       default: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/blacklist_en.txt
       en: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/blacklist_en.txt
+  ModPushSkillz:
+    rabbit_url: RABBITMQ_AUTH # Populated by a secret macro
   mod_admin_extra: {}
   mod_fail2ban:
     c2s_auth_ban_lifetime: 10

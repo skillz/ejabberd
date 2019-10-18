@@ -105,11 +105,15 @@ WORKDIR /home/ejabberd/.ejabberd-modules
 COPY --from=builder /home/ejabberd/.ejabberd-modules .
 
 WORKDIR /home/ejabberd
+
+RUN chown -R ejabberd:ejabberd /opt/chat-service/
+
 USER ejabberd
 
 ENV EJABBERD_HOME /opt/chat-service
 ENV EJABBERDCTL /opt/chat-service/sbin/ejabberdctl
+ENV EJABBERD_CONFIG_PATH /opt/chat-service/etc/ejabberd/ejabberd.yaml
 
-EXPOSE 1883 4369-4399 5222 5269 5280 5443
+EXPOSE 4369 5222 5269 5280 5290
 
 ENTRYPOINT ["/opt/chat-service/scripts/run.sh"]

@@ -1,43 +1,30 @@
 apiVersion: apps/v1
-kind: Deployment
-
+kind: StatefulSet
 metadata:
   name: chat-service
   labels:
     app: chat-service
-
 spec:
-  replicas: 1
-
+  replicas: 3
+  serviceName: $(SVC_NAME_INTERNAL)
   selector:
     matchLabels:
       app: chat-service
-
   template:
     metadata:
       labels:
         app: chat-service
-
     spec:
       serviceAccountName: chat-service
-
       volumes:
+      # Configuration files for the vault and consul-template agents
+      - name: vault-config
+        configMap:
+          name: ejabberd-vault-config
       # Configuration files for the ejabberd process
       - name: ejabberd-config
         configMap:
           name: ejabberd-config
-      # Secret configuration files for the ejabberd process
-      - name: ejabberd-config-secret
-        secret:
-          secretName: ejabberd-config-secret
-      # Configuration files for the vault and consul-template agents
-      - name: vault-config
-        configMap: ejabberd-vault-config
-        items:
-          - key: vault-agent-config.hcl
-            path: vault-agent-config.hcl
-          - key: consul-template-config.hcl
-            path: consul-template-config.hcl
       # Stores the vault authentication token in RAM-backed tmpfs
       - name: vault-token
         emptyDir:
@@ -45,7 +32,6 @@ spec:
       # Stores files containing vault secrets rendered by consul-template
       - name: vault-secrets
         emptyDir: {}
-
       initContainers:
       # Vault agent manages authentication with vault on pod startup
       - name: vault-agent-auth
@@ -59,7 +45,6 @@ spec:
         - name: VAULT_ADDR
           value: http://vault.default:8200 # Vault is currently deployed in the default namespace
         args: [ "agent", "-config=/etc/vault/vault-agent-config.hcl" ]
-
       containers:
       # consul-template connects to vault and populates templates with the values of secrets
       - name: consul-template
@@ -79,17 +64,41 @@ spec:
         args: [ "-config=/etc/consul-template/consul-template-config.hcl" ]
       # ejabberd is the core chat-service process
       - name: ejabberd
-        image: docker.dev.skillz.com:5000/ejabberd:latest
-        envFrom:
-        - secretRef:
-            name: chat-service-users
+        image: $(DOCKER_REPOSITORY):latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: EJABBERD_POD_PREFIX
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['app']
+        - name: EJABBERD_INTERNAL_SVC
+          value: $(SVC_NAME_INTERNAL)
+        - name: EJABBERD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: ERLANG_COOKIE
+          value: DOYOULIKEIT
+        - name: EJABBERD_K8S_AUTOCLUSTER
+          value: 'true'
+        - name: NUM_K8S_REPLICAS
+          value: '$(NUM_REPLICAS) '
+        - name: CHAT_SERVICE_USERS
+          valueFrom:
+            secretKeyRef:
+              name: chat-service-users
+              key: CHAT_SERVICE_USERS
         ports:
         - containerPort: 5280
+          name: websocket
+        - containerPort: 5290
           name: http
         - containerPort: 5269
           name: s2s-in
         - containerPort: 5222
           name: c2s
+        - containerPort: 4369
+          name: epmd
         resources: {}
         readinessProbe:
           tcpSocket:
@@ -105,9 +114,6 @@ spec:
           # ejabberd-config volume mounts
           # Switch to using a projected volume (https://kubernetes.io/docs/concepts/storage/volumes/#projected) once the feature comes out of beta
           - name: ejabberd-config
-            mountPath: /opt/chat-service/etc/ejabberd/ejabberdctl.cfg
-            subPath: ejabberdctl.cfg
-          - name: ejabberd-config
             mountPath: /opt/chat-service/etc/ejabberd/inetrc
             subPath: inetrc
           - name: ejabberd-config
@@ -122,9 +128,6 @@ spec:
           - name: ejabberd-config
             mountPath: /opt/chat-service/etc/ejabberd/listen.yaml
             subPath: listen.yaml
-          - name: ejabberd-config-secret
-            mountPath: /opt/chat-service/etc/ejabberd/authentication.yaml
-            subPath: authentication.yaml
           - name: ejabberd-config
             mountPath: /opt/chat-service/etc/ejabberd/api-permissions.yaml
             subPath: api-permissions.yaml
@@ -140,4 +143,6 @@ spec:
           # vault secrets volume mounts
           - name: vault-secrets
             mountPath: /opt/chat-service/secrets
+        # An additional space is added to NUM_REPLICAS as otherwise kustomize turns this into an int, which kubernetes does not accept
+        command: ["/opt/chat-service/scripts/run.sh", "${NUM_K8S_REPLICAS}"]
       terminationGracePeriodSeconds: 30

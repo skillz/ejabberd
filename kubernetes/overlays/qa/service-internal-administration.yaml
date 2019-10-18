@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: chat-service
+  name: $(SVC_NAME_ADMIN)
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+    service.beta.kubernetes.io/aws-load-balancer-extra-security-groups: $(PRIVATE_ELB_SG)
+    external-dns.alpha.kubernetes.io/hostname: chat-admin.$(PRIVATE_DNS_ZONE_NAME),chat-admin.$(PUBLIC_DNS_ZONE_NAME)
+spec:
+  selector:
+    app: chat-service
+  loadBalancerSourceRanges:
+    - "0.0.0.1/32" # Bogus CIDR because we cannot currently prevent kubernetes from creating a security group for a load balancer, this can be cleaned up with more ingress rollout
+  type: LoadBalancer
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: c2s
+      port: 5222
+      targetPort: c2s
