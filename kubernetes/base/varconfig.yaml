@@ -14,4 +14,4 @@ varReference:
 - kind: StatefulSet
   path: spec/template/metadata/annotations/iam.amazonaws.com\/role
 - kind: Service
-  path: metadata/annotations/service.beta.kubernetes.io\/aws-load-balancer-security-groups
+  path: metadata/annotations/service.beta.kubernetes.io\/aws-load-balancer-extra-security-groups
