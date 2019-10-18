@@ -1,8 +1,8 @@
 language: "en"
 allow_contrib_modules: true
 
-# # Secret Macros
-# include_config_file: /opt/chat-service/secrets/secrets.yaml
+# Secret Macros
+include_config_file: /opt/chat-service/secrets/secrets.yaml
 
 # Log
 include_config_file: /opt/chat-service/etc/ejabberd/log.yaml
