@@ -20,6 +20,7 @@ configMapGenerator:
 patchesStrategicMerge:
 - statefulset.yaml
 - service-external.yaml
+- secret.yaml
 vars:
 - name: SVC_NAME_ADMIN
   objref:
@@ -56,6 +57,13 @@ vars:
     name: tf-ejabberd-external
   fieldref:
     fieldpath: data.public_lb_security_group_id
+- name: PUBLIC_ELB_SSL
+  objref:
+    apiVersion: v1
+    kind: ConfigMap
+    name: tf-ejabberd-external
+  fieldref:
+    fieldpath: data.acm_ssl_certificate
 - name: RDS_DB_ENDPOINT
   objref:
     apiVersion: v1
