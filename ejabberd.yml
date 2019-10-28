@@ -352,6 +352,7 @@ api_permissions:
       - "status"
       - "get_room_options"
       - "register"
+      - "get_roster"
   "public commands":
     who:
       - ip: "127.0.0.1/8"
