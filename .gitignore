@@ -52,3 +52,6 @@ XmppAddr.hrl
 mix.lock
 ejabberd.iml
 *log/
+.ejabberd_modules
+**generated.yaml
+**external-tf-map.yaml

@@ -1,0 +1,3 @@
+hosts:
+  - "chat.qa.skillz.com"
+  - "chat-admin.qa.skillz.com"

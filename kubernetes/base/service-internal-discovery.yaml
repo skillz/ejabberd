@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: chat-service
+  name: $(SVC_NAME_INTERNAL)
+spec:
+  selector:
+    app: chat-service
+  clusterIP: None
+  ports:
+    - name: epmd
+      port: 4369
+      targetPort: epmd

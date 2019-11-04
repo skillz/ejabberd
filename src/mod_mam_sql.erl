@@ -187,9 +187,8 @@ select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
     % and the client did not specify a limit using RSM then the server should
     % return a policy-violation error to the client." We currently don't do this
     % for v0.2 requests, but we do limit #rsm_in.max for v0.3 and newer.
-    case {ejabberd_sql:sql_query(LServer, Query),
-	  ejabberd_sql:sql_query(LServer, CountQuery)} of
-	{{selected, _, Res}, {selected, _, [[Count]]}} ->
+    case {ejabberd_sql:sql_query(LServer, Query), CountQuery} of
+	{{selected, _, Res}, _} ->
 	    {Max, Direction, _} = get_max_direction_id(RSM),
 	    {Res1, IsComplete} =
 		if Max >= 0 andalso Max /= undefined andalso length(Res) > Max ->
@@ -211,7 +210,7 @@ select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
 			   {error, _} ->
 			       []
 		       end
-	       end, Res1), IsComplete, binary_to_integer(Count)};
+	       end, Res1), IsComplete, 50};
 	_ ->
 	    {[], false, 0}
     end.

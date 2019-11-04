@@ -1,0 +1,66 @@
+## ===============
+## API PERMISSIONS
+## ===============
+##
+## This section allows you to define who and using what method
+## can execute commands offered by ejabberd.
+##
+## By default "console commands" section allow executing all commands
+## issued using ejabberdctl command, and "admin access" section allows
+## users in admin acl that connect from 127.0.0.1 to  execute all
+## commands except start and stop with any available access method
+## (ejabberdctl, http-api, xmlrpc depending what is enabled on server).
+##
+## If you remove "console commands" there will be one added by
+## default allowing executing all commands, but if you just change
+## permissions in it, version from config file will be used instead
+## of default one.
+##
+api_permissions:
+  "admin access":
+    who:
+      - access:
+        - allow:
+          - ip: "0.0.0.0/0"
+    what:
+      - "send_stanza"
+      - "kick_session"
+      - "set_room_affiliation"
+      - "get_online_rooms"
+      - "get_room_occupants"
+      - "destroy_room"
+      - "get_room_options"
+      - "get_roster"
+
+shaper:
+  ##
+  ## The "normal" shaper limits traffic speed to 1000 B/s
+  ##
+  normal: 1000
+
+  ##
+  ## The "fast" shaper limits traffic speed to 50000 B/s
+  ##
+  fast: 50000
+
+##
+## This option specifies the maximum number of elements in the queue
+## of the FSM. Refer to the documentation for details.
+##
+max_fsm_queue: 1000
+
+# ACL rules managed by the ejabberd::user defined type
+
+shaper_rules:
+  ## Maximum number of simultaneous sessions allowed for a single user:
+  max_user_sessions: 10
+  ## Maximum number of offline messages that users can have:
+  max_user_offline_messages:
+    - 5000: admin
+    - 100
+  ## For C2S connections, all users except admins use the "normal" shaper
+  c2s_shaper:
+    - none: admin
+    - normal
+  ## All S2S connections use the "fast" shaper
+  s2s_shaper: fast

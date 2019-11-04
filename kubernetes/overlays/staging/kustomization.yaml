@@ -1,0 +1,14 @@
+namespace: server
+bases:
+- ../../base
+configMapGenerator:
+- name: ejabberd-config
+  behavior: merge
+  files:
+  - config/hosts.yaml
+  - config/access-control-lists.yaml
+secretGenerator:
+- name: ejabberd-config-secret
+  behavior: merge
+  files:
+  - secret/authentication.yaml
