@@ -148,11 +148,11 @@ send_metrics(Host, Probe, Peer, Port) ->
 		{Key, Val} ->
 		    BVal = integer_to_binary(Val),
 		    Data = <<BaseId/binary, (misc:atom_to_binary(Key))/binary,
-			    ":g/", TS/binary, ":", BVal/binary>>,
+			    ":", BVal/binary, "|g">>,
 		    gen_udp:send(Socket, Peer, Port, Data);
 		Key ->
 		    Data = <<BaseId/binary, (misc:atom_to_binary(Key))/binary,
-			    ":c/", TS/binary, ":1">>,
+			    ":1|c">>,
 		    gen_udp:send(Socket, Peer, Port, Data)
 	    end;
 	Err ->
