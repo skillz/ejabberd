@@ -17,6 +17,9 @@ spec:
     spec:
       serviceAccountName: chat-service
       volumes:
+      - name: statsd-mapping
+        configMap:
+          name: ejabberd-statsd-mapping
       # Configuration files for the vault and consul-template agents
       - name: vault-config
         configMap:
@@ -46,6 +49,17 @@ spec:
           value: http://vault.default:8200 # Vault is currently deployed in the default namespace
         args: [ "agent", "-config=/etc/vault/vault-agent-config.hcl" ]
       containers:
+      - name: ejabberd-statsd-exporter
+        image: prom/statsd-exporter:v0.12.2
+        imagePullPolicy: IfNotPresent
+        args: ["--statsd.mapping-config=/tmp/statsd-mapping.conf", "--statsd.listen-udp=:11111", "--statsd.listen-tcp=", ]
+        ports:
+        - containerPort: 9102
+          name: prometheus
+        volumeMounts:
+        - name: statsd-mapping
+          mountPath: /tmp/
+        name: statsd-mapping
       # consul-template connects to vault and populates templates with the values of secrets
       - name: consul-template
         image: hashicorp/consul-template:0.22.0-alpine # Latest alpine as of 2019-10-10
