@@ -8,6 +8,8 @@ resources:
 - service-account.yaml
 - service-external.yaml
 - service-internal-discovery.yaml
+- chat-alertrule.yaml
+- configmap.yaml
 configMapGenerator:
 - name: chat-service-config
   literals:

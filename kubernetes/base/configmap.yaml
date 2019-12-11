@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/instance: chat-service
+  name: ejabberd-statsd-mapping
+  namespace: server
+data:
+  statsd-mapping.conf: |
+    mappings:
+    - match: chat-admin.*.skillz.*.user_receive_packet
+      name: "chat_admin_user_receive_packet"
+      match_metric_type: counter
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.offline_message_hook
+      name: "chat_admin_offline_message_hook"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.sm_register_connection_hook
+      name: "chat_admin_sm_register_connection_hook"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.sm_remove_connection_hook
+      name: "chat_admin_sm_remove_connection_hook"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.s2s_send_packet
+      name: "chat_admin_s2s_send_packet"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.s2s_receive_packet
+      name: "chat_admin_s2s_receive_packet"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.register_user
+      name: "chat_admin_register_user"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.connected_users
+      name: "chat_admin_connected_users"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.erlang_processes
+      name: "chat_admin_erlang_processes"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.open_tcp_ports
+      name: "chat_admin_open_tcp_ports"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.sm_register_connection
+      name: "chat_admin_sm_register_connection"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.sm_remove_connection
+      name: "chat_admin_sm_remove_connection"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.user_send_packet
+      name: "chat_admin_user_send_packet"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat-admin.*.skillz.*.remove_user
+      name: "chat_admin_remove_user"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.user_receive_packet
+      name: "chat_user_receive_packet"
+      match_metric_type: counter
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.offline_message_hook
+      name: "chat_offline_message_hook"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.sm_register_connection_hook
+      name: "chat_sm_register_connection_hook"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.sm_remove_connection_hook
+      name: "chat_sm_remove_connection_hook"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.s2s_send_packet
+      name: "chat_s2s_send_packet"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.s2s_receive_packet
+      name: "chat_s2s_receive_packet"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.register_user
+      name: "chat_register_user"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.connected_users
+      name: "chat_connected_users"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.erlang_processes
+      name: "chat_erlang_processes"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.open_tcp_ports
+      name: "chat_open_tcp_ports"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.sm_register_connection
+      name: "chat_sm_register_connection"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.sm_remove_connection
+      name: "chat_sm_remove_connection"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.user_send_packet
+      name: "chat_user_send_packet"
+      labels:
+        env: "$1"
+        node: "$2"
+    - match: chat.*.skillz.*.remove_user
+      name: "chat_remove_user"
+      labels:
+        env: "$1"
+        node: "$2"

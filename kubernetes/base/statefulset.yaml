@@ -59,7 +59,6 @@ spec:
         volumeMounts:
         - name: statsd-mapping
           mountPath: /tmp/
-        name: statsd-mapping
       # consul-template connects to vault and populates templates with the values of secrets
       - name: consul-template
         image: hashicorp/consul-template:0.22.0-alpine # Latest alpine as of 2019-10-10

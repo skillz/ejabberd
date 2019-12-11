@@ -1,0 +1,84 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+  name: chat-service-k8s-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: chat-service
+    rules:
+    - alert: ChatHighS2SSendPacket
+      annotations:
+        message: High number of S2S packets sent
+        description: There have been more than 1000 S2S packets sent in the past 5mins for every iteration
+      expr: |
+        sum(chat_s2s_send_packet{job="chat-service-internal"}) > 1000
+      for: 5m
+      labels:
+        severity: critical
+    - alert: ChatHighUserSendPacket
+      annotations:
+        message: High number of user packets sent
+        description: There have been more than 1500 user packets sent in the past 5mins for every iteration
+      expr: |
+        sum(chat_user_send_packet{job="chat-service-internal"}) > 1500
+      for: 5m
+      labels:
+        severity: critical
+    - alert: ChatHighConnectedUsers
+      annotations:
+        message: High number of users connected
+        description: There have been more than 1000 users connected in the past 5mins for every iteration
+      expr: |
+        sum(chat_connected_users{job="chat-service-internal"}) > 1000
+      for: 5m
+      labels:
+        severity: critical
+    - alert: ChatHighUserReceivePacket
+      annotations:
+        message: High number of user packets received
+        description: There have been more than 1500 user packets received in the past 5mins for every iteration
+      expr: |
+        sum(chat_user_receive_packet{job="chat-service-internal"}) > 2000
+      for: 5m
+      labels:
+        severity: critical
+    - alert: ChatHighSMRegisterConnections
+      annotations:
+        message: High number of SM connections registered
+        description: There have been more than 300 SM connections registered in the past 5mins for every iteration
+      expr: |
+        sum(chat_sm_register_connection{job="chat-service-internal"}) > 1000
+      for: 5m
+      labels:
+        severity: critical
+    - alert: ChatHighOpenTCPPorts
+      annotations:
+        message: High number of TCP ports opened
+        description: There have been more than 1000 TCP ports opened in the past 5mins for every iteration
+      expr: |
+        sum(chat_open_tcp_ports{job="chat-service-internal"}) > 1000
+      for: 5m
+      labels:
+        severity: critical
+    - alert: ChatLowConnectedUsers
+      annotations:
+        message: Low number of users connected
+        description: There have been less than 2 users connected in the past 5mins for every iteration
+      expr: |
+        sum(chat_connected_users{job="chat-service-internal"}) < 2
+      for: 5m
+      labels:
+        severity: critical
+    - alert: ChatHighErlangProcesses
+      annotations:
+        message: High number of Erlang processes
+        description: There have been more than 1000 Erlang processes run in the past 5mins for every iteration
+      expr: |
+        sum(chat_erlang_processes{job="chat-service-internal"}) < 2
+      for: 5m
+      labels:
+        severity: critical
