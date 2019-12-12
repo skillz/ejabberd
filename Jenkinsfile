@@ -10,9 +10,9 @@ pipeline {
 
     parameters {
         string(name: 'AWS_ACCOUNT_ID', defaultValue: env.AWS_ACCOUNT_ID) // Get this from AWS
-        string(name: 'ECR_REGION', defaultValue: 'us-west-2')
-        string(name: 'EJABBERD_BRANCH', defaultValue: 'development')
-        string(name: 'MODULES_BRANCH', defaultValue: 'development')
+        string(name: 'ECR_REGION', defaultValue: env.ECR_REGION) // us-west-2 in QA
+        string(name: 'EJABBERD_BRANCH', defaultValue: env.EJABBERD_BRANCH) // development in QA
+        string(name: 'MODULES_BRANCH', defaultValue: env.MODULES_BRANCH) // development in QA
         string(name: 'SKILLZ_ENVIRONMENT', defaultValue: env.SKILLZ_ENVIRONMENT)
     }
 
