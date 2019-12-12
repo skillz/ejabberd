@@ -1,3 +1,9 @@
+def SKILLZ_ENV_DATACENTER_MAP = [
+    qa:         'islay',
+    staging:    'speyside',
+    production: 'skye'
+]
+
 pipeline {
     options {
         timestamps()
@@ -17,7 +23,7 @@ pipeline {
     }
 
     agent {
-        label "${params.SKILLZ_ENVIRONMENT}"
+        label "${SKILLZ_ENV_DATACENTER_MAP[params.SKILLZ_ENVIRONMENT]}"
     }
 
     stages {
