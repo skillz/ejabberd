@@ -43,7 +43,7 @@ pipeline {
                                 poll: false,
                                 extensions: [],
                                 submoduleCfg: [],
-                                userRemoteConfigs: [[url: "git@github.com:skillz/ejabberd"]]])
+                                userRemoteConfigs: [[url: "https://github.com/skillz/ejabberd.git"]]])
                 }
 
                 // Clone private modules
