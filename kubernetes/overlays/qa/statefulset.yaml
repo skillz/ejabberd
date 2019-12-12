@@ -10,7 +10,8 @@ spec:
     spec:
       containers:
       - name: ejabberd
-        image: $(ECR_REPOSITORY):latest
+        image: $(ECR_REPOSITORY):0.4.21
+        imagePullPolicy: Always
         volumeMounts:
           - name: ejabberd-config
             mountPath: /opt/chat-service/etc/ejabberd/authentication.yaml
