@@ -9,8 +9,10 @@ resources:
 - service-external.yaml
 - service-internal-discovery.yaml
 - chat-alertrule.yaml
-- configmap.yaml
 configMapGenerator:
+- name: ejabberd-statsd-mapping
+  files:
+  - config/statsd-mapping.conf
 - name: chat-service-config
   literals:
   - service_name_external=chat-service-external
