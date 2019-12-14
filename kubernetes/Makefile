@@ -12,5 +12,5 @@ kustomize: external-config # See the generated manifests for an environment
 kapply: external-config # Apply the generated manifests for an environment to the current kube context
 	kustomize build $(KUSTOMIZE_VARIANT) | kubectl apply -f -
 
-destroy: cloned-chart external-config # Destroys all ejabberd kubernetes resources, warning does not destroy external TF resources
+destroy: external-config # Destroys all ejabberd kubernetes resources, warning does not destroy external TF resources
 	kustomize build $(KUSTOMIZE_VARIANT) | kubectl delete -f -
