@@ -3,6 +3,7 @@ kind: Service
 metadata:
   labels:
     app: chat-service
+    k8s-app: chat-service-internal
   name: $(SVC_NAME_INTERNAL)
 spec:
   selector:
@@ -12,3 +13,6 @@ spec:
     - name: epmd
       port: 4369
       targetPort: epmd
+    - name: metrics
+      port: 9102
+      targetPort: 9102
