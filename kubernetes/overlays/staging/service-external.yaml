@@ -6,7 +6,7 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-internal: "false"
     service.beta.kubernetes.io/aws-load-balancer-ssl-cert: $(PUBLIC_ELB_SSL)
     service.beta.kubernetes.io/aws-load-balancer-extra-security-groups: $(PUBLIC_ELB_SG)
-    external-dns.alpha.kubernetes.io/hostname: chat.$(PUBLIC_DNS_ZONE_NAME) # Remove -k8s for cutover
+    external-dns.alpha.kubernetes.io/hostname: chat.$(PUBLIC_DNS_ZONE_NAME)
 spec:
   loadBalancerSourceRanges:
     - "0.0.0.1/32" # Bogus CIDR because we cannot currently prevent kubernetes from creating a security group for a load balancer, this can be cleaned up with more ingress rollout
