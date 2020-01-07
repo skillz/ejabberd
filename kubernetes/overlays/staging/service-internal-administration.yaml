@@ -7,7 +7,7 @@ metadata:
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-internal: "true"
     service.beta.kubernetes.io/aws-load-balancer-extra-security-groups: $(PRIVATE_ELB_SG)
-    external-dns.alpha.kubernetes.io/hostname: chat-admin.$(PRIVATE_DNS_ZONE_NAME),chat-admin-k8s.$(PUBLIC_DNS_ZONE_NAME)
+    external-dns.alpha.kubernetes.io/hostname: chat-admin.$(PRIVATE_DNS_ZONE_NAME),chat-admin.$(PUBLIC_DNS_ZONE_NAME)
 spec:
   selector:
     app: chat-service
