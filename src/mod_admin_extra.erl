@@ -1543,17 +1543,17 @@ send_stanza(FromString, ToString, Stanza) ->
             PacketToSend  = xmpp:set_from_to(Wrapped, Room, OfflineUser),
             ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, []),
             ok
-		end
-	end
+        end
+    end
     catch _:{xmpp_codec, Why} ->
-	    io:format("incorrect stanza: ~s~n", [xmpp:format_error(Why)]),
-	    {error, Why};
-	  _:{badmatch, {error, Why}} ->
-	    io:format("invalid xml: ~p~n", [Why]),
-	    {error, Why};
-	  _:{bad_jid, S} ->
-	    io:format("malformed JID: ~s~n", [S]),
-	    {error, "JID malformed"}
+        io:format("incorrect stanza: ~s~n", [xmpp:format_error(Why)]),
+        {error, Why};
+      _:{badmatch, {error, Why}} ->
+        io:format("invalid xml: ~p~n", [Why]),
+        {error, Why};
+      _:{bad_jid, S} ->
+        io:format("malformed JID: ~s~n", [S]),
+        {error, "JID malformed"}
     end.
 
 send_stanza_c2s(Username, Host, Resource, Stanza) ->
