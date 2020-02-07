@@ -1528,7 +1528,7 @@ send_stanza(FromString, ToString, Stanza) ->
         Packet        = xmpp:decode(El, ?NS_CLIENT, CodecOpts),
         ejabberd_router:route(xmpp:set_from_to(Packet, From, Room));
 	error ->
-        OfflineUser = get_offline_user(Room, jid:decode(FromString)),
+        OfflineUser = get_offline_user(Room, From),
         % Only trigger the offline message hook if the offline_user and the user this message is sent to are the same
         case OfflineUser of
         From ->
