@@ -4478,8 +4478,10 @@ inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
     [Children|_] = ChildrenList,
     {_, CData} = Children,
     case Name of
-      <<"user_id">> -> [User == CData|Acc];
-      <<"message_type">> -> [lists:member(binary_to_integer(CData), ?NoOfflineToSenderTypes)|Acc];
+      <<"user_id">> -> [User == CData | Acc];
+      %% TODO: Filtering by message_type is cruft that wasn't working as intended, but it's something we may want to
+      %% reimplement properly in the future, so for now we consider all message_types as potentially ignorable
+      <<"message_type">> -> [true | Acc];
       _ -> Acc
     end;
 inspect_sdk_xmlels(_, _, Acc) -> Acc.
@@ -4491,6 +4493,7 @@ should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
     ShouldIgnore = lists:foldl(fun(Child, Acc) ->
         inspect_sdk_xmlels(User, Child, Acc)
     end, [], SdkChildren),
+    ?DEBUG("ShouldIgnore [user_id, message_type]: ~p", [ShouldIgnore]),
     ShouldIgnore /= [true, true].
 
 %% If they are not in the room, and the message_type isn't in the list of
