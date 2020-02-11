@@ -4478,9 +4478,7 @@ inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
     [Children|_] = ChildrenList,
     {_, CData} = Children,
     case Name of
-      <<"user_id">> ->
-      ?DEBUG("Checking User: ~p against field: ~p. Result of comparison: ~p. Acc: ~p ", [User, CData, User == CData, Acc]),
-      [User == CData|Acc];
+      <<"user_id">> -> [User == CData|Acc];
       <<"message_type">> -> [lists:member(binary_to_integer(CData), ?NoOfflineToSenderTypes)|Acc];
       _ -> Acc
     end;
@@ -4501,7 +4499,6 @@ should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
 %% (Won't update offline message count).
 -spec send_to_room_or_offline(boolean(), boolean(), stanza(), binary()) -> any().
 send_to_room_or_offline(false, true, Packet, LServer) ->
-    ?DEBUG("Sending offline message using packet: ~p", [Packet]),
     ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet}, []);
 send_to_room_or_offline(_, _, Packet, _) -> ejabberd_router:route(Packet).
 
