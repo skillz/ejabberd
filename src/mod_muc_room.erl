@@ -4480,8 +4480,9 @@ inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
     case Name of
       <<"user_id">> ->
       ?DEBUG("Checking User: ~p against field: ~p. Result of comparison: ~p. Acc: ~p ", [User, CData, User == CData, Acc]),
-      [User == CData|Acc];
-      <<"message_type">> -> [lists:member(binary_to_integer(CData), ?NoOfflineToSenderTypes)|Acc];
+      [User == CData | Acc];
+      <<"message_type">> ->
+      [true | Acc];
       _ -> Acc
     end;
 inspect_sdk_xmlels(_, _, Acc) -> Acc.
@@ -4493,6 +4494,7 @@ should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
     ShouldIgnore = lists:foldl(fun(Child, Acc) ->
         inspect_sdk_xmlels(User, Child, Acc)
     end, [], SdkChildren),
+    ?DEBUG("ShouldIgnore: ~p", [ShouldIgnore]),
     ShouldIgnore /= [true, true].
 
 %% If they are not in the room, and the message_type isn't in the list of
