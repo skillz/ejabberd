@@ -1536,6 +1536,7 @@ send_stanza(FromString, ToString, Stanza) ->
 			                                    [spoof_muc_state(LServer, To), From#jid.user]),
 		Wrapped       = wrap(To, From, ArchivePacket, ?NS_MUCSUB_NODES_MESSAGES),
 		PacketToSend  = xmpp:set_from_to(Wrapped, To, From),
+		?DEBUG("Running offline_message_hook via send_stanza to an offline room", []),
 		ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, []),
 		ok
 	end
