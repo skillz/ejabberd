@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    k8s-app: chat-service-internal
+  name: chat-service
+  namespace: server
+spec:
+  endpoints:
+  - interval: 15s
+    port: metrics
+  jobLabel: k8s-app
+  namespaceSelector:
+    matchNames:
+    - server
+  selector:
+    matchLabels:
+      k8s-app: chat-service-internal

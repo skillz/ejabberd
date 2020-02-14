@@ -10,7 +10,7 @@ spec:
     spec:
       containers:
       - name: ejabberd
-        image: $(ECR_REPOSITORY):qa
+        image: $(ECR_REPOSITORY):staging
         imagePullPolicy: Always
         volumeMounts:
           - name: ejabberd-config

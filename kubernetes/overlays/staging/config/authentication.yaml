@@ -18,16 +18,15 @@ append_host_config:
   "chat.staging.skillz.com":
     auth_method: http
     auth_opts:
-      host: "http://api-gateway-internal.speyside:10010"
-      connection_pool_size: 12
+      host: "http://api-gateway.staging.skillz.com:10010"
+      connection_pool_size: 8
       connection_opts: []
-      basic_auth: "REDACTED"
       path_prefix: "/chat-auth/"
 
 default_db: sql
 
 sql_type: mysql
-sql_server: "mysql-ejabberd.staging.skillz.com"
+sql_server: "$(RDS_DB_ENDPOINT)"
 
 sql_port: 3306
 sql_database: "ejabberd"
