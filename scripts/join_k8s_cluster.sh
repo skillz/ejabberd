@@ -4,7 +4,7 @@ set -e
 # Join the cluster
 # Because this is deployed in a kubernetes StatefulSet we can assume that
 # Pods are created in sequential order starting from 0
-pod_ordinal=$(hostname | cut -d '-' -f 3) # Grabs the ordinal from the generated unique hostname
+pod_ordinal=$(hostname | rev | cut -d '-' -f 1 | rev) # Grabs the ordinal from the generated unique hostname
 num_replicas=$( echo $1 | xargs ) # This removes the trailing space we had to add to cast this to a string
 
 # Special clustering case for the first node
