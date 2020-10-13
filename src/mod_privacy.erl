@@ -528,7 +528,7 @@ check_packet(_, JID, Packet, Dir) ->
     #jid{luser = LUser, lserver = LServer} = JID,
     case get_user_list(LUser, LServer, default) of
 	{ok, {_, List}} ->
-	    do_check_packet(JID, List, Packet, Dir);
+	    do_check_packet(ok, JID, List, Packet, Dir);
 	_ ->
 	    allow
     end.
