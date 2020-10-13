@@ -4477,6 +4477,7 @@ is_privacy_allow(Packet) ->
 is_offline_privacy_allow(Packet) ->
     To = xmpp:get_to(Packet),
     LServer = To#jid.server,
+    ?DEBUG("mod_muc_room checking is_offline_privacy_allow", []),
     allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, respect_mute, [To, Packet, in]).
 
 -spec inspect_sdk_xmlels(binary(), map(), list()) -> list().
