@@ -612,12 +612,12 @@ check_packet_aux(Acc, [Item | List], PType, JID,
 		     message | iq | presence_in | presence_out | other) ->
 			    boolean().
 is_ptype_match(Acc, Item, PType) ->
-	ViewingMutedMessage = (Acc /= respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out
+	ViewingMutedMessage = (Acc /= respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out,
     case Item#listitem.match_all of
       true -> true;
       false ->
 	  case PType of
-	    message -> Item#listitem.match_message and ViewingMutedMessage;
+	    message -> Item#listitem.match_message and not ViewingMutedMessage;
 	    iq -> Item#listitem.match_iq;
 	    presence_in -> Item#listitem.match_presence_in;
 	    presence_out -> Item#listitem.match_presence_out;
