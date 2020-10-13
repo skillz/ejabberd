@@ -4473,6 +4473,12 @@ is_privacy_allow(Packet) ->
     LServer = To#jid.server,
     allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
 
+-spec is_offline_privacy_allow(stanza()) -> boolean().
+is_offline_privacy_allow(Packet) ->
+    To = xmpp:get_to(Packet),
+    LServer = To#jid.server,
+    allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, respect_mute, [To, Packet, in]).
+
 -spec inspect_sdk_xmlels(binary(), map(), list()) -> list().
 inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
     [Children|_] = ChildrenList,
@@ -4500,10 +4506,13 @@ should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
 %% specified message_types, and the to user doesn't match the user_id then
 %% send to the offline message hook, otherwise just send to the room.
 %% (Won't update offline message count).
--spec send_to_room_or_offline(boolean(), boolean(), stanza(), binary()) -> any().
-send_to_room_or_offline(false, true, Packet, LServer) ->
-    ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet}, []);
-send_to_room_or_offline(_, _, Packet, _) -> ejabberd_router:route(Packet).
+-spec send_to_room_or_offline(boolean(), boolean(), stanza(), stanza(), binary()) -> any().
+send_to_room_or_offline(false, true, Packet, PrivacyCheckPacket, LServer) ->
+	case is_offline_privacy_allow(PrivacyCheckPacket) of
+		true -> ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet}, []);
+		_ -> ok
+	end;
+send_to_room_or_offline(_, _, Packet, _, _) -> ejabberd_router:route(Packet).
 
 -spec send_wrapped(jid(), jid(), stanza(), binary(), state()) -> ok.
 send_wrapped(From, To, Packet, Node, State) ->
@@ -4537,7 +4546,7 @@ send_wrapped(From, To, Packet, Node, State) ->
 				?DEBUG("This packet will be used:~n~s", [xmpp:pp(PacketToSend)]),
 				case is_privacy_allow(PrivacyCheckPacket) of
 					true ->
-						send_to_room_or_offline(IsInRoom, should_send_message(Packet, To), PacketToSend, LServer);
+						send_to_room_or_offline(IsInRoom, should_send_message(Packet, To), PacketToSend, PrivacyCheckPacket, LServer);
 					false ->
 						?DEBUG("Packet wasnt allowed due to privacy list: ~p", [Packet])
 				end;

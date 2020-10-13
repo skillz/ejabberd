@@ -405,32 +405,36 @@ need_to_store(LServer, #message{type = Type} = Packet) ->
 store_packet({_Action, #message{from = From, to = To} = Packet} = Acc) ->
     case need_to_store(To#jid.lserver, Packet) of
 	true ->
-	    case check_event(Packet) of
-		true ->
-		    #jid{luser = LUser, lserver = LServer} = To,
-		    case ejabberd_hooks:run_fold(store_offline_message, LServer,
-						 Packet, []) of
-			drop ->
-			    Acc;
-			NewPacket ->
-			    TimeStamp = p1_time_compat:timestamp(),
-			    Expire = find_x_expire(TimeStamp, NewPacket),
-			    OffMsg = #offline_msg{us = {LUser, LServer},
-						  timestamp = TimeStamp,
-						  expire = Expire,
-						  from = From,
-						  to = To,
-						  packet = NewPacket},
-			    case store_offline_msg(OffMsg) of
-				ok ->
-				    {offlined, NewPacket};
-				{error, Reason} ->
-				    discard_warn_sender(Packet, Reason),
-				    stop
-			    end
-		    end;
-		_ -> Acc
-	    end;
+	    case ejabberd_hooks:run_fold(privacy_check_packet, To#jid.lserver, respect_mute, [To, Packet, in]) of
+	    	true ->
+			    case check_event(Packet) of
+				true ->
+				    #jid{luser = LUser, lserver = LServer} = To,
+				    case ejabberd_hooks:run_fold(store_offline_message, LServer,
+								 Packet, []) of
+					drop ->
+					    Acc;
+					NewPacket ->
+					    TimeStamp = p1_time_compat:timestamp(),
+					    Expire = find_x_expire(TimeStamp, NewPacket),
+					    OffMsg = #offline_msg{us = {LUser, LServer},
+								  timestamp = TimeStamp,
+								  expire = Expire,
+								  from = From,
+								  to = To,
+								  packet = NewPacket},
+					    case store_offline_msg(OffMsg) of
+						ok ->
+						    {offlined, NewPacket};
+						{error, Reason} ->
+						    discard_warn_sender(Packet, Reason),
+						    stop
+					    end
+				    end;
+				_ -> Acc
+			    end;
+			_ -> Acc
+		end;
 	false -> Acc
     end.
 
