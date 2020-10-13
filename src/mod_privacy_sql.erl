@@ -342,17 +342,6 @@ get_privacy_list_id_t(LUser, LServer, Name) ->
       ?SQL("select @(id)d from privacy_list"
            " where username=%(LUser)s and %(LServer)H and name=%(Name)s")).
 
-get_privacy_list_data(LUser, LServer, "skillz_default_privacy_list_v2") ->
-    ejabberd_sql:sql_query(
-      LServer,
-      ?SQL("select @(t)s, @(value)s, @(action)s, @(ord)d, 0 as 'match_all', "
-           "0 as 'match_iq', 0 as 'match_message', @(match_presence_in)b, "
-           "@(match_presence_out)b from privacy_list_data "
-           "where id ="
-           " (select id from privacy_list"
-           " where username=%(LUser)s and %(LServer)H and name='skillz_default_privacy_list') "
-           "order by ord")).
-
 get_privacy_list_data(LUser, LServer, Name) ->
     ejabberd_sql:sql_query(
       LServer,
