@@ -510,7 +510,7 @@ set_default_list(LUser, LServer, Name) ->
 	    Err
     end.
 
--spec check_packet(allow | deny, c2s_state() | jid(), stanza(), in | out) -> allow | deny.
+-spec check_packet(allow | respect_mute | deny, c2s_state() | jid(), stanza(), in | out) -> allow | deny.
 check_packet(Acc, #{jid := JID} = State, Packet, Dir) ->
     case maps:get(privacy_active_list, State, none) of
 	none ->
@@ -519,7 +519,7 @@ check_packet(Acc, #{jid := JID} = State, Packet, Dir) ->
 	    #jid{luser = LUser, lserver = LServer} = JID,
 	    case get_user_list(LUser, LServer, ListName) of
 		{ok, {_, List}} ->
-		    do_check_packet(JID, List, Packet, Dir);
+		    do_check_packet(Acc, JID, List, Packet, Dir);
 		_ ->
 		    check_packet(Acc, JID, Packet, Dir)
 	    end
@@ -536,10 +536,10 @@ check_packet(_, JID, Packet, Dir) ->
 %% From is the sender, To is the destination.
 %% If Dir = out, User@Server is the sender account (From).
 %% If Dir = in, User@Server is the destination account (To).
--spec do_check_packet(jid(), [listitem()], stanza(), in | out) -> allow | deny.
-do_check_packet(_, [], _, _) ->
+-spec do_check_packet(Acc, jid(), [listitem()], stanza(), in | out) -> allow | deny.
+do_check_packet(_, _, [], _, _) ->
     allow;
-do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
+do_check_packet(Acc, #jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
     From = xmpp:get_from(Packet),
     To = xmpp:get_to(Packet),
     case {From, To} of
@@ -582,22 +582,22 @@ do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
 					   roster_get_jid_info, LServer,
 					   {none, none, []},
 					   [LUser, LServer, LJID]),
-	  check_packet_aux(List, PType2, LJID, Subscription, Groups)
+	  check_packet_aux(Acc, List, PType2, LJID, Subscription, Groups)
     end.
 
--spec check_packet_aux([listitem()],
+-spec check_packet_aux(allow | respect_mute | deny, [listitem()],
 		       message | iq | presence_in | presence_out | other,
 		       ljid(), none | both | from | to, [binary()]) ->
 			      allow | deny.
 %% Ptype = mesage | iq | presence_in | presence_out | other
-check_packet_aux([], _PType, _JID, _Subscription,
+check_packet_aux(Acc, [], _PType, _JID, _Subscription,
 		 _Groups) ->
     allow;
-check_packet_aux([Item | List], PType, JID,
+check_packet_aux(Acc, [Item | List], PType, JID,
 		 Subscription, Groups) ->
     #listitem{type = Type, value = Value, action = Action} =
 	Item,
-    case is_ptype_match(Item, PType) of
+    case is_ptype_match(Acc, Item, PType) of
       true ->
 	    case is_type_match(Type, Value, JID, Subscription, Groups) of
 		true -> Action;
@@ -608,15 +608,16 @@ check_packet_aux([Item | List], PType, JID,
 	  check_packet_aux(List, PType, JID, Subscription, Groups)
     end.
 
--spec is_ptype_match(listitem(),
+-spec is_ptype_match(allow | respect_mute | deny, listitem(),
 		     message | iq | presence_in | presence_out | other) ->
 			    boolean().
-is_ptype_match(Item, PType) ->
+is_ptype_match(Acc, Item, PType) ->
+	ViewingMutedMessage = (Acc /= respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out
     case Item#listitem.match_all of
       true -> true;
       false ->
 	  case PType of
-	    message -> Item#listitem.match_message;
+	    message -> Item#listitem.match_message and ViewingMutedMessage;
 	    iq -> Item#listitem.match_iq;
 	    presence_in -> Item#listitem.match_presence_in;
 	    presence_out -> Item#listitem.match_presence_out;
