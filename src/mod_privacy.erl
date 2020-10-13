@@ -602,22 +602,21 @@ check_packet_aux(Acc, [Item | List], PType, JID,
 	    case is_type_match(Type, Value, JID, Subscription, Groups) of
 		true -> Action;
 		false ->
-		    check_packet_aux(List, PType, JID, Subscription, Groups)
+		    check_packet_aux(Acc, List, PType, JID, Subscription, Groups)
 	    end;
       false ->
-	  check_packet_aux(List, PType, JID, Subscription, Groups)
+	  check_packet_aux(Acc, List, PType, JID, Subscription, Groups)
     end.
 
 -spec is_ptype_match(allow | respect_mute | deny, listitem(),
 		     message | iq | presence_in | presence_out | other) ->
 			    boolean().
 is_ptype_match(Acc, Item, PType) ->
-	ViewingMutedMessage = (Acc /= respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out,
     case Item#listitem.match_all of
       true -> true;
       false ->
 	  case PType of
-	    message -> Item#listitem.match_message and not ViewingMutedMessage;
+	    message -> Item#listitem.match_message and not ((Acc /= respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out);
 	    iq -> Item#listitem.match_iq;
 	    presence_in -> Item#listitem.match_presence_in;
 	    presence_out -> Item#listitem.match_presence_out;
