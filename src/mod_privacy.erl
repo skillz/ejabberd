@@ -536,7 +536,7 @@ check_packet(_, JID, Packet, Dir) ->
 %% From is the sender, To is the destination.
 %% If Dir = out, User@Server is the sender account (From).
 %% If Dir = in, User@Server is the destination account (To).
--spec do_check_packet(Acc, jid(), [listitem()], stanza(), in | out) -> allow | deny.
+-spec do_check_packet(allow | respect_mute | deny, jid(), [listitem()], stanza(), in | out) -> allow | deny.
 do_check_packet(_, _, [], _, _) ->
     allow;
 do_check_packet(Acc, #jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
