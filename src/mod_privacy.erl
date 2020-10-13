@@ -512,6 +512,7 @@ set_default_list(LUser, LServer, Name) ->
 
 -spec check_packet(allow | respect_mute | deny, c2s_state() | jid(), stanza(), in | out) -> allow | deny.
 check_packet(Acc, #{jid := JID} = State, Packet, Dir) ->
+    ?DEBUG("mod_privacy check_packet. Acc: '~s'", [Acc]),
     case maps:get(privacy_active_list, State, none) of
 	none ->
 	    check_packet(Acc, JID, Packet, Dir);
@@ -612,11 +613,13 @@ check_packet_aux(Acc, [Item | List], PType, JID,
 		     message | iq | presence_in | presence_out | other) ->
 			    boolean().
 is_ptype_match(Acc, Item, PType) ->
+	ViewingMutedMessages = ((Acc /= respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out),
+    ?DEBUG("mod_privacy checking packet type. Acc: '~s' match_message: '~p'. ViewingMutedMessage: '~p'", [Acc, Item#listitem.match_message, ViewingMutedMessages]),
     case Item#listitem.match_all of
       true -> true;
       false ->
 	  case PType of
-	    message -> Item#listitem.match_message and not ((Acc /= respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out);
+	    message -> Item#listitem.match_message and not ViewingMutedMessages;
 	    iq -> Item#listitem.match_iq;
 	    presence_in -> Item#listitem.match_presence_in;
 	    presence_out -> Item#listitem.match_presence_out;
