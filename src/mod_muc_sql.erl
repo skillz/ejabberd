@@ -468,9 +468,9 @@ get_subscribed_rooms(LServer, Host, Jid) ->
     	 " from (select room, jid, host, nodes from muc_room_subscribers where jid=%(JidS)s and host=%(Host)s) as m"
     	 " left join (select username, timestamp from archive) as a on a.username in (select concat(m.room, '@%(Host)s') from muc_room_subscribers where jid=%(JidS)s and host=%(Host)s)"
     	 " group by m.room"
-    	 " order by max(a.timestamp) desc") of
+    	 " order by max(a.timestamp) desc")) of
 	{selected, Subs} ->
-	    [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- OrderedSubs];
+	    [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs];
 	_Error ->
 	    []
     end.
