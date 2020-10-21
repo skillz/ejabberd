@@ -464,10 +464,13 @@ get_subscribed_rooms(LServer, Host, Jid) ->
     JidS = jid:encode(Jid),
     case catch ejabberd_sql:sql_query(
 	LServer,
-	?SQL("select @(room)s, @(nodes)s from muc_room_subscribers where jid=%(JidS)s"
-	     " and host=%(Host)s")) of
+    ?SQL("select @(m.room)s, @(m.nodes)s"
+    	 " from (select room, jid, host, nodes from muc_room_subscribers where jid=%(JidS)s and host=%(Host)s) as m"
+    	 " left join (select username, timestamp from archive) as a on a.username in (select concat(m.room, '@%(Host)s') from muc_room_subscribers where jid=%(JidS)s and host=%(Host)s)"
+    	 " group by m.room"
+    	 " order by max(a.timestamp) desc") of
 	{selected, Subs} ->
-	    [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs];
+	    [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- OrderedSubs];
 	_Error ->
 	    []
     end.
