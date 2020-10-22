@@ -466,7 +466,7 @@ get_subscribed_rooms(LServer, Host, Jid) ->
 	LServer,
     ?SQL("select @(m.room)s, @(m.nodes)s"
     	 " from (select room, jid, host, nodes from muc_room_subscribers where jid=%(JidS)s and host=%(Host)s) as m"
-    	 " left join (select username, timestamp from archive) as a on a.username in (select concat(m.room, '@%(Host)s') from muc_room_subscribers where jid=%(JidS)s and host=%(Host)s)"
+    	 " left join (select username, timestamp from archive order by timestamp desc limit 1) as a on a.username in (select concat(m.room, concat('@', %(Host)s)) from muc_room_subscribers where jid=%(JidS)s and host=%(Host)s)"
     	 " group by m.room"
     	 " order by max(a.timestamp) desc")) of
 	{selected, Subs} ->
