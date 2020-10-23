@@ -613,13 +613,13 @@ check_packet_aux(Acc, [Item | List], PType, JID,
 		     message | iq | presence_in | presence_out | other) ->
 			    boolean().
 is_ptype_match(Acc, Item, PType) ->
-	ViewingMutedMessages = ((Acc /= respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out),
-    ?DEBUG("mod_privacy checking packet type. Acc: '~s' match_message: '~p'. ViewingMutedMessage: '~p'", [Acc, Item#listitem.match_message, ViewingMutedMessages]),
+	IgnoreMessageFlag = ((Acc == respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out),
+    ?DEBUG("mod_privacy checking packet type. Acc: '~s' match_message: '~p'. ViewingMutedMessage: '~p'", [Acc, Item#listitem.match_message, IgnoreMessageFlag]),
     case Item#listitem.match_all of
       true -> true;
       false ->
 	  case PType of
-	    message -> Item#listitem.match_message and not ViewingMutedMessages;
+	    message -> Item#listitem.match_message and IgnoreMessageFlag;
 	    iq -> Item#listitem.match_iq;
 	    presence_in -> Item#listitem.match_presence_in;
 	    presence_out -> Item#listitem.match_presence_out;
