@@ -405,7 +405,7 @@ need_to_store(LServer, #message{type = Type} = Packet) ->
 store_packet({_Action, #message{from = From, to = To} = Packet} = Acc) ->
     case need_to_store(To#jid.lserver, Packet) of
 	true ->
-	    case ejabberd_hooks:run_fold(privacy_check_packet, To#jid.lserver, respect_mute, [To, Packet, in]) of
+	    case ejabberd_hooks:run_fold(privacy_check_packet, To#jid.lserver, allow, [To, Packet, in]) of
 	    	true ->
 			    case check_event(Packet) of
 				true ->
