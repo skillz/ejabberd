@@ -476,12 +476,15 @@ get_user_list(LUser, LServer, Name) ->
 		      case ets_cache:lookup(
 			     ?PRIVACY_CACHE, {LUser, LServer}) of
 			  {ok, Privacy} ->
+			      ?DEBUG("Found a privacy in the cache", []),
 			      get_list_by_name(Privacy, Name);
 			  error ->
+			  	  ?DEBUG("Did not find a privacy in the cache", []),
 			      Mod:get_list(LUser, LServer, Name)
 		      end
 	      end);
 	false ->
+		?DEBUG("Looking up privacy list in DB", []),
 	    Mod:get_list(LUser, LServer, Name)
     end.
 
@@ -520,17 +523,21 @@ check_packet(Acc, #{jid := JID} = State, Packet, Dir) ->
 	    #jid{luser = LUser, lserver = LServer} = JID,
 	    case get_user_list(LUser, LServer, ListName) of
 		{ok, {_, List}} ->
-		    do_check_packet(Acc, JID, List, Packet, Dir);
+		    ?DEBUG("Found a custom privacy list for user ~s", [JID]),
+		    do_check_packet(Acc, JID, List, Packet, Dir); % found a privacy list
 		_ ->
 		    check_packet(Acc, JID, Packet, Dir)
 	    end
     end;
-check_packet(_, JID, Packet, Dir) ->
+check_packet(Acc, JID, Packet, Dir) ->
+    ?DEBUG("mod_privacy check_packet (529). Acc", []),
     #jid{luser = LUser, lserver = LServer} = JID,
     case get_user_list(LUser, LServer, default) of
 	{ok, {_, List}} ->
-	    do_check_packet(ok, JID, List, Packet, Dir);
+	    ?DEBUG("Found a default privacy list for user ~s", [JID]),
+	    do_check_packet(Acc, JID, List, Packet, Dir); % found a default privacy list
 	_ ->
+		?DEBUG("No default privacy list, allowing", []),
 	    allow
     end.
 
@@ -598,6 +605,7 @@ check_packet_aux(Acc, [Item | List], PType, JID,
 		 Subscription, Groups) ->
     #listitem{type = Type, value = Value, action = Action} =
 	Item,
+	?DEBUG("checking packet with action: '~s'", [Action]),
     case is_ptype_match(Acc, Item, PType) of
       true ->
 	    case is_type_match(Type, Value, JID, Subscription, Groups) of
@@ -613,13 +621,15 @@ check_packet_aux(Acc, [Item | List], PType, JID,
 		     message | iq | presence_in | presence_out | other) ->
 			    boolean().
 is_ptype_match(Acc, Item, PType) ->
-	ViewingMutedMessages = ((Acc /= respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out),
-    ?DEBUG("mod_privacy checking packet type. Acc: '~s' match_message: '~p'. ViewingMutedMessage: '~p'", [Acc, Item#listitem.match_message, ViewingMutedMessages]),
+	% true, false
+	#listitem{type = Type, value = Value, action = Action} = Item,
+	IgnoreMessageFlag = ((Acc == respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out),
+    ?DEBUG("mod_privacy checking packet type. Acc: '~s' match_message: '~p', match_presence_in: '~p', match_presence_out: '~p', applying action: '~p'. IgnoreMessageFlag: '~p', PType: '~s'", [Acc, Item#listitem.match_message, Item#listitem.match_presence_in, Item#listitem.match_presence_out, Action, IgnoreMessageFlag, PType]),
     case Item#listitem.match_all of
       true -> true;
       false ->
 	  case PType of
-	    message -> Item#listitem.match_message and not ViewingMutedMessages;
+	    message -> Item#listitem.match_message and IgnoreMessageFlag;
 	    iq -> Item#listitem.match_iq;
 	    presence_in -> Item#listitem.match_presence_in;
 	    presence_out -> Item#listitem.match_presence_out;

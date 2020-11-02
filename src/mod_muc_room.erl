@@ -4510,8 +4510,12 @@ should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
 -spec send_to_room_or_offline(boolean(), boolean(), stanza(), stanza(), binary()) -> any().
 send_to_room_or_offline(false, true, Packet, PrivacyCheckPacket, LServer) ->
 	case is_offline_privacy_allow(PrivacyCheckPacket) of
-		true -> ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet}, []);
-		_ -> ok
+		true -> 
+		  ?DEBUG("offline_privacy_allowed, sending offline_message", []),
+		  ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet}, []);
+		_ -> 
+		  ?DEBUG("Failed to allow offline_privacy_allowed, doing nothing", []),
+		  ok
 	end;
 send_to_room_or_offline(_, _, Packet, _, _) -> ejabberd_router:route(Packet).
 

@@ -739,6 +739,15 @@ is_privacy_allow(Packet) ->
 	       privacy_check_packet, LServer, allow,
 	       [To, Packet, in]).
 
+-spec is_offline_privacy_allow(stanza()) -> boolean().
+is_offline_privacy_allow(Packet) ->
+    To = xmpp:get_to(Packet),
+    LServer = To#jid.server,
+    ?DEBUG("checking is_offline_privacy_allow in ejabberd_sm", []),
+    allow == ejabberd_hooks:run_fold(
+	       privacy_check_packet, LServer, respect_mute,
+	       [To, Packet, in]).
+
 -spec route_message(message()) -> any().
 route_message(#message{to = To, type = Type} = Packet) ->
     LUser = To#jid.luser,
@@ -772,7 +781,7 @@ route_message(#message{to = To, type = Type} = Packet) ->
 			PrioRes);
       _ ->
 	    case ejabberd_auth:user_exists(LUser, LServer) andalso
-		is_privacy_allow(Packet) of
+		is_offline_privacy_allow(Packet) of
 		true ->
 		    ejabberd_hooks:run_fold(offline_message_hook,
 					    LServer, {bounce, Packet}, []);
