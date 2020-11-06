@@ -624,12 +624,13 @@ is_ptype_match(Acc, Item, PType) ->
 	% true, false
 	#listitem{type = Type, value = Value, action = Action} = Item,
 	IgnoreMessageFlag = ((Acc == respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out),
+	BlockedMessageFlag = Item#listitem.match_message and Item#listitem.match_presence_in and Item#listitem.match_presence_out,
     ?DEBUG("mod_privacy checking packet type. Acc: '~s' match_message: '~p', match_presence_in: '~p', match_presence_out: '~p', applying action: '~p'. IgnoreMessageFlag: '~p', PType: '~s'", [Acc, Item#listitem.match_message, Item#listitem.match_presence_in, Item#listitem.match_presence_out, Action, IgnoreMessageFlag, PType]),
     case Item#listitem.match_all of
       true -> true;
       false ->
 	  case PType of
-	    message -> Item#listitem.match_message and IgnoreMessageFlag;
+	    message -> Item#listitem.match_message and (IgnoreMessageFlag or BlockedMessageFlag);
 	    iq -> Item#listitem.match_iq;
 	    presence_in -> Item#listitem.match_presence_in;
 	    presence_out -> Item#listitem.match_presence_out;
