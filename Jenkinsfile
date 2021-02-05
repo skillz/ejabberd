@@ -4,7 +4,7 @@ switch(env.BRANCH_NAME) {
   case ~/PR-[0-9]+/:
     testPipeline()
     break
-  case 'development':
+  case 'build-deploy-improvements': // should be development
     testPipeline()
     buildPipeline()
     deploymentPipeline(['gitops-qa'], true)
@@ -26,7 +26,7 @@ def pullModules() {
 
   moduleRepositories.each { repo ->
     git.cloneRepo(
-      destination: "ejabberd/.ejabberd_modules/sources/${repo}",
+      destination: ".ejabberd_modules/sources/${repo}",
       org: 'skillz',
       repo: repo
     )
@@ -64,7 +64,7 @@ def buildPipeline() {
   }
 }
 
-def deploymentPipeline() {
+def deploymentPipeline(List repos, boolean autoMerge = false) {
   stage('GitOps Deploy') {
     echo "Not yet implemented"
   }
