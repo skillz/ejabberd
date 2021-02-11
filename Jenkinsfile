@@ -4,7 +4,7 @@ switch(env.BRANCH_NAME) {
   case ~/PR-[0-9]+/:
     testPipeline()
     break
-  case 'build-deploy-improvements': // should be development
+  case 'deployment':
     testPipeline()
     buildPipeline()
     deploymentPipeline(['gitops-qa'], true)
@@ -66,6 +66,27 @@ def buildPipeline() {
 
 def deploymentPipeline(List repos, boolean autoMerge = false) {
   stage('GitOps Deploy') {
-    echo "Not yet implemented"
+    workerTemplates.github {
+      node(POD_LABEL) {
+        def scmVars = checkout(scm)
+        def imageTag = scmVars.GIT_COMMIT
+
+        container('github') {
+          def prBranch = "${repoName()}@${scmVars.GIT_BRANCH}"
+          def modifyFile = "apps/${repoName()}/release.yaml"
+          createPR(
+            branch: prBranch,
+            waitForStatus: false,
+            repos: repos,
+            autoMerge: autoMerge,
+            modifyYaml: [
+              file        : modifyFile,
+              key         : "imageTag",
+              desiredValue: imageTag
+            ]
+          )
+        }
+      }
+    }
   }
 }
