@@ -26,7 +26,7 @@ ${EJABBERDCTL} started
 # Run post startup scripts
 ${EJABBERD_HOME}/scripts/create_users.sh
 if [ "${EJABBERD_K8S_AUTOCLUSTER}" = true ]; then
-    ${EJABBERD_HOME}/scripts/join_k8s_cluster.sh
+    ${EJABBERD_HOME}/scripts/join_k8s_cluster.sh $1
 fi
 
 wait $child
