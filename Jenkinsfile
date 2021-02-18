@@ -7,12 +7,12 @@ switch(env.BRANCH_NAME) {
   case 'development':
     testPipeline()
     buildPipeline()
-    deploymentPipeline(['gitops-qa'], true)
+    deploymentPipeline(['gitops-qa'], false)
     break
   case 'master':
     testPipeline()
     buildPipeline()
-    deploymentPipeline(['gitops-staging'], true)
+    deploymentPipeline(['gitops-staging'], false)
     deploymentPipeline(['gitops-production'], false)
     break
 }
