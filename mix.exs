@@ -46,8 +46,7 @@ defmodule Ejabberd.MixProject do
      included_applications: [:logger, :mnesia, :inets, :p1_utils, :cache_tab,
                              :fast_tls, :stringprep, :fast_xml, :xmpp,
                              :stun, :fast_yaml, :esip, :jiffy, :p1_oauth2,
-                             :base64url, :jose, :pkix, :os_mon, :ex_aws,
-                             :ex_aws_sts, :ex_aws_sqs]
+                             :base64url, :jose, :pkix, :os_mon]
      ++ cond_apps()]
   end
 
