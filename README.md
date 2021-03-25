@@ -73,3 +73,4 @@ make && sudo make install
 - A new SQL table is created for subscriptions.  Subscriptions used to only reside in the muc objects, and when they were removed we lost subscriptions.  See [this](https://github.com/skillz/ejabberd/pull/56) PR.
 - When all occupants leave a muc room, it is now removed from memory.  See [this](https://github.com/skillz/ejabberd/pull/57) PR.
 - Dockerfile refers to private modules that must exist in `.ejabberd_modules`
+
