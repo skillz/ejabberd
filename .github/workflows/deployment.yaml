@@ -93,7 +93,7 @@ jobs:
 
   deploy-dev:
     needs: [build]
-    if: ${{ github.event_name != 'pull_request' && needs.build.outputs.branch == 'development }}
+    if: ${{ github.event_name != 'pull_request' && needs.build.outputs.branch == 'development' }}
     runs-on: [feature/generic, size/nano, group/default, env/infra-mgmt]
     env:
       GITOPS_ENV: qa
