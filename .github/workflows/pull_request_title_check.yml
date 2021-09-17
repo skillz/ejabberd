@@ -8,9 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  title-format:
-    if: ${{ github.event_name != 'pull_request' && needs.build.outputs.branch == 'development }}
-
+  title_format:
+    runs-on: [feature/generic, size/nano, group/default, env/infra-mgmt]
     steps:
       - uses: deepakputhraya/action-pr-title@v1.0.2
         with:
