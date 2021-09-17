@@ -76,13 +76,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
 
-      - name: Get Github Token
-        id: github-token
-        uses: getsentry/action-github-app-token@v1
-        with:
-          app_id: ${{ secrets.INFRA_BOT_GITHUB_APP_ID }}
-          private_key: ${{ secrets.INFRA_BOT_GITHUB_APP_KEY }}
-
       - name: Build/Push
         uses: docker/build-push-action@v2
         with:
