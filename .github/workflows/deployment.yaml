@@ -1,0 +1,209 @@
+name: deployment
+
+on:
+  push:
+    branches:
+      - development
+      - master
+  pull_request:
+    branches:
+      - development
+      - master
+
+env:
+  APP_NAME: ${{ github.event.repository.name }}
+  DOCKER_REGISTRY: docker.jfrog.skillz.com
+  GITOPS_ACTION_VERSION: v0.2
+  MODULE_PATH: .ejabberd_modules/sources
+
+jobs:
+  build:
+    runs-on: [feature/dind, size/lg, group/default, env/infra-mgmt]
+    outputs:
+      version: ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
+      branch: ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+    steps:
+      - name: Cancel Previous Runs
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: styfle/cancel-workflow-action@0.9.1
+        with:
+          access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # Pull Modules
+      - name: Get Github Token
+        id: github-token
+        uses: getsentry/action-github-app-token@v1
+        with:
+          app_id: ${{ secrets.INFRA_BOT_GITHUB_APP_ID }}
+          private_key: ${{ secrets.INFRA_BOT_GITHUB_APP_KEY }}
+
+      - name: Get mod_push_skillz module
+        uses: actions/checkout@v2
+        with:
+          repository: skillz/mod_push_skillz
+          token: ${{ steps.github-token.outputs.token }}
+          path: ${{ env.MODULE_PATH }}/mod_push_skillz
+
+      - name: Get mod_pottymouth module
+        uses: actions/checkout@v2
+        with:
+          repository: skillz/mod_pottymouth
+          token: ${{ steps.github-token.outputs.token }}
+          path: ${{ env.MODULE_PATH }}/mod_pottymouth
+
+      - name: Get mod_beam_stats module
+        uses: actions/checkout@v2
+        with:
+          repository: skillz/mod_beam_stats
+          token: ${{ steps.github-token.outputs.token }}
+          path: ${{ env.MODULE_PATH }}/mod_beam_stats
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.APP_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=long,prefix=
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Get Github Token
+        id: github-token
+        uses: getsentry/action-github-app-token@v1
+        with:
+          app_id: ${{ secrets.INFRA_BOT_GITHUB_APP_ID }}
+          private_key: ${{ secrets.INFRA_BOT_GITHUB_APP_KEY }}
+
+      - name: Build/Push
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-dev:
+    needs: [build]
+    if: ${{ github.event_name != 'pull_request' && needs.build.outputs.branch == 'development }}
+    runs-on: [feature/generic, size/nano, group/default, env/infra-mgmt]
+    env:
+      GITOPS_ENV: qa
+    steps:
+      - name: Get Github Token
+        id: github-token
+        uses: getsentry/action-github-app-token@v1
+        with:
+          app_id: ${{ secrets.INFRA_BOT_GITHUB_APP_ID }}
+          private_key: ${{ secrets.INFRA_BOT_GITHUB_APP_KEY }}
+
+      - name: Check Out Infra GitOps Action
+        uses: actions/checkout@v2
+        with:
+          repository: skillz/infra-gitops-action
+          ref: ${{ env.GITOPS_ACTION_VERSION }}
+          token: ${{ steps.github-token.outputs.token }}
+          path: ./.github/actions/infra-gitops-action
+
+      - name: Check out Gitops Repo for updating the PR with
+        uses: actions/checkout@v2
+        with:
+          path: ./gitops-${{ env.GITOPS_ENV }}
+          repository: skillz/gitops-${{ env.GITOPS_ENV }}
+          token: ${{ steps.github-token.outputs.token }}
+
+      - name: Update the PR And Deploy
+        uses: ./.github/actions/infra-gitops-action
+        with:
+          workDir: ./gitops-${{ env.GITOPS_ENV }}
+          valueFile: apps/${{ env.APP_NAME }}/release.yaml
+          value: ${{ needs.build.outputs.version }}
+          repository: gitops-${{ env.GITOPS_ENV }}
+          token: ${{ steps.github-token.outputs.token }}
+          waitForStatus: false
+
+  deploy-staging:
+    needs: [build]
+    if: ${{ needs.build.outputs.branch == 'master' }}
+    runs-on: [feature/generic, size/nano, group/default, env/infra-mgmt]
+    env:
+      GITOPS_ENV: staging
+    steps:
+      - name: Get Github Token
+        id: github-token
+        uses: getsentry/action-github-app-token@v1
+        with:
+          app_id: ${{ secrets.INFRA_BOT_GITHUB_APP_ID }}
+          private_key: ${{ secrets.INFRA_BOT_GITHUB_APP_KEY }}
+
+      - name: Check Out Infra GitOps Action
+        uses: actions/checkout@v2
+        with:
+          repository: skillz/infra-gitops-action
+          ref: ${{ env.GITOPS_ACTION_VERSION }}
+          token: ${{ steps.github-token.outputs.token }}
+          path: ./.github/actions/infra-gitops-action
+
+      - name: Check out Gitops Repo for updating the PR with
+        uses: actions/checkout@v2
+        with:
+          path: ./gitops-${{ env.GITOPS_ENV }}
+          repository: skillz/gitops-${{ env.GITOPS_ENV }}
+          token: ${{ steps.github-token.outputs.token }}
+
+      - name: Update the PR And Deploy
+        uses: ./.github/actions/infra-gitops-action
+        with:
+          workDir: ./gitops-${{ env.GITOPS_ENV }}
+          valueFile: apps/${{ env.APP_NAME }}/release.yaml
+          value: ${{ needs.build.outputs.version }}
+          repository: gitops-${{ env.GITOPS_ENV }}
+          token: ${{ steps.github-token.outputs.token }}
+          waitForStatus: false
+
+  deploy-production:
+    needs: [build, deploy-staging]
+    if: ${{ needs.build.outputs.branch == 'master' }}
+    runs-on: [feature/generic, size/nano, group/default, env/infra-mgmt]
+    env:
+      GITOPS_ENV: production
+    steps:
+      - name: Get Github Token
+        id: github-token
+        uses: getsentry/action-github-app-token@v1
+        with:
+          app_id: ${{ secrets.INFRA_BOT_GITHUB_APP_ID }}
+          private_key: ${{ secrets.INFRA_BOT_GITHUB_APP_KEY }}
+
+      - name: Check Out Infra GitOps Action
+        uses: actions/checkout@v2
+        with:
+          repository: skillz/infra-gitops-action
+          ref: ${{ env.GITOPS_ACTION_VERSION }}
+          token: ${{ steps.github-token.outputs.token }}
+          path: ./.github/actions/infra-gitops-action
+
+      - name: Check out Gitops Repo for updating the PR with
+        uses: actions/checkout@v2
+        with:
+          path: ./gitops-${{ env.GITOPS_ENV }}
+          repository: skillz/gitops-${{ env.GITOPS_ENV }}
+          token: ${{ steps.github-token.outputs.token }}
+
+      - name: Update the PR And Deploy
+        uses: ./.github/actions/infra-gitops-action
+        with:
+          workDir: ./gitops-${{ env.GITOPS_ENV }}
+          valueFile: apps/${{ env.APP_NAME }}/release.yaml
+          value: ${{ needs.build.outputs.version }}
+          repository: gitops-${{ env.GITOPS_ENV }}
+          token: ${{ steps.github-token.outputs.token }}
+          waitForStatus: false

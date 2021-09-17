@@ -1,0 +1,46 @@
+name: Title Format
+
+on:
+  pull_request:
+    types: [edited, opened, reopened, ready_for_review, synchronize]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  title_format:
+    runs-on: [feature/generic, size/nano]
+
+    steps:
+      - uses: deepakputhraya/action-pr-title@v1.0.2
+        with:
+          regex: '^(\[(WS|ES|PS|APP)-[0-9]+\]){1,}.+$'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Find existing jira ticket format comment
+        uses: peter-evans/find-comment@v1
+        id: find-comment
+        if: failure()
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-includes: The pull request title must include the jira ticket number
+      - name: Adding comment regarding pull request title format
+        uses: peter-evans/create-or-update-comment@v1
+        if: steps.find-comment.outputs.comment-id == '' && failure()
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            The pull request title must include the jira ticket number. It should be in the format
+
+            ```
+            [<Jira Prefix>-<Jira ticket number>] Other description
+            ```
+
+            Jira prefix: `APP`, `ES`, `PS`, and `WS`
+            Jira ticket number: must be an integer
+
+            Examples:
+            ```
+            [WS-123] This is a web services jira ticket
+            [ES-345] This is an enabling services jira ticket
+            [PS-123][PS-234] This has multiple tickets. Do not have spaces between each ticket.
+            ```
