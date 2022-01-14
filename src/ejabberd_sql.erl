@@ -34,6 +34,7 @@
 %% External exports
 -export([start/1, start_link/2,
 	 sql_query/2,
+   sql_query/3,
 	 sql_query_t/1,
 	 sql_transaction/2,
 	 sql_bloc/2,
@@ -136,9 +137,12 @@ start_link(Host, StartInterval) ->
                             {selected, [any()]}.
 
 -spec sql_query(binary(), sql_query()) -> sql_query_result().
-
 sql_query(Host, Query) ->
-    sql_call(Host, {sql_query, Query}).
+  sql_query(Host, Query, primary).
+
+-spec sql_query(binary(), sql_query(), atom()) -> sql_query_result().
+sql_query(Host, Query, NodeType) ->
+  sql_call(Host, {sql_query, Query}, NodeType).
 
 %% SQL transaction based on a list of queries
 %% This function automatically
@@ -160,16 +164,24 @@ sql_transaction(Host, F) when is_function(F) ->
 %% SQL bloc, based on a erlang anonymous function (F = fun)
 sql_bloc(Host, F) -> sql_call(Host, {sql_bloc, F}).
 
+%% backwards compatible sql_call
 sql_call(Host, Msg) ->
+  sql_call(Host, Msg, primary).
+
+%% sql_call that accepts primary or secondary NodeType
+sql_call(Host, Msg, NodeType) ->
     case get(?STATE_KEY) of
+      %% new sql_call
       undefined ->
-        case ejabberd_sql_sup:get_random_pid(Host) of
+        %% get random pid of ejabberd_sql instance that matches the NodeType
+        %% so if NodeType is secondary, then it will run the sql cmd on an ejabberd_sql instance
+        %% that has a secondary database context (eg, the Host for that ejabberd_sql is one of the secondary ones)
+        case ejabberd_sql_sup:get_random_pid(Host, NodeType) of
           none -> {error, <<"Unknown Host">>};
           Pid ->
-		sync_send_event(Pid,{sql_cmd, Msg,
-				     p1_time_compat:monotonic_time(milli_seconds)},
-				query_timeout(Host))
-          end;
+		        sync_send_event(Pid, {sql_cmd, Msg, p1_time_compat:monotonic_time(milli_seconds)}, query_timeout(Host))
+        end;
+      %% nested sql call where the state is already in context from a parent's call to sql_call
       _State -> nested_op(Msg)
     end.
 
@@ -1182,10 +1194,12 @@ opt_type(sql_connect_timeout) ->
 opt_type(sql_queue_type) ->
     fun(ram) -> ram; (file) -> file end;
 opt_type(new_sql_schema) -> fun(B) when is_boolean(B) -> B end;
+opt_type(sql_secondary_servers) ->
+  fun(I) when is_list(I) -> I end;
 opt_type(_) ->
     [sql_database, sql_keepalive_interval,
      sql_password, sql_port, sql_server,
      sql_username, sql_ssl, sql_ssl_verify, sql_ssl_certfile,
      sql_ssl_cafile, sql_queue_type, sql_query_timeout,
      sql_connect_timeout,
-     new_sql_schema].
+     new_sql_schema, sql_secondary_servers].
