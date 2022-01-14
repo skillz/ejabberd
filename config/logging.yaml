@@ -1,0 +1,6 @@
+log_rate_limit: 100
+log_rotate_count: 30
+log_rotate_size: 524288000
+loglevel: 4
+log_rotate_date: "$D23"
+
