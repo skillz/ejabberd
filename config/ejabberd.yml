@@ -164,7 +164,7 @@ listen:
     ## request_handlers:
     ##   "/pub/archive": mod_http_fileserver
     web_admin: true
-    http_poll: true
+    # http_poll: true
     http_bind: true
     ## register: true
     captcha: true
@@ -359,6 +359,8 @@ auth_method: internal
 ## database alive. Specify in seconds: for example 28800 means 8 hours
 ##
 ## odbc_keepalive_interval: undefined
+
+sql_secondary_servers: ["123", "456"]
 
 ###   ===============
 ###   TRAFFIC SHAPERS
@@ -560,7 +562,7 @@ modules:
   mod_caps: {}
   mod_carboncopy: {}
   mod_client_state:
-    drop_chat_states: true
+    # drop_chat_states: true
     queue_presence: false
   mod_configure: {} # requires mod_adhoc
   mod_disco: {}
