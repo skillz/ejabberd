@@ -360,8 +360,6 @@ auth_method: internal
 ##
 ## odbc_keepalive_interval: undefined
 
-sql_secondary_servers: ["123", "456"]
-
 ###   ===============
 ###   TRAFFIC SHAPERS
 
