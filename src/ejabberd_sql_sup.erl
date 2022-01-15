@@ -177,13 +177,15 @@ get_pids(Host) ->
 get_pids(Host, NodeType) ->
   %% if secondary, pick a random secondary host and get its list of pids (ejabberd_sql instances)
   %% else default to primary
-  SearchHost = if NodeType == secondary ->
-    SecondaryHosts = ejabberd_config:get_option({sql_secondary_servers, Host}, []),
-    %% only use secondary hosts if there actually are some
-    if length(SecondaryHosts) > 0 ->
-      I = p1_rand:round_robin(length(SecondaryHosts)) + 1,
-      lists:nth(I, SecondaryHosts);
-    true -> Host
+  SearchHost = if NodeType == secondary orelse NodeType == any ->
+    %% make list of secondary servers and optionally include primary if NodeType is 'any' (meaning primary or secondary)
+    HostList = ejabberd_config:get_option({sql_secondary_servers, Host}, []) ++ (if NodeType == any -> [Host]; true -> [] end),
+    %% only use host list if there actually are some
+    if length(HostList) > 0 ->
+      I = random:uniform(length(HostList)),
+      lists:nth(I, HostList);
+    true ->
+      Host
     end;
   true ->
     Host
