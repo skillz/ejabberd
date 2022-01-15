@@ -182,7 +182,7 @@ get_pids(Host, NodeType) ->
     HostList = ejabberd_config:get_option({sql_secondary_servers, Host}, []) ++ (if NodeType == any -> [Host]; true -> [] end),
     %% only use host list if there actually are some
     if length(HostList) > 0 ->
-      I = random:uniform(length(HostList)),
+      I = rand:uniform(length(HostList)),
       lists:nth(I, HostList);
     true ->
       Host
