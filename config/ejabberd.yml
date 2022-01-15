@@ -2,28 +2,28 @@ language: "en"
 allow_contrib_modules: true
 
 # Logging
-include_config_file: logging.yaml
+include_config_file: config/dev-logging.yaml
 
 # Hosts, populated by ejabberd helm chart virtualHosts value
-include_config_file: config/hosts.yaml
+include_config_file: config/dev-hosts.yaml
 
 # Listeners
-include_config_file: config/listeners.yaml
+include_config_file: config/dev-listeners.yaml
 
 # API Permissions
-include_config_file: config/api-permissions.yaml
+include_config_file: config/dev-api-permissions.yaml
 
 # Access Rules
-include_config_file: config/access-rules.yaml
+include_config_file: config/dev-access-rules.yaml
 
 # Access Control Lists, populated by ejabberd helm chart virtualHosts value
-include_config_file: config/access-control-lists.yaml
+include_config_file: config/dev-access-control-lists.yaml
 
 # Authentication, populated by ejabberd helm chart virtualHosts value
-include_config_file: config/auth.yaml
+include_config_file: config/dev-auth.yaml
 
 # Mysql, populated by ejabberd helm chart mysqlAddress value
-include_config_file: config/mysql.yaml
+include_config_file: config/dev-mysql.yaml
 
 # Modules
-include_config_file: config/modules.yaml
+include_config_file: config/dev-modules.yaml
