@@ -30,8 +30,13 @@
 -author('alexey@process-one.net').
 
 -export([start_link/1, init/1, add_pid/2, remove_pid/2,
-	 get_pids/1, get_random_pid/1, get_pids/2, get_random_pid/2, transform_options/1,
-	 reload/1, opt_type/1]).
+  get_pids/1, get_random_pid/1, get_pids/2, get_random_pid/2, transform_options/1,
+  reload/1, opt_type/1,
+
+  add_sql_cache_pid/2,
+  get_subscribed_rooms_cache_key/2, get_subscribed_rooms_cache_item/1,
+  put_subscribed_rooms_cache_item/2, invalidate_subscribed_rooms/2, flush_subscribed_rooms_cache/0
+]).
 
 -include("logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
@@ -41,17 +46,32 @@
 -define(DEFAULT_POOL_SIZE, 10).
 -define(DEFAULT_SQL_START_INTERVAL, 30).
 -define(CONNECT_TIMEOUT, 500).
+-define(SQL_CACHES, ["get_subscribed_rooms_cache"]).
 
 -record(sql_pool, {host :: binary(),
 		   pid  :: pid()}).
 
+-record(sql_cache, {name :: binary(), pid  :: pid()}).
+
 start_link(Host) ->
     ejabberd_mnesia:create(?MODULE, sql_pool,
-			[{ram_copies, [node()]}, {type, bag},
-			 {local_content, true},
-			 {attributes, record_info(fields, sql_pool)}]),
-    F = fun () -> mnesia:delete({sql_pool, Host}) end,
+      [{ram_copies, [node()]}, {type, bag},
+       {local_content, true},
+       {attributes, record_info(fields, sql_pool)}]),
+    F = fun() -> mnesia:delete({sql_pool, Host}) end,
     mnesia:ets(F),
+
+    %% sql cache pids
+    ejabberd_mnesia:create(?MODULE, sql_cache,
+      [{ram_copies, [node()]}, {type, bag},
+        {local_content, true},
+        {attributes, record_info(fields, sql_cache)}]),
+
+    %% delete any entries in any sql caches
+    lists:foreach(fun(C) ->
+      mnesia:ets(fun() -> mnesia:delete({sql_cache, C}) end)
+    end, ?SQL_CACHES),
+
     supervisor:start_link({local,
 			   gen_mod:get_module_proc(Host, ?MODULE)},
 			  ?MODULE, [Host]).
@@ -72,7 +92,7 @@ init([Host]) ->
       {
         {one_for_one, PoolSize * 10 * length(AllHosts), 1},
         %% list of ejabberd_sql specs; the total count would be number of hosts * pool size
-        lists:foldl(
+        sql_cache_child_specs() ++ lists:foldl(
           fun(H, Acc) ->
             %% first iter: length(Acc) is 0, so HostIndex bc (0 / PoolSize) + 1 = 1
             %% next iter : Acc length will be exactly PoolSize, so we have (PoolSize  / PoolSize) + 1 = 2
@@ -168,6 +188,98 @@ reload(Host, NewPoolSize, OldPoolSize) ->
         lists:seq(1, length(AllHosts))
       )
     end.
+
+
+
+
+
+%% GENERIC CACHE FUNS
+sql_cache_child_specs() ->
+  lists:map(fun(C) ->
+    {C, {ejabberd_cache, start_link, [C]}, transient, 2000, worker, [?MODULE]}
+  end, ?SQL_CACHES)
+.
+
+add_sql_cache_pid(Name, Pid) ->
+  F = fun () ->
+    mnesia:write(#sql_cache{name = Name, pid = Pid})
+  end,
+  mnesia:ets(F)
+.
+
+get_cache_pid(Name) ->
+  Rs = mnesia:dirty_read(sql_cache, Name),
+  case [R#sql_cache.pid || R <- Rs, is_process_alive(R#sql_cache.pid)] of
+    [] -> none;
+    Pids -> hd(Pids)
+  end
+.
+
+get_cache_item(Name, Key) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:call(Pid, {get_item, Key})
+  end
+.
+
+put_cache_item(Name, Key, Value) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:call(Pid, {put_item, Key, Value})
+  end
+.
+
+delete_cache_item(Name, Key) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:cast(Pid, {delete_item, Key})
+  end
+.
+
+flush_cache(Name) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:cast(Pid, {flush})
+  end
+.
+%% END GENERIC CACHE FUNS
+
+
+
+
+
+%% GET_SUBSCRIBED_ROOMS CACHE FUNS
+get_subscribed_rooms_cache_key(JidS, Host) ->
+  unicode:characters_to_list("get_subscribed_rooms&") ++
+  unicode:characters_to_list(JidS) ++
+  unicode:characters_to_list("&") ++
+  unicode:characters_to_list(Host)
+.
+
+get_subscribed_rooms_cache_item(Key) ->
+  get_cache_item("get_subscribed_rooms_cache", Key)
+.
+
+put_subscribed_rooms_cache_item(Key, Value) ->
+  put_cache_item("get_subscribed_rooms_cache", Key, Value)
+.
+
+delete_subscribed_rooms_cache_item(Key) ->
+  delete_cache_item("get_subscribed_rooms_cache", Key)
+.
+
+flush_subscribed_rooms_cache() ->
+  flush_cache("get_subscribed_rooms_cache")
+.
+
+invalidate_subscribed_rooms(JidS, Host) ->
+  delete_subscribed_rooms_cache_item(get_subscribed_rooms_cache_key(JidS, Host))
+.
+%% END GET_SUBSCRIBED_ROOMS FUNS
+
+
+
+
 
 %% backwards compatible get_pids
 get_pids(Host) ->

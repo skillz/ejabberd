@@ -76,6 +76,7 @@ store_room(LServer, Host, Name, Opts, ChangesHints) ->
                     Changes when is_list(Changes) ->
                         [change_room(Host, Name, Change) || Change <- Changes];
                     _ ->
+											  ejabberd_sql_sup:flush_subscribed_rooms_cache(),
                         ejabberd_sql:sql_query_t(
                           ?SQL("delete from muc_room_subscribers where "
                                "room=%(Name)s and host=%(Host)s")),
@@ -87,6 +88,7 @@ store_room(LServer, Host, Name, Opts, ChangesHints) ->
 
 change_room(Host, Room, {add_subscription, JID, Nick, Nodes}) ->
     SJID = jid:encode(JID),
+		ejabberd_sql_sup:invalidate_subscribed_rooms(SJID, Host),
     SNodes = misc:term_to_expr(Nodes),
     ?SQL_UPSERT_T(
        "muc_room_subscribers",
@@ -97,6 +99,7 @@ change_room(Host, Room, {add_subscription, JID, Nick, Nodes}) ->
 	"nodes=%(SNodes)s"]);
 change_room(Host, Room, {del_subscription, JID}) ->
     SJID = jid:encode(JID),
+		ejabberd_sql_sup:invalidate_subscribed_rooms(SJID, Host),
     ejabberd_sql:sql_query_t(?SQL("delete from muc_room_subscribers where "
 				  "room=%(Room)s and host=%(Host)s and jid=%(SJID)s"));
 change_room(Host, Room, Change) ->
@@ -137,14 +140,15 @@ restore_room(LServer, Host, Name) ->
     end.
 
 forget_room(LServer, Host, Name) ->
+		ejabberd_sql_sup:flush_subscribed_rooms_cache(),
     F = fun () ->
-		ejabberd_sql:sql_query_t(
-                  ?SQL("delete from muc_room where name=%(Name)s"
-                       " and host=%(Host)s")),
-		ejabberd_sql:sql_query_t(
-		    ?SQL("delete from muc_room_subscribers where room=%(Name)s"
-                       " and host=%(Host)s"))
-	end,
+			ejabberd_sql:sql_query_t(
+										?SQL("delete from muc_room where name=%(Name)s"
+												 " and host=%(Host)s")),
+			ejabberd_sql:sql_query_t(
+					?SQL("delete from muc_room_subscribers where room=%(Name)s"
+												 " and host=%(Host)s"))
+		end,
     ejabberd_sql:sql_transaction(LServer, F).
 
 can_use_nick(LServer, Host, JID, Nick) ->
@@ -462,20 +466,32 @@ import(_, _, _) ->
 
 get_subscribed_rooms(LServer, Host, Jid) ->
     JidS = jid:encode(Jid),
-    case catch ejabberd_sql:sql_query(
-	LServer,
-			?SQL("select @(m.room)s, @(m.nodes)s "
-			"from muc_room_subscribers m "
-			"left join archive as a on a.username = concat(m.room, concat('@', %(Host)s)) "
-			"where m.jid = %(JidS)s "
-			"and m.host = %(Host)s "
-			"group by m.room "
-			"order by max(a.timestamp) desc, m.created_at desc")) of
-	{selected, Subs} ->
-	    [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs];
-	_Error ->
-	    []
-    end.
+		Key = ejabberd_sql_sup:get_subscribed_rooms_cache_key(JidS, Host),
+		case ejabberd_sql_sup:get_subscribed_rooms_cache_item(Key) of
+			none ->
+				%% io:put_chars("CACHE MISS\n"),
+				case catch ejabberd_sql:sql_query(
+					LServer,
+					?SQL("select @(m.room)s, @(m.nodes)s "
+					"from muc_room_subscribers m "
+					"left join archive as a on a.username = concat(m.room, concat('@', %(Host)s)) "
+					"where m.jid = %(JidS)s "
+					"and m.host = %(Host)s "
+					"group by m.room "
+					"order by max(a.timestamp) desc, m.created_at desc")
+				) of
+					{selected, Subs} ->
+						Resp = [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs],
+						ejabberd_sql_sup:put_subscribed_rooms_cache_item(Key, Resp),
+						Resp;
+					_Error ->
+						[]
+				end;
+			CachedValue ->
+				%% io:put_chars("CACHE HIT\n"),
+				CachedValue
+		end
+.
 
 %%%===================================================================
 %%% Internal functions

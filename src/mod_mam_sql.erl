@@ -97,14 +97,13 @@ extended_fields() ->
 
 store(Pkt, LServer, {LUser, LHost}, Type, Peer, Nick, _Dir, TS) ->
     SUser = case Type of
-		chat -> LUser;
-		groupchat -> jid:encode({LUser, LHost, <<>>})
-	    end,
-    BarePeer = jid:encode(
-		 jid:tolower(
-		   jid:remove_resource(Peer))),
-    LPeer = jid:encode(
-	      jid:tolower(Peer)),
+			chat -> LUser;
+			groupchat -> jid:encode({LUser, LHost, <<>>})
+		end,
+    BarePeer = jid:encode(jid:tolower(jid:remove_resource(Peer))),
+    LPeer = jid:encode(jid:tolower(Peer)),
+		ejabberd_sql_sup:invalidate_subscribed_rooms(SUser, LHost),
+		ejabberd_sql_sup:invalidate_subscribed_rooms(LPeer, LHost),
     Body = fxml:get_subtag_cdata(Pkt, <<"body">>),
     SType = misc:atom_to_binary(Type),
     XML = case gen_mod:get_module_opt(LServer, mod_mam, compress_xml) of
@@ -248,6 +247,8 @@ export(_Server) ->
                     end,
                 BarePeer = jid:encode(jid:tolower(jid:remove_resource(Peer))),
                 LPeer = jid:encode(jid:tolower(Peer)),
+								ejabberd_sql_sup:invalidate_subscribed_rooms(SUser, Host),
+								ejabberd_sql_sup:invalidate_subscribed_rooms(LPeer, Host),
                 XML = fxml:element_to_binary(Pkt),
                 Body = fxml:get_subtag_cdata(Pkt, <<"body">>),
                 SType = misc:atom_to_binary(Type),
