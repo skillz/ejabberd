@@ -140,7 +140,7 @@ restore_room(LServer, Host, Name) ->
     end.
 
 forget_room(LServer, Host, Name) ->
-		ejabberd_sql_sup:flush_subscribed_rooms_cache(),
+	  ejabberd_sql_sup:remove_subscribed_rooms_by_room(Name, Host),
     F = fun () ->
 			ejabberd_sql:sql_query_t(
 										?SQL("delete from muc_room where name=%(Name)s"
