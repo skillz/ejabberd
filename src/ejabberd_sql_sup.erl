@@ -35,7 +35,8 @@
 
   add_sql_cache_pid/2,
   get_subscribed_rooms_cache_key/2, get_subscribed_rooms_cache_item/1,
-  put_subscribed_rooms_cache_item/2, invalidate_subscribed_rooms/2, flush_subscribed_rooms_cache/0
+  put_subscribed_rooms_cache_item/2, invalidate_subscribed_rooms/2, flush_subscribed_rooms_cache/0,
+  remove_subscribed_rooms_by_room/2
 ]).
 
 -include("logger.hrl").
@@ -46,7 +47,9 @@
 -define(DEFAULT_POOL_SIZE, 10).
 -define(DEFAULT_SQL_START_INTERVAL, 30).
 -define(CONNECT_TIMEOUT, 500).
--define(SQL_CACHES, ["get_subscribed_rooms_cache"]).
+-define(SQL_CACHES, [
+  {"get_subscribed_rooms_cache", 10000}
+]).
 
 -record(sql_pool, {host :: binary(),
 		   pid  :: pid()}).
@@ -195,8 +198,8 @@ reload(Host, NewPoolSize, OldPoolSize) ->
 
 %% GENERIC CACHE FUNS
 sql_cache_child_specs() ->
-  lists:map(fun(C) ->
-    {C, {ejabberd_cache, start_link, [C]}, transient, 2000, worker, [?MODULE]}
+  lists:map(fun({ CacheName, MaxCacheSize }) ->
+    {CacheName, {ejabberd_cache, start_link, [CacheName, MaxCacheSize]}, transient, 2000, worker, [?MODULE]}
   end, ?SQL_CACHES)
 .
 
@@ -222,10 +225,24 @@ get_cache_item(Name, Key) ->
   end
 .
 
+get_cache(Name) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:call(Pid, {get_all})
+  end
+.
+
+put_cache(Name, Dict) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:cast(Pid, {put_all, Dict})
+  end
+.
+
 put_cache_item(Name, Key, Value) ->
   case get_cache_pid(Name) of
     none -> none;
-    Pid -> gen_server:call(Pid, {put_item, Key, Value})
+    Pid -> gen_server:cast(Pid, {put_item, Key, Value})
   end
 .
 
@@ -274,6 +291,44 @@ flush_subscribed_rooms_cache() ->
 
 invalidate_subscribed_rooms(JidS, Host) ->
   delete_subscribed_rooms_cache_item(get_subscribed_rooms_cache_key(JidS, Host))
+.
+
+%% filter InputRoom and InputHost out of any cache entries with them
+remove_subscribed_rooms_by_room(InputRoom, InputHost) ->
+  case get_cache("get_subscribed_rooms_cache") of
+    none -> none;
+    Dict ->
+      NewDict = dict:map(
+        fun(_, Value) ->
+          %% list of rooms and nodes from get_subscribed_rooms(...) call
+          case is_list(Value) of
+            true ->
+              %% filter entries to remove ones containing both InputRoom, InputHost
+              lists:filter(
+                fun(Entry) ->
+                  case Entry of
+                    %% jid:make from jid.erl has signature: { jid, User, Server, Resource, LUser, LServer, LResource }
+                    { { jid, Room, Host, _, _, _, _ }, _ } ->
+                      %% only keep entries where Room != InputRoom or Host != InputHost
+                      %% which is equiv to only removing entries where Room == InputRoom and Host == InputHost
+                      Room /= InputRoom orelse Host /= InputHost;
+                    _ ->
+                      %% unknown entry signature so keep it included to be safe
+                      true
+                  end
+                end,
+                Value
+              );
+            %% not a list so keep it in the dict to be safe
+            _ -> Value
+          end
+        end,
+        Dict
+      ),
+
+      %% put back the new cache with InputRoom entries removed
+      put_cache("get_subscribed_rooms_cache", NewDict)
+  end
 .
 %% END GET_SUBSCRIBED_ROOMS FUNS
 

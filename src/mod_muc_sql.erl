@@ -76,7 +76,7 @@ store_room(LServer, Host, Name, Opts, ChangesHints) ->
                     Changes when is_list(Changes) ->
                         [change_room(Host, Name, Change) || Change <- Changes];
                     _ ->
-											  ejabberd_sql_sup:flush_subscribed_rooms_cache(),
+											  ejabberd_sql_sup:remove_subscribed_rooms_by_room(Name, Host),
                         ejabberd_sql:sql_query_t(
                           ?SQL("delete from muc_room_subscribers where "
                                "room=%(Name)s and host=%(Host)s")),
