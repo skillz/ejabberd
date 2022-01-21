@@ -312,8 +312,9 @@ remove_subscribed_rooms_by_room(InputRoom, InputHost) ->
                       %% only keep entries where Room != InputRoom or Host != InputHost
                       %% which is equiv to only removing entries where Room == InputRoom and Host == InputHost
                       Room /= InputRoom orelse Host /= InputHost;
-                    _ ->
+                    OtherValue ->
                       %% unknown entry signature so keep it included to be safe
+                      ?WARNING_MSG("Unknown get_subscribed_rooms_cache entry signature: ~p", [OtherValue]),
                       true
                   end
                 end,
@@ -345,10 +346,13 @@ get_pids(Host, NodeType) ->
   %% if secondary, pick a random secondary host and get its list of pids (ejabberd_sql instances)
   %% else default to primary
   SearchHost = if NodeType == secondary orelse NodeType == any ->
+    ?WARNING_MSG("Using secondary server", []),
     %% make list of secondary servers and optionally include primary if NodeType is 'any' (meaning primary or secondary)
     HostList = ejabberd_config:get_option({sql_secondary_servers, Host}, []) ++ (if NodeType == any -> [Host]; true -> [] end),
+    ?WARNING_MSG("Secondary server host list: ~p", [HostList]),
     %% only use host list if there actually are some
     if length(HostList) > 0 ->
+      ?WARNING_MSG("Successfully chose secondary server for use", []),
       I = rand:uniform(length(HostList)),
       lists:nth(I, HostList);
     true ->
