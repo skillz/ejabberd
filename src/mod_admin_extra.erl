@@ -1483,7 +1483,7 @@ build_packet(Type, Subject, Body, FromJID, ToJID) ->
 	     id = p1_rand:get_string(),
 	     subject = xmpp:mk_text(Subject)}.
 
-%% Taken from mod_muc_room 
+%% Taken from mod_muc_room
 -spec wrap(jid(), jid(), stanza(), binary()) -> message().
 wrap(From, To, Packet, Node) ->
     El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
@@ -1498,9 +1498,9 @@ wrap(From, To, Packet, Node) ->
 %% Kind of a bad hack.  We might want to add a funciton in mod_mam in the future
 %% to handle this case.
 spoof_muc_state(LServer, RoomJID) ->
-	#state{ 
-	   server_host = LServer, 
-	   jid = RoomJID, 
+	#state{
+	   server_host = LServer,
+	   jid = RoomJID,
 	   config = #config{
 			mam = true}}.
 
@@ -1515,8 +1515,6 @@ get_offline_user(To, From) ->
 	end,
 	From#jid{user = NewUser, luser = NewUser}.
 
-%% Note this doesn't filter what we are sending to it.  Don't pass along user generated
-%% messages :) (if you need to , fun the filter_packet hook!)
 send_stanza(FromString, ToString, Stanza) ->
     try
 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
