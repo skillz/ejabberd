@@ -33,52 +33,52 @@
 
 %% External exports
 -export([start/1, start_link/2,
-	 sql_query/2,
+   sql_query/2,
    sql_query/3,
-	 sql_query_t/1,
-	 sql_transaction/2,
-	 sql_bloc/2,
-	 abort/1,
-	 restart/1,
-	 use_new_schema/0,
-	 sql_query_to_iolist/1,
-	 escape/1,
-	 standard_escape/1,
-	 escape_like/1,
-	 escape_like_arg/1,
-	 escape_like_arg_circumflex/1,
-	 to_bool/1,
-	 sqlite_db/1,
-	 sqlite_file/1,
-	 encode_term/1,
-	 decode_term/1,
-	 odbc_config/0,
-	 freetds_config/0,
-	 odbcinst_config/0,
-	 init_mssql/1,
-	 keep_alive/2,
-	 to_list/2]).
+   sql_query_t/1,
+   sql_transaction/2,
+   sql_bloc/2,
+   abort/1,
+   restart/1,
+   use_new_schema/0,
+   sql_query_to_iolist/1,
+   escape/1,
+   standard_escape/1,
+   escape_like/1,
+   escape_like_arg/1,
+   escape_like_arg_circumflex/1,
+   to_bool/1,
+   sqlite_db/1,
+   sqlite_file/1,
+   encode_term/1,
+   decode_term/1,
+   odbc_config/0,
+   freetds_config/0,
+   odbcinst_config/0,
+   init_mssql/1,
+   keep_alive/2,
+   to_list/2]).
 
 %% gen_fsm callbacks
 -export([init/1, handle_event/3, handle_sync_event/4,
-	 handle_info/3, terminate/3, print_state/1,
-	 code_change/4]).
+   handle_info/3, terminate/3, print_state/1,
+   code_change/4]).
 
 -export([connecting/2, connecting/3,
-	 session_established/2, session_established/3,
-	 opt_type/1]).
+   session_established/2, session_established/3,
+   opt_type/1]).
 
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
 -include("ejabberd_stacktrace.hrl").
 
 -record(state,
-	{db_ref = self()                     :: pid(),
-	 db_type = odbc                      :: pgsql | mysql | sqlite | odbc | mssql,
-	 db_version = undefined              :: undefined | non_neg_integer(),
-	 start_interval = 0                  :: non_neg_integer(),
-	 host = <<"">>                       :: binary(),
-	 pending_requests                    :: p1_queue:queue()}).
+  {db_ref = self()                     :: pid(),
+   db_type = odbc                      :: pgsql | mysql | sqlite | odbc | mssql,
+   db_version = undefined              :: undefined | non_neg_integer(),
+   start_interval = 0                  :: non_neg_integer(),
+   host = <<"">>                       :: binary(),
+   pending_requests                    :: p1_queue:queue()}).
 
 -define(STATE_KEY, ejabberd_sql_state).
 
@@ -121,12 +121,12 @@
 %%%----------------------------------------------------------------------
 start(Host) ->
     p1_fsm:start(ejabberd_sql, [Host],
-		     fsm_limit_opts() ++ (?FSMOPTS)).
+         fsm_limit_opts() ++ (?FSMOPTS)).
 
 start_link(Host, StartInterval) ->
     p1_fsm:start_link(ejabberd_sql,
-			  [Host, StartInterval],
-			  fsm_limit_opts() ++ (?FSMOPTS)).
+        [Host, StartInterval],
+        fsm_limit_opts() ++ (?FSMOPTS)).
 
 -type sql_query() :: [sql_query() | binary()] | #sql_query{} |
                      fun(() -> any()) | fun((atom(), _) -> any()).
@@ -153,9 +153,9 @@ sql_query(Host, Query, NodeType) ->
 sql_transaction(Host, Queries)
     when is_list(Queries) ->
     F = fun () ->
-		lists:foreach(fun (Query) -> sql_query_t(Query) end,
-			      Queries)
-	end,
+    lists:foreach(fun (Query) -> sql_query_t(Query) end,
+            Queries)
+  end,
     sql_transaction(Host, F);
 %% SQL transaction, based on a erlang anonymous function (F = fun)
 sql_transaction(Host, F) when is_function(F) ->
@@ -179,7 +179,7 @@ sql_call(Host, Msg, NodeType) ->
         case ejabberd_sql_sup:get_random_pid(Host, NodeType) of
           none -> {error, <<"Unknown Host">>};
           Pid ->
-		        sync_send_event(Pid, {sql_cmd, Msg, p1_time_compat:monotonic_time(milli_seconds)}, query_timeout(Host))
+            sync_send_event(Pid, {sql_cmd, Msg, p1_time_compat:monotonic_time(milli_seconds)}, query_timeout(Host))
         end;
       %% nested sql call where the state is already in context from a parent's call to sql_call
       _State -> nested_op(Msg)
@@ -187,20 +187,20 @@ sql_call(Host, Msg, NodeType) ->
 
 keep_alive(Host, PID) ->
     case sync_send_event(PID,
-		    {sql_cmd, {sql_query, ?KEEPALIVE_QUERY},
-		     p1_time_compat:monotonic_time(milli_seconds)},
-		    query_timeout(Host)) of
-	{selected,_,[[<<"1">>]]} ->
-	    ok;
-	_Err ->
-	    ?ERROR_MSG("keep alive query failed, closing connection: ~p", [_Err]),
-	    sync_send_event(PID, force_timeout, query_timeout(Host))
+        {sql_cmd, {sql_query, ?KEEPALIVE_QUERY},
+         p1_time_compat:monotonic_time(milli_seconds)},
+        query_timeout(Host)) of
+  {selected,_,[[<<"1">>]]} ->
+      ok;
+  _Err ->
+      ?ERROR_MSG("keep alive query failed, closing connection: ~p", [_Err]),
+      sync_send_event(PID, force_timeout, query_timeout(Host))
     end.
 
 sync_send_event(Pid, Msg, Timeout) ->
     try p1_fsm:sync_send_event(Pid, Msg, Timeout)
     catch _:{Reason, {p1_fsm, _, _}} ->
-	    {error, Reason}
+      {error, Reason}
     end.
 
 -spec sql_query_t(sql_query()) -> sql_query_result().
@@ -211,10 +211,10 @@ sql_query_t(Query) ->
     case QRes of
       {error, Reason} -> throw({aborted, Reason});
       Rs when is_list(Rs) ->
-	  case lists:keysearch(error, 1, Rs) of
-	    {value, {error, Reason}} -> throw({aborted, Reason});
-	    _ -> QRes
-	  end;
+    case lists:keysearch(error, 1, Rs) of
+      {value, {error, Reason}} -> throw({aborted, Reason});
+      _ -> QRes
+    end;
       _ -> QRes
     end.
 
@@ -237,7 +237,7 @@ escape_char(C) -> <<C>>.
 
 -spec escape(binary()) -> binary().
 escape(S) ->
-	<<  <<(escape_char(Char))/binary>> || <<Char>> <= S >>.
+  <<  <<(escape_char(Char))/binary>> || <<Char>> <= S >>.
 
 %% Escape character that will confuse an SQL engine
 %% Percent and underscore only need to be escaped for pattern matching like
@@ -294,12 +294,12 @@ sqlite_db(Host) ->
 -spec sqlite_file(binary()) -> string().
 sqlite_file(Host) ->
     case ejabberd_config:get_option({sql_database, Host}) of
-	undefined ->
-	    {ok, Cwd} = file:get_cwd(),
-	    filename:join([Cwd, "sqlite", atom_to_list(node()),
-			   binary_to_list(Host), "ejabberd.db"]);
-	File ->
-	    binary_to_list(File)
+  undefined ->
+      {ok, Cwd} = file:get_cwd(),
+      filename:join([Cwd, "sqlite", atom_to_list(node()),
+         binary_to_list(Host), "ejabberd.db"]);
+  File ->
+      binary_to_list(File)
     end.
 
 use_new_schema() ->
@@ -321,24 +321,24 @@ init([Host, StartInterval]) ->
     p1_fsm:send_event(self(), connect),
     ejabberd_sql_sup:add_pid(Host, self()),
     QueueType = case ejabberd_config:get_option({sql_queue_type, Host}) of
-		    undefined ->
-			ejabberd_config:default_queue_type(Host);
-		    Type ->
-			Type
-		end,
+        undefined ->
+      ejabberd_config:default_queue_type(Host);
+        Type ->
+      Type
+    end,
     {ok, connecting,
      #state{db_type = DBType, host = Host,
-	    pending_requests = p1_queue:new(QueueType, max_fsm_queue()),
-	    start_interval = StartInterval}}.
+      pending_requests = p1_queue:new(QueueType, max_fsm_queue()),
+      start_interval = StartInterval}}.
 
 connecting(connect, #state{host = Host} = State) ->
     ConnectRes = case db_opts(Host) of
-		   [mysql | Args] -> apply(fun mysql_connect/8, Args);
+       [mysql | Args] -> apply(fun mysql_connect/8, Args);
            [pgsql | Args] -> apply(fun pgsql_connect/8, Args);
            [sqlite | Args] -> apply(fun sqlite_connect/1, Args);
-		   [mssql | Args] -> apply(fun odbc_connect/2, Args);
-		   [odbc | Args] -> apply(fun odbc_connect/2, Args)
-		 end,
+       [mssql | Args] -> apply(fun odbc_connect/2, Args);
+       [odbc | Args] -> apply(fun odbc_connect/2, Args)
+     end,
     case ConnectRes of
         {ok, Ref} ->
             erlang:monitor(process, Ref),
@@ -348,76 +348,76 @@ connecting(connect, #state{host = Host} = State) ->
                  (_) ->
                       ok
               end, get()),
-	    PendingRequests =
-		p1_queue:dropwhile(
-		  fun(Req) ->
-			  p1_fsm:send_event(self(), Req),
-			  true
-		  end, State#state.pending_requests),
+      PendingRequests =
+    p1_queue:dropwhile(
+      fun(Req) ->
+        p1_fsm:send_event(self(), Req),
+        true
+      end, State#state.pending_requests),
             State1 = State#state{db_ref = Ref,
                                  pending_requests = PendingRequests},
             State2 = get_db_version(State1),
             {next_state, session_established, State2};
       {error, Reason} ->
-	  ?WARNING_MSG("~p connection failed:~n** Reason: ~p~n** "
-		       "Retry after: ~p seconds",
-		       [State#state.db_type, Reason,
-			State#state.start_interval div 1000]),
-	  p1_fsm:send_event_after(State#state.start_interval,
-				      connect),
-	  {next_state, connecting, State}
+    ?WARNING_MSG("~p connection failed:~n** Reason: ~p~n** "
+           "Retry after: ~p seconds",
+           [State#state.db_type, Reason,
+      State#state.start_interval div 1000]),
+    p1_fsm:send_event_after(State#state.start_interval,
+              connect),
+    {next_state, connecting, State}
     end;
 connecting(Event, State) ->
     ?WARNING_MSG("unexpected event in 'connecting': ~p",
-		 [Event]),
+     [Event]),
     {next_state, connecting, State}.
 
 connecting({sql_cmd, {sql_query, ?KEEPALIVE_QUERY},
-	    _Timestamp},
-	   From, State) ->
+      _Timestamp},
+     From, State) ->
     p1_fsm:reply(From,
-		     {error, <<"SQL connection failed">>}),
+         {error, <<"SQL connection failed">>}),
     {next_state, connecting, State};
 connecting({sql_cmd, Command, Timestamp} = Req, From,
-	   State) ->
+     State) ->
     ?DEBUG("queuing pending request while connecting:~n\t~p",
-	   [Req]),
+     [Req]),
     PendingRequests =
-	try p1_queue:in({sql_cmd, Command, From, Timestamp},
-			State#state.pending_requests)
-	catch error:full ->
-		Q = p1_queue:dropwhile(
-		      fun({sql_cmd, _, To, _Timestamp}) ->
-			      p1_fsm:reply(
-				To, {error, <<"SQL connection failed">>}),
-			      true
-		      end, State#state.pending_requests),
-		p1_queue:in({sql_cmd, Command, From, Timestamp}, Q)
-	end,
+  try p1_queue:in({sql_cmd, Command, From, Timestamp},
+      State#state.pending_requests)
+  catch error:full ->
+    Q = p1_queue:dropwhile(
+          fun({sql_cmd, _, To, _Timestamp}) ->
+            p1_fsm:reply(
+        To, {error, <<"SQL connection failed">>}),
+            true
+          end, State#state.pending_requests),
+    p1_queue:in({sql_cmd, Command, From, Timestamp}, Q)
+  end,
     {next_state, connecting,
      State#state{pending_requests = PendingRequests}};
 connecting(Request, {Who, _Ref}, State) ->
     ?WARNING_MSG("unexpected call ~p from ~p in 'connecting'",
-		 [Request, Who]),
+     [Request, Who]),
     {reply, {error, badarg}, connecting, State}.
 
 session_established({sql_cmd, Command, Timestamp}, From,
-		    State) ->
+        State) ->
     run_sql_cmd(Command, From, State, Timestamp);
 session_established(Request, {Who, _Ref}, State) ->
     ?WARNING_MSG("unexpected call ~p from ~p in 'session_establ"
-		 "ished'",
-		 [Request, Who]),
+     "ished'",
+     [Request, Who]),
     {reply, {error, badarg}, session_established, State}.
 
 session_established({sql_cmd, Command, From, Timestamp},
-		    State) ->
+        State) ->
     run_sql_cmd(Command, From, State, Timestamp);
 session_established(force_timeout, State) ->
     {stop, timeout, State};
 session_established(Event, State) ->
     ?WARNING_MSG("unexpected event in 'session_established': ~p",
-		 [Event]),
+     [Event]),
     {next_state, session_established, State}.
 
 handle_event(_Event, StateName, State) ->
@@ -432,12 +432,12 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %% We receive the down signal when we loose the MySQL connection (we are
 %% monitoring the connection)
 handle_info({'DOWN', _MonitorRef, process, _Pid, _Info},
-	    _StateName, State) ->
+      _StateName, State) ->
     p1_fsm:send_event(self(), connect),
     {next_state, connecting, State};
 handle_info(Info, StateName, State) ->
     ?WARNING_MSG("unexpected info in ~p: ~p",
-		 [StateName, Info]),
+     [StateName, Info]),
     {next_state, StateName, State}.
 
 terminate(_Reason, _StateName, State) ->
@@ -464,14 +464,14 @@ run_sql_cmd(Command, From, State, Timestamp) ->
     QueryTimeout = query_timeout(State#state.host),
     case p1_time_compat:monotonic_time(milli_seconds) - Timestamp of
       Age when Age < QueryTimeout ->
-	  put(?NESTING_KEY, ?TOP_LEVEL_TXN),
-	  put(?STATE_KEY, State),
-	  abort_on_driver_error(outer_op(Command), From);
+    put(?NESTING_KEY, ?TOP_LEVEL_TXN),
+    put(?STATE_KEY, State),
+    abort_on_driver_error(outer_op(Command), From);
       Age ->
-	  ?ERROR_MSG("Database was not available or too slow, "
-		     "discarding ~p milliseconds old request~n~p~n",
-		     [Age, Command]),
-	  {next_state, session_established, State}
+    ?ERROR_MSG("Database was not available or too slow, "
+         "discarding ~p milliseconds old request~n~p~n",
+         [Age, Command]),
+    {next_state, session_established, State}
     end.
 
 %% Only called by handle_call, only handles top level operations.
@@ -489,7 +489,7 @@ nested_op({sql_query, Query}) ->
 nested_op({sql_transaction, F}) ->
     NestingLevel = get(?NESTING_KEY),
     if NestingLevel =:= (?TOP_LEVEL_TXN) ->
-	   outer_transaction(F, ?MAX_TRANSACTION_RESTARTS, <<"">>);
+     outer_transaction(F, ?MAX_TRANSACTION_RESTARTS, <<"">>);
        true -> inner_transaction(F)
     end;
 nested_op({sql_bloc, F}) -> execute_bloc(F).
@@ -499,11 +499,11 @@ inner_transaction(F) ->
     PreviousNestingLevel = get(?NESTING_KEY),
     case get(?NESTING_KEY) of
       ?TOP_LEVEL_TXN ->
-	  {backtrace, T} = process_info(self(), backtrace),
-	  ?ERROR_MSG("inner transaction called at outer txn "
-		     "level. Trace: ~s",
-		     [T]),
-	  erlang:exit(implementation_faulty);
+    {backtrace, T} = process_info(self(), backtrace),
+    ?ERROR_MSG("inner transaction called at outer txn "
+         "level. Trace: ~s",
+         [T]),
+    erlang:exit(implementation_faulty);
       _N -> ok
     end,
     put(?NESTING_KEY, PreviousNestingLevel + 1),
@@ -521,34 +521,34 @@ outer_transaction(F, NRestarts, _Reason) ->
     case get(?NESTING_KEY) of
       ?TOP_LEVEL_TXN -> ok;
       _N ->
-	  {backtrace, T} = process_info(self(), backtrace),
-	  ?ERROR_MSG("outer transaction called at inner txn "
-		     "level. Trace: ~s",
-		     [T]),
-	  erlang:exit(implementation_faulty)
+    {backtrace, T} = process_info(self(), backtrace),
+    ?ERROR_MSG("outer transaction called at inner txn "
+         "level. Trace: ~s",
+         [T]),
+    erlang:exit(implementation_faulty)
     end,
     sql_query_internal([<<"begin;">>]),
     put(?NESTING_KEY, PreviousNestingLevel + 1),
     try F() of
-	Res ->
-	    sql_query_internal([<<"commit;">>]),
-	    {atomic, Res}
+  Res ->
+      sql_query_internal([<<"commit;">>]),
+      {atomic, Res}
     catch
-	?EX_RULE(throw, {aborted, Reason}, _) when NRestarts > 0 ->
-	    sql_query_internal([<<"rollback;">>]),
-	    outer_transaction(F, NRestarts - 1, Reason);
-	?EX_RULE(throw, {aborted, Reason}, Stack) when NRestarts =:= 0 ->
-	    ?ERROR_MSG("SQL transaction restarts exceeded~n** "
-		       "Restarts: ~p~n** Last abort reason: "
-		       "~p~n** Stacktrace: ~p~n** When State "
-		       "== ~p",
-		       [?MAX_TRANSACTION_RESTARTS, Reason,
-			?EX_STACK(Stack), get(?STATE_KEY)]),
-	    sql_query_internal([<<"rollback;">>]),
-	    {aborted, Reason};
-	?EX_RULE(exit, Reason, _) ->
-	    sql_query_internal([<<"rollback;">>]),
-	    {aborted, Reason}
+  ?EX_RULE(throw, {aborted, Reason}, _) when NRestarts > 0 ->
+      sql_query_internal([<<"rollback;">>]),
+      outer_transaction(F, NRestarts - 1, Reason);
+  ?EX_RULE(throw, {aborted, Reason}, Stack) when NRestarts =:= 0 ->
+      ?ERROR_MSG("SQL transaction restarts exceeded~n** "
+           "Restarts: ~p~n** Last abort reason: "
+           "~p~n** Stacktrace: ~p~n** When State "
+           "== ~p",
+           [?MAX_TRANSACTION_RESTARTS, Reason,
+      ?EX_STACK(Stack), get(?STATE_KEY)]),
+      sql_query_internal([<<"rollback;">>]),
+      {aborted, Reason};
+  ?EX_RULE(exit, Reason, _) ->
+      sql_query_internal([<<"rollback;">>]),
+      {aborted, Reason}
     end.
 
 execute_bloc(F) ->
@@ -579,8 +579,8 @@ sql_query_internal(#sql_query{} = Query) ->
             case State#state.db_type of
                 odbc ->
                     generic_sql_query(Query);
-		mssql ->
-		    mssql_sql_query(Query);
+    mssql ->
+        mssql_sql_query(Query);
                 pgsql ->
                     Key = {?PREPARE_KEY, Query#sql_query.hash},
                     case get(Key) of
@@ -609,12 +609,12 @@ sql_query_internal(#sql_query{} = Query) ->
                     sqlite_sql_query(Query)
             end
         catch exit:{timeout, _} ->
-		{error, <<"timed out">>};
-	      exit:{killed, _} ->
-		{error, <<"killed">>};
-	      exit:{normal, _} ->
-		{error, <<"terminated unexpectedly">>};
-	      ?EX_RULE(Class, Reason, Stack) ->
+    {error, <<"timed out">>};
+        exit:{killed, _} ->
+    {error, <<"killed">>};
+        exit:{normal, _} ->
+    {error, <<"terminated unexpectedly">>};
+        ?EX_RULE(Class, Reason, Stack) ->
                 ?ERROR_MSG("Internal error while processing SQL query: ~p",
                            [{Class, Reason, ?EX_STACK(Stack)}]),
                 {error, <<"internal error">>}
@@ -630,25 +630,25 @@ sql_query_internal(Query) ->
     ?DEBUG("SQL: \"~s\"", [Query]),
     QueryTimeout = query_timeout(State#state.host),
     Res = case State#state.db_type of
-	    odbc ->
-		to_odbc(odbc:sql_query(State#state.db_ref, [Query],
+      odbc ->
+    to_odbc(odbc:sql_query(State#state.db_ref, [Query],
                                        QueryTimeout - 1000));
-	    mssql ->
-		to_odbc(odbc:sql_query(State#state.db_ref, [Query],
+      mssql ->
+    to_odbc(odbc:sql_query(State#state.db_ref, [Query],
                                        QueryTimeout - 1000));
-	    pgsql ->
-		pgsql_to_odbc(pgsql:squery(State#state.db_ref, Query,
-					   QueryTimeout - 1000));
-	    mysql ->
-		R = mysql_to_odbc(p1_mysql_conn:squery(State#state.db_ref,
-						   [Query], self(),
-						   [{timeout, QueryTimeout - 1000},
-						    {result_type, binary}])),
-		  R;
-	      sqlite ->
-		  Host = State#state.host,
-		  sqlite_to_odbc(Host, sqlite3:sql_exec(sqlite_db(Host), Query))
-	  end,
+      pgsql ->
+    pgsql_to_odbc(pgsql:squery(State#state.db_ref, Query,
+             QueryTimeout - 1000));
+      mysql ->
+    R = mysql_to_odbc(p1_mysql_conn:squery(State#state.db_ref,
+               [Query], self(),
+               [{timeout, QueryTimeout - 1000},
+                {result_type, binary}])),
+      R;
+        sqlite ->
+      Host = State#state.host,
+      sqlite_to_odbc(Host, sqlite3:sql_exec(sqlite_db(Host), Query))
+    end,
     check_error(Res, Query).
 
 select_sql_query(Queries, State) ->
@@ -751,7 +751,7 @@ sql_query_format_res({selected, _, Rows}, SQLQuery) ->
                   try
                       [(SQLQuery#sql_query.format_res)(Row)]
                   catch
-		      ?EX_RULE(Class, Reason, Stack) ->
+          ?EX_RULE(Class, Reason, Stack) ->
                           ?ERROR_MSG("Error while processing "
                                      "SQL query result: ~p~n"
                                      "row: ~p",
@@ -768,23 +768,23 @@ sql_query_to_iolist(SQLQuery) ->
 
 %% Generate the OTP callback return tuple depending on the driver result.
 abort_on_driver_error({error,
-		       <<"query timed out">>} = Reply,
-		      From) ->
+           <<"query timed out">>} = Reply,
+          From) ->
     p1_fsm:reply(From, Reply),
     {stop, timeout, get(?STATE_KEY)};
 abort_on_driver_error({error,
-		       <<"Failed sending data on socket", _/binary>>} = Reply,
-		      From) ->
+           <<"Failed sending data on socket", _/binary>>} = Reply,
+          From) ->
     p1_fsm:reply(From, Reply),
     {stop, closed, get(?STATE_KEY)};
 abort_on_driver_error({error,
-		       <<"SQL connection failed">>} = Reply,
-		      From) ->
+           <<"SQL connection failed">>} = Reply,
+          From) ->
     p1_fsm:reply(From, Reply),
     {stop, timeout, get(?STATE_KEY)};
 abort_on_driver_error({error,
-		       <<"Communication link failure">>} = Reply,
-		      From) ->
+           <<"Communication link failure">>} = Reply,
+          From) ->
     p1_fsm:reply(From, Reply),
     {stop, closed, get(?STATE_KEY)};
 abort_on_driver_error(Reply, From) ->
@@ -798,11 +798,11 @@ abort_on_driver_error(Reply, From) ->
 odbc_connect(SQLServer, Timeout) ->
     ejabberd:start_app(odbc),
     odbc:connect(binary_to_list(SQLServer),
-		 [{scrollable_cursors, off},
-		  {extended_errors, on},
-		  {tuple_row, off},
-		  {timeout, Timeout},
-		  {binary_strings, on}]).
+     [{scrollable_cursors, off},
+      {extended_errors, on},
+      {tuple_row, off},
+      {timeout, Timeout},
+      {binary_strings, on}]).
 
 %% == Native SQLite code
 
@@ -812,19 +812,19 @@ odbc_connect(SQLServer, Timeout) ->
 sqlite_connect(Host) ->
     File = sqlite_file(Host),
     case filelib:ensure_dir(File) of
-	ok ->
-	    case sqlite3:open(sqlite_db(Host), [{file, File}]) of
-		{ok, Ref} ->
-		    sqlite3:sql_exec(
-		      sqlite_db(Host), "pragma foreign_keys = on"),
-		    {ok, Ref};
-		{error, {already_started, Ref}} ->
-		    {ok, Ref};
-		{error, Reason} ->
-		    {error, Reason}
-	    end;
-	Err ->
-	    Err
+  ok ->
+      case sqlite3:open(sqlite_db(Host), [{file, File}]) of
+    {ok, Ref} ->
+        sqlite3:sql_exec(
+          sqlite_db(Host), "pragma foreign_keys = on"),
+        {ok, Ref};
+    {error, {already_started, Ref}} ->
+        {ok, Ref};
+    {error, Reason} ->
+        {error, Reason}
+      end;
+  Err ->
+      Err
     end.
 
 %% Convert SQLite query result to Erlang ODBC result formalism
@@ -834,11 +834,11 @@ sqlite_to_odbc(Host, {rowid, _}) ->
     {updated, sqlite3:changes(sqlite_db(Host))};
 sqlite_to_odbc(_Host, [{columns, Columns}, {rows, TRows}]) ->
     Rows = [lists:map(
-	      fun(I) when is_integer(I) ->
-		      integer_to_binary(I);
-		 (B) ->
-		      B
-	      end, tuple_to_list(Row)) || Row <- TRows],
+        fun(I) when is_integer(I) ->
+          integer_to_binary(I);
+     (B) ->
+          B
+        end, tuple_to_list(Row)) || Row <- TRows],
     {selected, [list_to_binary(C) || C <- Columns], Rows};
 sqlite_to_odbc(_Host, {error, _Code, Reason}) ->
     {error, Reason};
@@ -850,14 +850,14 @@ sqlite_to_odbc(_Host, _) ->
 %% part of init/1
 %% Open a database connection to PostgreSQL
 pgsql_connect(Server, Port, DB, Username, Password, ConnectTimeout,
-	      Transport, SSLOpts) ->
+        Transport, SSLOpts) ->
     case pgsql:connect([{host, Server},
                         {database, DB},
                         {user, Username},
                         {password, Password},
                         {port, Port},
-			{transport, Transport},
-			{connect_timeout, ConnectTimeout},
+      {transport, Transport},
+      {connect_timeout, ConnectTimeout},
                         {as_binary, true}|SSLOpts]) of
         {ok, Ref} ->
             pgsql:squery(Ref, [<<"alter database \"">>, DB, <<"\" set ">>,
@@ -876,10 +876,10 @@ pgsql_to_odbc({ok, PGSQLResult}) ->
     end.
 
 pgsql_item_to_odbc({<<"SELECT", _/binary>>, Rows,
-		    Recs}) ->
+        Recs}) ->
     {selected, [element(1, Row) || Row <- Rows], Recs};
 pgsql_item_to_odbc({<<"FETCH", _/binary>>, Rows,
-		    Recs}) ->
+        Recs}) ->
     {selected, [element(1, Row) || Row <- Rows], Recs};
 pgsql_item_to_odbc(<<"INSERT ", OIDN/binary>>) ->
     [_OID, N] = str:tokens(OIDN, <<" ">>),
@@ -909,16 +909,16 @@ pgsql_execute_to_odbc(_) -> {updated, undefined}.
 %% Open a database connection to MySQL
 mysql_connect(Server, Port, DB, Username, Password, ConnectTimeout,  _, _) ->
     case p1_mysql_conn:start(binary_to_list(Server), Port,
-			     binary_to_list(Username),
-			     binary_to_list(Password),
-			     binary_to_list(DB),
-			     ConnectTimeout, fun log/3)
-	of
-	{ok, Ref} ->
-	    p1_mysql_conn:fetch(
-		Ref, [<<"set names 'utf8mb4' collate 'utf8mb4_bin';">>], self()),
-	    {ok, Ref};
-	Err -> Err
+           binary_to_list(Username),
+           binary_to_list(Password),
+           binary_to_list(DB),
+           ConnectTimeout, fun log/3)
+  of
+  {ok, Ref} ->
+      p1_mysql_conn:fetch(
+    Ref, [<<"set names 'utf8mb4' collate 'utf8mb4_bin';">>], self()),
+      {ok, Ref};
+  Err -> Err
     end.
 
 %% Convert MySQL query result to Erlang ODBC result formalism
@@ -926,7 +926,7 @@ mysql_to_odbc({updated, MySQLRes}) ->
     {updated, p1_mysql:get_result_affected_rows(MySQLRes)};
 mysql_to_odbc({data, MySQLRes}) ->
     mysql_item_to_odbc(p1_mysql:get_result_field_info(MySQLRes),
-		       p1_mysql:get_result_rows(MySQLRes));
+           p1_mysql:get_result_rows(MySQLRes));
 mysql_to_odbc({error, MySQLRes})
   when is_binary(MySQLRes) ->
     {error, MySQLRes};
@@ -945,11 +945,11 @@ mysql_item_to_odbc(Columns, Recs) ->
 
 to_odbc({selected, Columns, Recs}) ->
     Rows = [lists:map(
-	      fun(I) when is_integer(I) ->
-		      integer_to_binary(I);
-		 (B) ->
-		      B
-	      end, Row) || Row <- Recs],
+        fun(I) when is_integer(I) ->
+          integer_to_binary(I);
+     (B) ->
+          B
+        end, Row) || Row <- Recs],
     {selected, [list_to_binary(C) || C <- Columns], Rows};
 to_odbc({error, Reason}) when is_list(Reason) ->
     {error, list_to_binary(Reason)};
@@ -985,11 +985,11 @@ db_opts(Host) ->
     Type = ejabberd_config:get_option({sql_type, Host}, odbc),
     Server = ejabberd_config:get_option({sql_server, Host}, <<"localhost">>),
     Timeout = timer:seconds(
-		ejabberd_config:get_option({sql_connect_timeout, Host}, 5)),
+    ejabberd_config:get_option({sql_connect_timeout, Host}, 5)),
     Transport = case ejabberd_config:get_option({sql_ssl, Host}, false) of
-		    false -> tcp;
-		    true -> ssl
-		end,
+        false -> tcp;
+        true -> ssl
+    end,
     warn_if_ssl_unsupported(Transport, Type),
     case Type of
         odbc ->
@@ -1000,7 +1000,7 @@ db_opts(Host) ->
             Port = ejabberd_config:get_option(
                      {sql_port, Host},
                      case Type of
-			 mssql -> ?MSSQL_PORT;
+       mssql -> ?MSSQL_PORT;
                          mysql -> ?MYSQL_PORT;
                          pgsql -> ?PGSQL_PORT
                      end),
@@ -1010,14 +1010,14 @@ db_opts(Host) ->
                                               <<"ejabberd">>),
             Pass = ejabberd_config:get_option({sql_password, Host},
                                               <<"">>),
-	    SSLOpts = get_ssl_opts(Transport, Host),
-	    case Type of
-		mssql ->
-		    [mssql, <<"DSN=", Host/binary, ";UID=", User/binary,
-			      ";PWD=", Pass/binary>>, Timeout];
-		_ ->
-		    [Type, Server, Port, DB, User, Pass, Timeout, Transport, SSLOpts]
-	    end
+      SSLOpts = get_ssl_opts(Transport, Host),
+      case Type of
+    mssql ->
+        [mssql, <<"DSN=", Host/binary, ";UID=", User/binary,
+            ";PWD=", Pass/binary>>, Timeout];
+    _ ->
+        [Type, Server, Port, DB, User, Pass, Timeout, Transport, SSLOpts]
+      end
     end.
 
 warn_if_ssl_unsupported(tcp, _) ->
@@ -1029,27 +1029,27 @@ warn_if_ssl_unsupported(ssl, Type) ->
 
 get_ssl_opts(ssl, Host) ->
     Opts1 = case ejabberd_config:get_option({sql_ssl_certfile, Host}) of
-		undefined -> [];
-		CertFile -> [{certfile, CertFile}]
-	    end,
+    undefined -> [];
+    CertFile -> [{certfile, CertFile}]
+      end,
     Opts2 = case ejabberd_config:get_option({sql_ssl_cafile, Host}) of
-		undefined -> Opts1;
-		CAFile -> [{cacertfile, CAFile}|Opts1]
-	    end,
+    undefined -> Opts1;
+    CAFile -> [{cacertfile, CAFile}|Opts1]
+      end,
     case ejabberd_config:get_option({sql_ssl_verify, Host}, false) of
-	true ->
-	    case lists:keymember(cacertfile, 1, Opts2) of
-		true ->
-		    [{verify, verify_peer}|Opts2];
-		false ->
-		    ?WARNING_MSG("SSL verification is enabled for "
-				 "SQL connection, but option "
-				 "'sql_ssl_cafile' is not set; "
-				 "verification will be disabled", []),
-		    Opts2
-	    end;
-	false ->
-	    Opts2
+  true ->
+      case lists:keymember(cacertfile, 1, Opts2) of
+    true ->
+        [{verify, verify_peer}|Opts2];
+    false ->
+        ?WARNING_MSG("SSL verification is enabled for "
+         "SQL connection, but option "
+         "'sql_ssl_cafile' is not set; "
+         "verification will be disabled", []),
+        Opts2
+      end;
+  false ->
+      Opts2
     end;
 get_ssl_opts(tcp, _) ->
     [].
@@ -1059,58 +1059,58 @@ init_mssql(Host) ->
     Port = ejabberd_config:get_option({sql_port, Host}, ?MSSQL_PORT),
     DB = ejabberd_config:get_option({sql_database, Host}, <<"ejabberd">>),
     FreeTDS = io_lib:fwrite("[~s]~n"
-			    "\thost = ~s~n"
-			    "\tport = ~p~n"
-			    "\tclient charset = UTF-8~n"
-			    "\ttds version = 7.1~n",
-			    [Host, Server, Port]),
+          "\thost = ~s~n"
+          "\tport = ~p~n"
+          "\tclient charset = UTF-8~n"
+          "\ttds version = 7.1~n",
+          [Host, Server, Port]),
     ODBCINST = io_lib:fwrite("[freetds]~n"
-			     "Description = MSSQL connection~n"
-			     "Driver = libtdsodbc.so~n"
-			     "Setup = libtdsS.so~n"
-			     "UsageCount = 1~n"
-			     "FileUsage = 1~n", []),
+           "Description = MSSQL connection~n"
+           "Driver = libtdsodbc.so~n"
+           "Setup = libtdsS.so~n"
+           "UsageCount = 1~n"
+           "FileUsage = 1~n", []),
     ODBCINI = io_lib:fwrite("[~s]~n"
-			    "Description = MS SQL~n"
-			    "Driver = freetds~n"
-			    "Servername = ~s~n"
-			    "Database = ~s~n"
-			    "Port = ~p~n",
-			    [Host, Host, DB, Port]),
+          "Description = MS SQL~n"
+          "Driver = freetds~n"
+          "Servername = ~s~n"
+          "Database = ~s~n"
+          "Port = ~p~n",
+          [Host, Host, DB, Port]),
     ?DEBUG("~s:~n~s", [freetds_config(), FreeTDS]),
     ?DEBUG("~s:~n~s", [odbcinst_config(), ODBCINST]),
     ?DEBUG("~s:~n~s", [odbc_config(), ODBCINI]),
     case filelib:ensure_dir(freetds_config()) of
-	ok ->
-	    try
-		ok = write_file_if_new(freetds_config(), FreeTDS),
-		ok = write_file_if_new(odbcinst_config(), ODBCINST),
-		ok = write_file_if_new(odbc_config(), ODBCINI),
-		os:putenv("ODBCSYSINI", tmp_dir()),
-		os:putenv("FREETDS", freetds_config()),
-		os:putenv("FREETDSCONF", freetds_config()),
-		ok
-	    catch error:{badmatch, {error, Reason} = Err} ->
-		    ?ERROR_MSG("failed to create temporary files in ~s: ~s",
-			       [tmp_dir(), file:format_error(Reason)]),
-		    Err
-	    end;
-	{error, Reason} = Err ->
-	    ?ERROR_MSG("failed to create temporary directory ~s: ~s",
-		       [tmp_dir(), file:format_error(Reason)]),
-	    Err
+  ok ->
+      try
+    ok = write_file_if_new(freetds_config(), FreeTDS),
+    ok = write_file_if_new(odbcinst_config(), ODBCINST),
+    ok = write_file_if_new(odbc_config(), ODBCINI),
+    os:putenv("ODBCSYSINI", tmp_dir()),
+    os:putenv("FREETDS", freetds_config()),
+    os:putenv("FREETDSCONF", freetds_config()),
+    ok
+      catch error:{badmatch, {error, Reason} = Err} ->
+        ?ERROR_MSG("failed to create temporary files in ~s: ~s",
+             [tmp_dir(), file:format_error(Reason)]),
+        Err
+      end;
+  {error, Reason} = Err ->
+      ?ERROR_MSG("failed to create temporary directory ~s: ~s",
+           [tmp_dir(), file:format_error(Reason)]),
+      Err
     end.
 
 write_file_if_new(File, Payload) ->
     case filelib:is_file(File) of
-	true -> ok;
-	false -> file:write_file(File, Payload)
+  true -> ok;
+  false -> file:write_file(File, Payload)
     end.
 
 tmp_dir() ->
     case os:type() of
-	{win32, _} -> filename:join([os:getenv("HOME"), "conf"]);
-	_ -> filename:join(["/tmp", "ejabberd"])
+  {win32, _} -> filename:join([os:getenv("HOME"), "conf"]);
+  _ -> filename:join(["/tmp", "ejabberd"])
     end.
 
 odbc_config() ->

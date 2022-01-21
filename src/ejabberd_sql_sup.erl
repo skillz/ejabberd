@@ -52,7 +52,7 @@
 ]).
 
 -record(sql_pool, {host :: binary(),
-		   pid  :: pid()}).
+       pid  :: pid()}).
 
 -record(sql_cache, {name :: binary(), pid  :: pid()}).
 
@@ -76,8 +76,8 @@ start_link(Host) ->
     end, ?SQL_CACHES),
 
     supervisor:start_link({local,
-			   gen_mod:get_module_proc(Host, ?MODULE)},
-			  ?MODULE, [Host]).
+         gen_mod:get_module_proc(Host, ?MODULE)},
+        ?MODULE, [Host]).
 
 init([Host]) ->
     Type = ejabberd_config:get_option({sql_type, Host}, odbc),
@@ -85,8 +85,8 @@ init([Host]) ->
     case Type of
         sqlite ->
             check_sqlite_db(Host);
-	mssql ->
-	    ejabberd_sql:init_mssql(Host);
+  mssql ->
+      ejabberd_sql:init_mssql(Host);
         _ ->
             ok
     end,
@@ -149,18 +149,18 @@ reload(Host) ->
     Type = ejabberd_config:get_option({sql_type, Host}, odbc),
     NewPoolSize = get_pool_size(Type, Host),
     OldPoolSize = ets:select_count(
-		    sql_pool,
-		    ets:fun2ms(
-		      fun(#sql_pool{host = H}) when H == Host ->
-			      true
-		      end)),
+        sql_pool,
+        ets:fun2ms(
+          fun(#sql_pool{host = H}) when H == Host ->
+            true
+          end)),
     reload(Host, NewPoolSize, OldPoolSize).
 
 reload(Host, NewPoolSize, OldPoolSize) ->
     Sup = gen_mod:get_module_proc(Host, ?MODULE),
     AllHosts = [Host] ++ ejabberd_config:get_option({sql_secondary_servers, Host}, []),
     if NewPoolSize == OldPoolSize ->
-	    ok;
+      ok;
     %% add more sql connections
     NewPoolSize > OldPoolSize ->
       %% for each host, get the host and make the extra ejabberd_sql specs needed
@@ -373,35 +373,35 @@ get_random_pid(Host, NodeType) ->
     case get_pids(Host, NodeType) of
       [] -> none;
       Pids ->
-	    I = p1_rand:round_robin(length(Pids)) + 1,
-	    lists:nth(I, Pids)
+      I = p1_rand:round_robin(length(Pids)) + 1,
+      lists:nth(I, Pids)
     end.
 
 add_pid(Host, Pid) ->
     F = fun () ->
-		  mnesia:write(#sql_pool{host = Host, pid = Pid})
-	  end,
+      mnesia:write(#sql_pool{host = Host, pid = Pid})
+    end,
     mnesia:ets(F).
 
 remove_pid(Host, Pid) ->
     F = fun () ->
-		mnesia:delete_object(#sql_pool{host = Host, pid = Pid})
-	end,
+    mnesia:delete_object(#sql_pool{host = Host, pid = Pid})
+  end,
     mnesia:ets(F).
 
 -spec get_pool_size(atom(), binary()) -> pos_integer().
 get_pool_size(SQLType, Host) ->
     PoolSize = ejabberd_config:get_option(
                  {sql_pool_size, Host},
-		 case SQLType of
-		     sqlite -> 1;
-		     _ -> ?DEFAULT_POOL_SIZE
-		 end),
+     case SQLType of
+         sqlite -> 1;
+         _ -> ?DEFAULT_POOL_SIZE
+     end),
     if PoolSize > 1 andalso SQLType == sqlite ->
-	    ?WARNING_MSG("it's not recommended to set sql_pool_size > 1 for "
-			 "sqlite, because it may cause race conditions", []);
+      ?WARNING_MSG("it's not recommended to set sql_pool_size > 1 for "
+       "sqlite, because it may cause race conditions", []);
        true ->
-	    ok
+      ok
     end,
     PoolSize.
 
@@ -435,18 +435,18 @@ check_sqlite_db(Host) ->
     DB = ejabberd_sql:sqlite_db(Host),
     File = ejabberd_sql:sqlite_file(Host),
     Ret = case filelib:ensure_dir(File) of
-	      ok ->
-		  case sqlite3:open(DB, [{file, File}]) of
-		      {ok, _Ref} -> ok;
-		      {error, {already_started, _Ref}} -> ok;
-		      {error, R} -> {error, R}
-		  end;
-	      Err ->
-		  Err
-	  end,
+        ok ->
+      case sqlite3:open(DB, [{file, File}]) of
+          {ok, _Ref} -> ok;
+          {error, {already_started, _Ref}} -> ok;
+          {error, R} -> {error, R}
+      end;
+        Err ->
+      Err
+    end,
     case Ret of
         ok ->
-	    sqlite3:sql_exec(DB, "pragma foreign_keys = on"),
+      sqlite3:sql_exec(DB, "pragma foreign_keys = on"),
             case sqlite3:list_tables(DB) of
                 [] ->
                     create_sqlite_tables(DB),
@@ -470,7 +470,7 @@ create_sqlite_tables(DB) ->
             ok = sqlite3:sql_exec(DB, "commit");
         {error, Reason} ->
             ?WARNING_MSG("Failed to read SQLite schema file: ~s",
-			 [file:format_error(Reason)])
+       [file:format_error(Reason)])
     end.
 
 read_lines(Fd, File, Acc) ->
