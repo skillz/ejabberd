@@ -13,11 +13,29 @@
 -export([start/2, start_link/2]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, terminate/3]).
+-export([init/1, handle_call/3, handle_cast/2, terminate/3, handle_info/3]).
 
-start(CacheName, MaxCacheSize) -> gen_server:start_link({local, ?MODULE}, ?MODULE, [CacheName, MaxCacheSize], []).
+start(CacheName, MaxCacheSize) ->
+  case gen_server:start_link({global, ?MODULE}, ?MODULE, [CacheName, MaxCacheSize], []) of
+    {ok, Pid} -> {ok, Pid};
+    {ok, {Pid, Mon}} -> {ok, {Pid, Mon}};
+    {error, {already_started, Pid}} -> {ok, Pid};
+    ignore -> ignore;
+    {error, Error} -> {error, Error};
+    Other -> Other
+  end
+.
 
-start_link(CacheName, MaxCacheSize) -> gen_server:start_link({local, ?MODULE}, ?MODULE, [CacheName, MaxCacheSize], []).
+start_link(CacheName, MaxCacheSize) ->
+  case gen_server:start_link({global, ?MODULE}, ?MODULE, [CacheName, MaxCacheSize], []) of
+    {ok, Pid} -> {ok, Pid};
+    {ok, {Pid, Mon}} -> {ok, {Pid, Mon}};
+    {error, {already_started, Pid}} -> {ok, Pid};
+    ignore -> ignore;
+    {error, Error} -> {error, Error};
+    Other -> Other
+  end
+.
 
 init([CacheName, MaxCacheSize]) ->
   ejabberd_sql_sup:add_sql_cache_pid(CacheName, self()),
@@ -45,6 +63,24 @@ handle_cast({delete_item, Key}, { CacheName, KeyQueue, CacheDict, Size, MaxCache
 
 handle_cast({flush}, { CacheName, _, _, _, MaxCacheSize }) ->
   {noreply, { CacheName, queue:new(), dict:new(), 0, MaxCacheSize} }
+.
+
+% got stop message
+handle_info(stop, _StateName, StateData) ->
+  {stop, normal, StateData}
+;
+
+%% either linked process or peer process died
+handle_info({'EXIT', _, _}, _, StateData) ->
+  {stop, normal, StateData}
+;
+
+handle_info({'DOWN', _, _, _, _}, _StateName, StateData) ->
+  {stop, normal, StateData}
+.
+
+terminate(_Reason, _StateName, { CacheName, _, _, _, _ }) ->
+  ejabberd_sql_sup:remove_cache_pid(CacheName, self())
 .
 
 %% avg O(1)
@@ -80,8 +116,4 @@ get_item(Key, CacheDict) ->
 delete_item(CacheName, Key, KeyQueue, CacheDict, Size, MaxCacheSize) ->
   %% to_list -> delete -> from_list is much faster than queue:filter
   { CacheName, queue:from_list(lists:delete(Key, queue:to_list(KeyQueue))), dict:erase(Key, CacheDict), Size - 1, MaxCacheSize }
-.
-
-terminate(_Reason, _StateName, { CacheName, _, _, _, _ }) ->
-  ejabberd_sql_sup:remove_cache_pid(CacheName, self())
 .
