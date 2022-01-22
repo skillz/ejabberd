@@ -15,6 +15,8 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, terminate/3, handle_info/3]).
 
+-include("logger.hrl").
+
 -record(sql_cache, {name :: binary(), pid  :: pid()}).
 
 start(CacheName, MaxCacheSize) ->
@@ -40,13 +42,7 @@ start_link(CacheName, MaxCacheSize) ->
 .
 
 init([CacheName, MaxCacheSize]) ->
-  ?WARNING_MSG("Creating Ejabberd SQL Cache"),
-
-  %% sql cache pids
-  ejabberd_mnesia:create(?MODULE, sql_cache,
-    [{ram_copies, [node()]}, {type, bag},
-      {local_content, false},
-      {attributes, record_info(fields, sql_cache)}]),
+  ?WARNING_MSG("Creating Ejabberd SQL Cache", []),
 
   %% delete any entries in the sql caches
   mnesia:ets(
