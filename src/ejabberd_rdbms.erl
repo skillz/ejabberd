@@ -58,10 +58,7 @@ init([]) ->
     ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
 
     %% sql cache pids
-    ejabberd_mnesia:create(?MODULE, sql_cache,
-      [{ram_copies, [node()]}, {type, bag},
-        {local_content, false},
-        {attributes, record_info(fields, sql_cache)}]),
+    ejabberd_mnesia:create(?MODULE, sql_cache, [{ram_copies, [node()]}, {attributes, record_info(fields, sql_cache)}]),
 
     {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
 
@@ -153,9 +150,12 @@ add_sql_cache_pid(Name, Pid) ->
 
 get_cache_pid(Name) ->
   Rs = mnesia:dirty_read(sql_cache, Name),
-  case [R#sql_cache.pid || R <- Rs, is_process_alive(R#sql_cache.pid)] of
-    [] -> none;
-    Pids -> hd(Pids)
+  try case [R#sql_cache.pid || R <- Rs, is_process_alive(R#sql_cache.pid)] of
+        [] -> none;
+        Pids -> hd(Pids)
+      end of
+    Value -> Value
+  catch _ -> none
   end
 .
 
