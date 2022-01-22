@@ -31,9 +31,15 @@
 -author('alexey@process-one.net').
 
 -export([start_link/0, init/1, opt_type/1,
-	 config_reloaded/0, start_host/1, stop_host/1]).
+   config_reloaded/0, start_host/1, stop_host/1]).
 
 -include("logger.hrl").
+
+-define(SQL_CACHES, [
+  {"get_subscribed_rooms_cache", 10000}
+]).
+
+-record(sql_cache, {name :: binary(), pid  :: pid()}).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
@@ -45,28 +51,52 @@ init([]) ->
     ejabberd_hooks:add(host_up, ?MODULE, start_host, 20),
     ejabberd_hooks:add(host_down, ?MODULE, stop_host, 90),
     ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
-    {ok, {{one_for_one, 10, 1}, get_specs()}}.
+
+    %% sql cache pids
+    ejabberd_mnesia:create(?MODULE, sql_cache,
+      [{ram_copies, [node()]}, {type, bag},
+        {local_content, false},
+        {attributes, record_info(fields, sql_cache)}]),
+
+    %% delete any entries in any sql caches
+    lists:foreach(fun({CacheName, _}) ->
+      mnesia:ets(
+        fun() ->
+          mnesia:delete({sql_cache, CacheName})
+        end)
+    end, ?SQL_CACHES),
+
+  {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
+
+sql_cache_child_specs() ->
+  lists:map(
+    fun({ CacheName, MaxCacheSize }) ->
+      {CacheName, {ejabberd_cache, start_link, [CacheName, MaxCacheSize]}, transient, 2000, worker, [?MODULE]}
+    end,
+    ?SQL_CACHES
+  )
+.
 
 -spec get_specs() -> [supervisor:child_spec()].
 get_specs() ->
     lists:flatmap(
       fun(Host) ->
-	      case get_spec(Host) of
-		  {ok, Spec} -> [Spec];
-		  undefined -> []
-	      end
+        case get_spec(Host) of
+      {ok, Spec} -> [Spec];
+      undefined -> []
+        end
       end, ejabberd_config:get_myhosts()).
 
 -spec get_spec(binary()) -> {ok, supervisor:child_spec()} | undefined.
 get_spec(Host) ->
     case needs_sql(Host) of
-	{true, App} ->
-	    ejabberd:start_app(App),
-	    SupName = gen_mod:get_module_proc(Host, ejabberd_sql_sup),
-	    {ok, {SupName, {ejabberd_sql_sup, start_link, [Host]},
-		  transient, infinity, supervisor, [ejabberd_sql_sup]}};
-	false ->
-	    undefined
+  {true, App} ->
+      ejabberd:start_app(App),
+      SupName = gen_mod:get_module_proc(Host, ejabberd_sql_sup),
+      {ok, {SupName, {ejabberd_sql_sup, start_link, [Host]},
+      transient, infinity, supervisor, [ejabberd_sql_sup]}};
+  false ->
+      undefined
     end.
 
 -spec config_reloaded() -> ok.
@@ -76,17 +106,17 @@ config_reloaded() ->
 -spec start_host(binary()) -> ok.
 start_host(Host) ->
     case get_spec(Host) of
-	{ok, Spec} ->
-	    case supervisor:start_child(?MODULE, Spec) of
-		{ok, _PID} ->
-		    ok;
-		{error, {already_started, _}} ->
-		    ok;
-		{error, _} = Err ->
-		    erlang:error(Err)
-	    end;
-	undefined ->
-	    ok
+  {ok, Spec} ->
+      case supervisor:start_child(?MODULE, Spec) of
+    {ok, _PID} ->
+        ok;
+    {error, {already_started, _}} ->
+        ok;
+    {error, _} = Err ->
+        erlang:error(Err)
+      end;
+  undefined ->
+      ok
     end.
 
 -spec stop_host(binary()) -> ok.
@@ -99,8 +129,8 @@ stop_host(Host) ->
 -spec reload_host(binary()) -> ok.
 reload_host(Host) ->
     case needs_sql(Host) of
-	{true, _} -> ejabberd_sql_sup:reload(Host);
-	false -> ok
+  {true, _} -> ejabberd_sql_sup:reload(Host);
+  false -> ok
     end.
 
 %% Returns {true, App} if we have configured sql for the given host
@@ -110,7 +140,7 @@ needs_sql(Host) ->
         mysql -> {true, p1_mysql};
         pgsql -> {true, p1_pgsql};
         sqlite -> {true, sqlite3};
-	mssql -> {true, odbc};
+  mssql -> {true, odbc};
         odbc -> {true, odbc};
         undefined -> false
     end.
@@ -118,9 +148,9 @@ needs_sql(Host) ->
 -spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
 opt_type(sql_type) ->
     fun (mysql) -> mysql;
-	(pgsql) -> pgsql;
-	(sqlite) -> sqlite;
-	(mssql) -> mssql;
-	(odbc) -> odbc
+  (pgsql) -> pgsql;
+  (sqlite) -> sqlite;
+  (mssql) -> mssql;
+  (odbc) -> odbc
     end;
 opt_type(_) -> [sql_type].
