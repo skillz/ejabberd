@@ -33,7 +33,7 @@
   get_pids/1, get_random_pid/1, get_pids/2, get_random_pid/2, transform_options/1,
   reload/1, opt_type/1,
 
-  add_sql_cache_pid/2,
+  add_sql_cache_pid/2, remove_cache_pid/2,
   get_subscribed_rooms_cache_key/2, get_subscribed_rooms_cache_item/1,
   put_subscribed_rooms_cache_item/2, invalidate_subscribed_rooms/2, flush_subscribed_rooms_cache/0,
   remove_subscribed_rooms_by_room/2
@@ -216,6 +216,13 @@ get_cache_pid(Name) ->
     [] -> none;
     Pids -> hd(Pids)
   end
+.
+
+remove_cache_pid(Name, Pid) ->
+  F = fun () ->
+    mnesia:delete_object(#sql_cache{name = Name, pid = Pid})
+  end,
+  mnesia:ets(F)
 .
 
 get_cache_item(Name, Key) ->
