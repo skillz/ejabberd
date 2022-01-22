@@ -150,12 +150,16 @@ add_sql_cache_pid(Name, Pid) ->
 
 get_cache_pid(Name) ->
   Rs = mnesia:dirty_read(sql_cache, Name),
-  try case [R#sql_cache.pid || R <- Rs, is_process_alive(R#sql_cache.pid)] of
-        [] -> none;
+  try case [R#sql_cache.pid || R <- Rs, erlang:process_info(R#sql_cache.pid) /= undefined] of
+        [] ->
+          supervisor:start_child(?MODULE, sql_cache_child_specs()),
+          none;
         Pids -> hd(Pids)
       end of
     Value -> Value
-  catch _ -> none
+  catch _:_ ->
+    supervisor:start_child(?MODULE, sql_cache_child_specs()),
+    none
   end
 .
 
