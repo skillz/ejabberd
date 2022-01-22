@@ -908,6 +908,14 @@ pgsql_execute_to_odbc(_) -> {updated, undefined}.
 %% part of init/1
 %% Open a database connection to MySQL
 mysql_connect(Server, Port, DB, Username, Password, ConnectTimeout,  _, _) ->
+    ?WARNING_MSG("MySql Conn: ~p; ~p; ~p; ~p; ~p; ~p", [
+      binary_to_list(Server),
+      Port,
+      binary_to_list(Username),
+      binary_to_list(Password),
+      binary_to_list(DB),
+      ConnectTimeout
+    ]),
     case p1_mysql_conn:start(binary_to_list(Server), Port,
            binary_to_list(Username),
            binary_to_list(Password),
