@@ -67,12 +67,12 @@ start_link(Host) ->
     %% sql cache pids
     ejabberd_mnesia:create(?MODULE, sql_cache,
       [{ram_copies, [node()]}, {type, bag},
-        {local_content, true},
+        {local_content, false},
         {attributes, record_info(fields, sql_cache)}]),
 
     %% delete any entries in any sql caches
-    lists:foreach(fun(C) ->
-      mnesia:ets(fun() -> mnesia:delete({sql_cache, C}) end)
+    lists:foreach(fun({CacheName, _}) ->
+      mnesia:ets(fun() -> mnesia:delete({sql_cache, CacheName}) end)
     end, ?SQL_CACHES),
 
     supervisor:start_link({local,
