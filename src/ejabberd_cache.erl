@@ -117,3 +117,7 @@ delete_item(CacheName, Key, KeyQueue, CacheDict, Size, MaxCacheSize) ->
   %% to_list -> delete -> from_list is much faster than queue:filter
   { CacheName, queue:from_list(lists:delete(Key, queue:to_list(KeyQueue))), dict:erase(Key, CacheDict), Size - 1, MaxCacheSize }
 .
+
+terminate(_Reason, _StateName, { CacheName, _, _, _, _ }) ->
+  ejabberd_sql_sup:remove_cache_pid(CacheName, self())
+.
