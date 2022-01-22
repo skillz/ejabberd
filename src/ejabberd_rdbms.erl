@@ -33,6 +33,11 @@
 -export([start_link/0, init/1, opt_type/1,
    config_reloaded/0, start_host/1, stop_host/1]).
 
+-export([add_sql_cache_pid/2, remove_cache_pid/2,
+    get_subscribed_rooms_cache_key/2, get_subscribed_rooms_cache_item/1,
+    put_subscribed_rooms_cache_item/2, invalidate_subscribed_rooms/2, flush_subscribed_rooms_cache/0,
+    remove_subscribed_rooms_by_room/2]).
+
 -include("logger.hrl").
 
 -define(SQL_CACHES, [
@@ -51,21 +56,6 @@ init([]) ->
     ejabberd_hooks:add(host_up, ?MODULE, start_host, 20),
     ejabberd_hooks:add(host_down, ?MODULE, stop_host, 90),
     ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
-
-    %% sql cache pids
-    ejabberd_mnesia:create(?MODULE, sql_cache,
-      [{ram_copies, [node()]}, {type, bag},
-        {local_content, false},
-        {attributes, record_info(fields, sql_cache)}]),
-
-    %% delete any entries in any sql caches
-    lists:foreach(fun({CacheName, _}) ->
-      mnesia:ets(
-        fun() ->
-          mnesia:delete({sql_cache, CacheName})
-        end)
-    end, ?SQL_CACHES),
-
   {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
 
 sql_cache_child_specs() ->
@@ -144,6 +134,145 @@ needs_sql(Host) ->
         odbc -> {true, odbc};
         undefined -> false
     end.
+
+%% GENERIC CACHE FUNS
+
+add_sql_cache_pid(Name, Pid) ->
+  F = fun () ->
+    mnesia:write(#sql_cache{name = Name, pid = Pid})
+      end,
+  mnesia:ets(F)
+.
+
+get_cache_pid(Name) ->
+  Rs = mnesia:dirty_read(sql_cache, Name),
+  case [R#sql_cache.pid || R <- Rs, is_process_alive(R#sql_cache.pid)] of
+    [] -> none;
+    Pids -> hd(Pids)
+  end
+.
+
+remove_cache_pid(Name, Pid) ->
+  F = fun () ->
+    mnesia:delete_object(#sql_cache{name = Name, pid = Pid})
+      end,
+  mnesia:ets(F)
+.
+
+get_cache_item(Name, Key) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:call(Pid, {get_item, Key})
+  end
+.
+
+get_cache(Name) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:call(Pid, {get_all})
+  end
+.
+
+put_cache(Name, Dict) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:cast(Pid, {put_all, Dict})
+  end
+.
+
+put_cache_item(Name, Key, Value) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:cast(Pid, {put_item, Key, Value})
+  end
+.
+
+delete_cache_item(Name, Key) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:cast(Pid, {delete_item, Key})
+  end
+.
+
+flush_cache(Name) ->
+  case get_cache_pid(Name) of
+    none -> none;
+    Pid -> gen_server:cast(Pid, {flush})
+  end
+.
+%% END GENERIC CACHE FUNS
+
+
+
+
+
+%% GET_SUBSCRIBED_ROOMS CACHE FUNS
+get_subscribed_rooms_cache_key(JidS, Host) ->
+  unicode:characters_to_list("get_subscribed_rooms&") ++
+    unicode:characters_to_list(JidS) ++
+    unicode:characters_to_list("&") ++
+    unicode:characters_to_list(Host)
+.
+
+get_subscribed_rooms_cache_item(Key) ->
+  get_cache_item("get_subscribed_rooms_cache", Key)
+.
+
+put_subscribed_rooms_cache_item(Key, Value) ->
+  put_cache_item("get_subscribed_rooms_cache", Key, Value)
+.
+
+delete_subscribed_rooms_cache_item(Key) ->
+  delete_cache_item("get_subscribed_rooms_cache", Key)
+.
+
+flush_subscribed_rooms_cache() ->
+  flush_cache("get_subscribed_rooms_cache")
+.
+
+invalidate_subscribed_rooms(JidS, Host) ->
+  delete_subscribed_rooms_cache_item(get_subscribed_rooms_cache_key(JidS, Host))
+.
+
+%% filter InputRoom and InputHost out of any cache entries with them
+remove_subscribed_rooms_by_room(InputRoom, InputHost) ->
+  case get_cache("get_subscribed_rooms_cache") of
+    none -> none;
+    Dict ->
+      NewDict = dict:map(
+        fun(_, Value) ->
+          %% list of rooms and nodes from get_subscribed_rooms(...) call
+          case is_list(Value) of
+            true ->
+              %% filter entries to remove ones containing both InputRoom, InputHost
+              lists:filter(
+                fun(Entry) ->
+                  case Entry of
+                    %% jid:make from jid.erl has signature: { jid, User, Server, Resource, LUser, LServer, LResource }
+                    { { jid, Room, Host, _, _, _, _ }, _ } ->
+                      %% only keep entries where Room != InputRoom or Host != InputHost
+                      %% which is equiv to only removing entries where Room == InputRoom and Host == InputHost
+                      Room /= InputRoom orelse Host /= InputHost;
+                    OtherValue ->
+                      %% unknown entry signature so keep it included to be safe
+                      ?WARNING_MSG("Unknown get_subscribed_rooms_cache entry signature: ~p", [OtherValue]),
+                      true
+                  end
+                end,
+                Value
+              );
+            %% not a list so keep it in the dict to be safe
+            _ -> Value
+          end
+        end,
+        Dict
+      ),
+
+      %% put back the new cache with InputRoom entries removed
+      put_cache("get_subscribed_rooms_cache", NewDict)
+  end
+.
+%% END GET_SUBSCRIBED_ROOMS FUNS
 
 -spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
 opt_type(sql_type) ->

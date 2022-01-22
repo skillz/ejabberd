@@ -15,6 +15,8 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, terminate/3, handle_info/3]).
 
+-record(sql_cache, {name :: binary(), pid  :: pid()}).
+
 start(CacheName, MaxCacheSize) ->
   case gen_server:start_link({global, ?MODULE}, ?MODULE, [CacheName, MaxCacheSize], []) of
     {ok, Pid} -> {ok, Pid};
@@ -38,7 +40,22 @@ start_link(CacheName, MaxCacheSize) ->
 .
 
 init([CacheName, MaxCacheSize]) ->
-  ejabberd_sql_sup:add_sql_cache_pid(CacheName, self()),
+  ?WARNING_MSG("Creating Ejabberd SQL Cache"),
+
+  %% sql cache pids
+  ejabberd_mnesia:create(?MODULE, sql_cache,
+    [{ram_copies, [node()]}, {type, bag},
+      {local_content, false},
+      {attributes, record_info(fields, sql_cache)}]),
+
+  %% delete any entries in the sql caches
+  mnesia:ets(
+    fun() ->
+      mnesia:delete({sql_cache, CacheName})
+    end
+  ),
+
+  ejabberd_rdbms:add_sql_cache_pid(CacheName, self()),
   {ok, {CacheName, queue:new(), dict:new(), 0, MaxCacheSize}}.
 
 handle_call({get_item, Key}, _From, { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }) ->
@@ -80,7 +97,7 @@ handle_info({'DOWN', _, _, _, _}, _StateName, StateData) ->
 .
 
 terminate(_Reason, _StateName, { CacheName, _, _, _, _ }) ->
-  ejabberd_sql_sup:remove_cache_pid(CacheName, self())
+  ejabberd_rdbms:remove_cache_pid(CacheName, self())
 .
 
 %% avg O(1)

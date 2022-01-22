@@ -76,7 +76,7 @@ store_room(LServer, Host, Name, Opts, ChangesHints) ->
                     Changes when is_list(Changes) ->
                         [change_room(Host, Name, Change) || Change <- Changes];
                     _ ->
-                        ejabberd_sql_sup:remove_subscribed_rooms_by_room(Name, Host),
+                        ejabberd_rdbms:remove_subscribed_rooms_by_room(Name, Host),
                         ejabberd_sql:sql_query_t(
                           ?SQL("delete from muc_room_subscribers where "
                                "room=%(Name)s and host=%(Host)s")),
@@ -88,7 +88,7 @@ store_room(LServer, Host, Name, Opts, ChangesHints) ->
 
 change_room(Host, Room, {add_subscription, JID, Nick, Nodes}) ->
     SJID = jid:encode(JID),
-    ejabberd_sql_sup:invalidate_subscribed_rooms(SJID, Host),
+    ejabberd_rdbms:invalidate_subscribed_rooms(SJID, Host),
     SNodes = misc:term_to_expr(Nodes),
     ?SQL_UPSERT_T(
        "muc_room_subscribers",
@@ -99,7 +99,7 @@ change_room(Host, Room, {add_subscription, JID, Nick, Nodes}) ->
   "nodes=%(SNodes)s"]);
 change_room(Host, Room, {del_subscription, JID}) ->
     SJID = jid:encode(JID),
-    ejabberd_sql_sup:invalidate_subscribed_rooms(SJID, Host),
+    ejabberd_rdbms:invalidate_subscribed_rooms(SJID, Host),
     ejabberd_sql:sql_query_t(?SQL("delete from muc_room_subscribers where "
           "room=%(Room)s and host=%(Host)s and jid=%(SJID)s"));
 change_room(Host, Room, Change) ->
@@ -140,7 +140,7 @@ restore_room(LServer, Host, Name) ->
     end.
 
 forget_room(LServer, Host, Name) ->
-    ejabberd_sql_sup:remove_subscribed_rooms_by_room(Name, Host),
+    ejabberd_rdbms:remove_subscribed_rooms_by_room(Name, Host),
     F = fun () ->
       ejabberd_sql:sql_query_t(
                     ?SQL("delete from muc_room where name=%(Name)s"
@@ -466,8 +466,8 @@ import(_, _, _) ->
 
 get_subscribed_rooms(LServer, Host, Jid) ->
     JidS = jid:encode(Jid),
-    Key = ejabberd_sql_sup:get_subscribed_rooms_cache_key(JidS, Host),
-    case ejabberd_sql_sup:get_subscribed_rooms_cache_item(Key) of
+    Key = ejabberd_rdbms:get_subscribed_rooms_cache_key(JidS, Host),
+    case ejabberd_rdbms:get_subscribed_rooms_cache_item(Key) of
       none ->
         ?WARNING_MSG("Cache Miss for get_subscribed_rooms", []),
         case catch ejabberd_sql:sql_query(
@@ -482,7 +482,7 @@ get_subscribed_rooms(LServer, Host, Jid) ->
         ) of
           {selected, Subs} ->
             Resp = [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs],
-            ejabberd_sql_sup:put_subscribed_rooms_cache_item(Key, Resp),
+            ejabberd_rdbms:put_subscribed_rooms_cache_item(Key, Resp),
             Resp;
           _Error ->
             []
