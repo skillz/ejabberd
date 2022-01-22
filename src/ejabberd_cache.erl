@@ -20,10 +20,23 @@
 -record(sql_cache, {name :: binary(), pid  :: pid()}).
 
 start(CacheName, MaxCacheSize) ->
+  %% delete any entries in the sql caches
+  mnesia:ets(
+    fun() ->
+      mnesia:delete({sql_cache, CacheName})
+    end
+  ),
+
   case gen_server:start_link({global, ?MODULE}, ?MODULE, [CacheName, MaxCacheSize], []) of
-    {ok, Pid} -> {ok, Pid};
-    {ok, {Pid, Mon}} -> {ok, {Pid, Mon}};
-    {error, {already_started, Pid}} -> {ok, Pid};
+    {ok, Pid} ->
+      ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
+      {ok, Pid};
+    {ok, {Pid, Mon}} ->
+      ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
+      {ok, {Pid, Mon}};
+    {error, {already_started, Pid}} ->
+      ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
+      {ok, Pid};
     ignore -> ignore;
     {error, Error} -> {error, Error};
     Other -> Other
