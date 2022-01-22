@@ -47,9 +47,6 @@
 -define(DEFAULT_POOL_SIZE, 10).
 -define(DEFAULT_SQL_START_INTERVAL, 30).
 -define(CONNECT_TIMEOUT, 500).
--define(SQL_CACHES, [
-  {"get_subscribed_rooms_cache", 10000}
-]).
 
 -record(sql_pool, {host :: binary(),
        pid  :: pid()}).
@@ -63,17 +60,6 @@ start_link(Host) ->
        {attributes, record_info(fields, sql_pool)}]),
     F = fun() -> mnesia:delete({sql_pool, Host}) end,
     mnesia:ets(F),
-
-    %% sql cache pids
-    ejabberd_mnesia:create(?MODULE, sql_cache,
-      [{ram_copies, [node()]}, {type, bag},
-        {local_content, true},
-        {attributes, record_info(fields, sql_cache)}]),
-
-    %% delete any entries in any sql caches
-    lists:foreach(fun(C) ->
-      mnesia:ets(fun() -> mnesia:delete({sql_cache, C}) end)
-    end, ?SQL_CACHES),
 
     supervisor:start_link({local,
          gen_mod:get_module_proc(Host, ?MODULE)},
@@ -95,7 +81,7 @@ init([Host]) ->
       {
         {one_for_one, PoolSize * 10 * length(AllHosts), 1},
         %% list of ejabberd_sql specs; the total count would be number of hosts * pool size
-        sql_cache_child_specs() ++ lists:foldl(
+        lists:foldl(
           fun(H, Acc) ->
             %% first iter: length(Acc) is 0, so HostIndex bc (0 / PoolSize) + 1 = 1
             %% next iter : Acc length will be exactly PoolSize, so we have (PoolSize  / PoolSize) + 1 = 2
@@ -197,11 +183,6 @@ reload(Host, NewPoolSize, OldPoolSize) ->
 
 
 %% GENERIC CACHE FUNS
-sql_cache_child_specs() ->
-  lists:map(fun({ CacheName, MaxCacheSize }) ->
-    {CacheName, {ejabberd_cache, start_link, [CacheName, MaxCacheSize]}, transient, 2000, worker, [?MODULE]}
-  end, ?SQL_CACHES)
-.
 
 add_sql_cache_pid(Name, Pid) ->
   F = fun () ->
