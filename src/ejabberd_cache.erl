@@ -31,10 +31,23 @@ start(CacheName, MaxCacheSize) ->
 .
 
 start_link(CacheName, MaxCacheSize) ->
+  %% delete any entries in the sql caches
+  mnesia:ets(
+    fun() ->
+      mnesia:delete({sql_cache, CacheName})
+    end
+  ),
+
   case gen_server:start_link({global, ?MODULE}, ?MODULE, [CacheName, MaxCacheSize], []) of
-    {ok, Pid} -> {ok, Pid};
-    {ok, {Pid, Mon}} -> {ok, {Pid, Mon}};
-    {error, {already_started, Pid}} -> {ok, Pid};
+    {ok, Pid} ->
+      ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
+      {ok, Pid};
+    {ok, {Pid, Mon}} ->
+      ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
+      {ok, {Pid, Mon}};
+    {error, {already_started, Pid}} ->
+      ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
+      {ok, Pid};
     ignore -> ignore;
     {error, Error} -> {error, Error};
     Other -> Other
@@ -43,15 +56,6 @@ start_link(CacheName, MaxCacheSize) ->
 
 init([CacheName, MaxCacheSize]) ->
   ?WARNING_MSG("Creating Ejabberd SQL Cache", []),
-
-  %% delete any entries in the sql caches
-  mnesia:ets(
-    fun() ->
-      mnesia:delete({sql_cache, CacheName})
-    end
-  ),
-
-  ejabberd_rdbms:add_sql_cache_pid(CacheName, self()),
   {ok, {CacheName, queue:new(), dict:new(), 0, MaxCacheSize}}.
 
 handle_call({get_item, Key}, _From, { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }) ->
