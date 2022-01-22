@@ -986,7 +986,8 @@ log(Level, Format, Args) ->
     case Level of
       debug -> ?DEBUG(Format, Args);
       normal -> ?INFO_MSG(Format, Args);
-      error -> ?ERROR_MSG(Format, Args)
+      error -> ?ERROR_MSG(Format, Args);
+      info -> ?INFO_MSG(Format, Args)
     end.
 
 db_opts(Host) ->
