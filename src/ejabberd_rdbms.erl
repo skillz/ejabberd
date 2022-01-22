@@ -56,7 +56,14 @@ init([]) ->
     ejabberd_hooks:add(host_up, ?MODULE, start_host, 20),
     ejabberd_hooks:add(host_down, ?MODULE, stop_host, 90),
     ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
-  {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
+
+    %% sql cache pids
+    ejabberd_mnesia:create(?MODULE, sql_cache,
+      [{ram_copies, [node()]}, {type, bag},
+        {local_content, false},
+        {attributes, record_info(fields, sql_cache)}]),
+
+    {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
 
 sql_cache_child_specs() ->
   lists:map(
