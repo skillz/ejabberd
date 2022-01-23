@@ -41,10 +41,10 @@
 -include("logger.hrl").
 
 -define(SQL_CACHES, [
-  {"get_subscribed_rooms_cache", 10000}
+  {get_subscribed_rooms_cache, 10000}
 ]).
 
--record(sql_cache, {name :: binary(), pid  :: pid()}).
+-record(sql_cache, {name :: atom(), pid  :: pid()}).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
@@ -58,7 +58,7 @@ init([]) ->
     ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
 
     %% sql cache pids
-    ejabberd_mnesia:create(?MODULE, sql_cache, [{ram_copies, [node()]}, {attributes, record_info(fields, sql_cache)}]),
+    ejabberd_mnesia:create(?MODULE, sql_cache, [{ram_copies, [node()]}, {local_content, true}, {attributes, record_info(fields, sql_cache)}]),
 
     {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
 
@@ -150,7 +150,7 @@ add_sql_cache_pid(Name, Pid) ->
 
 get_cache_pid(Name) ->
   Rs = mnesia:dirty_read(sql_cache, Name),
-  try case [R#sql_cache.pid || R <- Rs, erlang:process_info(R#sql_cache.pid) /= undefined] of
+  try case [R#sql_cache.pid || R <- Rs, gen_server:call(R#sql_cache.pid, {is_alive})] of
         [] ->
           supervisor:start_child(?MODULE, sql_cache_child_specs()),
           none;
@@ -226,19 +226,19 @@ get_subscribed_rooms_cache_key(JidS, Host) ->
 .
 
 get_subscribed_rooms_cache_item(Key) ->
-  get_cache_item("get_subscribed_rooms_cache", Key)
+  get_cache_item(get_subscribed_rooms_cache, Key)
 .
 
 put_subscribed_rooms_cache_item(Key, Value) ->
-  put_cache_item("get_subscribed_rooms_cache", Key, Value)
+  put_cache_item(get_subscribed_rooms_cache, Key, Value)
 .
 
 delete_subscribed_rooms_cache_item(Key) ->
-  delete_cache_item("get_subscribed_rooms_cache", Key)
+  delete_cache_item(get_subscribed_rooms_cache, Key)
 .
 
 flush_subscribed_rooms_cache() ->
-  flush_cache("get_subscribed_rooms_cache")
+  flush_cache(get_subscribed_rooms_cache)
 .
 
 invalidate_subscribed_rooms(JidS, Host) ->
@@ -247,7 +247,7 @@ invalidate_subscribed_rooms(JidS, Host) ->
 
 %% filter InputRoom and InputHost out of any cache entries with them
 remove_subscribed_rooms_by_room(InputRoom, InputHost) ->
-  case get_cache("get_subscribed_rooms_cache") of
+  case get_cache(get_subscribed_rooms_cache) of
     none -> none;
     Dict ->
       NewDict = dict:map(
@@ -280,7 +280,7 @@ remove_subscribed_rooms_by_room(InputRoom, InputHost) ->
       ),
 
       %% put back the new cache with InputRoom entries removed
-      put_cache("get_subscribed_rooms_cache", NewDict)
+      put_cache(get_subscribed_rooms_cache, NewDict)
   end
 .
 %% END GET_SUBSCRIBED_ROOMS FUNS
