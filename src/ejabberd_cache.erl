@@ -17,7 +17,7 @@
 
 -include("logger.hrl").
 
--record(sql_cache, {name :: binary(), pid  :: pid()}).
+-record(sql_cache, {name :: atom(), pid  :: pid()}).
 
 start_link(CacheName, MaxCacheSize) ->
   %% delete any entries in the sql caches
@@ -46,6 +46,10 @@ start_link(CacheName, MaxCacheSize) ->
 init([CacheName, MaxCacheSize]) ->
   ?WARNING_MSG("Creating Ejabberd SQL Cache", []),
   {ok, {CacheName, queue:new(), dict:new(), 0, MaxCacheSize}}.
+
+handle_call({is_alive}, _From, { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }) ->
+  {reply, true, { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }}
+;
 
 handle_call({get_item, Key}, _From, { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }) ->
   {reply, get_item(Key, CacheDict), { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }}
