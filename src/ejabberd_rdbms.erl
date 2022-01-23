@@ -36,7 +36,7 @@
 -export([add_sql_cache_pid/2, remove_cache_pid/2,
     get_subscribed_rooms_cache_key/2, get_subscribed_rooms_cache_item/1,
     put_subscribed_rooms_cache_item/2, invalidate_subscribed_rooms/2, flush_subscribed_rooms_cache/0,
-    remove_subscribed_rooms_by_room/2]).
+    remove_subscribed_rooms_by_room/2, refresh_cache_pid/1]).
 
 -include("logger.hrl").
 
@@ -148,17 +148,23 @@ add_sql_cache_pid(Name, Pid) ->
   mnesia:ets(F)
 .
 
+refresh_cache_pid(Name) ->
+  supervisor:terminate_child(ejabberd_rdbms, Name),
+  supervisor:delete_child(ejabberd_rdbms, Name),
+  supervisor:start_child(?MODULE, hd(lists:filter(fun({CacheName, _, _, _, _, _}) -> CacheName == Name end, sql_cache_child_specs())))
+.
+
 get_cache_pid(Name) ->
   Rs = mnesia:dirty_read(sql_cache, Name),
   try case [R#sql_cache.pid || R <- Rs, gen_server:call(R#sql_cache.pid, {is_alive})] of
         [] ->
-          supervisor:start_child(?MODULE, sql_cache_child_specs()),
+          refresh_cache_pid(Name),
           none;
         Pids -> hd(Pids)
       end of
     Value -> Value
   catch _:_ ->
-    supervisor:start_child(?MODULE, sql_cache_child_specs()),
+    refresh_cache_pid(Name),
     none
   end
 .
