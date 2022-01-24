@@ -124,6 +124,11 @@ get_item(Key, CacheDict) ->
 %%       removing (if not exists then rebuild queue as here) and that could get us avg O(1) delete as well but the older
 %%       keys are more likely to get deleted so this idea could actually degrade performance
 delete_item(CacheName, Key, KeyQueue, CacheDict, Size, MaxCacheSize) ->
-  %% to_list -> delete -> from_list is much faster than queue:filter
-  { CacheName, queue:from_list(lists:delete(Key, queue:to_list(KeyQueue))), dict:erase(Key, CacheDict), Size - 1, MaxCacheSize }
+  case dict:is_key(Key, CacheDict) of
+    true ->
+      %% to_list -> delete -> from_list is much faster than queue:filter
+      { CacheName, queue:from_list(lists:delete(Key, queue:to_list(KeyQueue))), dict:erase(Key, CacheDict), Size - 1, MaxCacheSize };
+    _ ->
+      { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }
+  end
 .
