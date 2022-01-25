@@ -44,7 +44,6 @@ start_link(CacheName, MaxCacheSize) ->
 .
 
 init([CacheName, MaxCacheSize]) ->
-  ?WARNING_MSG("Creating Ejabberd SQL Cache", []),
   {ok, {CacheName, queue:new(), dict:new(), 0, MaxCacheSize}}.
 
 handle_call({is_alive}, _From, { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }) ->
