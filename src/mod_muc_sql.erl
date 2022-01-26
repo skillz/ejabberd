@@ -469,7 +469,6 @@ get_subscribed_rooms(LServer, Host, Jid) ->
     Key = ejabberd_rdbms:get_subscribed_rooms_cache_key(JidS, Host),
     case ejabberd_rdbms:get_subscribed_rooms_cache_item(Key) of
       none ->
-        ?WARNING_MSG("Cache Miss for get_subscribed_rooms", []),
         case catch ejabberd_sql:sql_query(
           LServer,
           ?SQL("select @(m.room)s, @(m.nodes)s "
@@ -488,7 +487,6 @@ get_subscribed_rooms(LServer, Host, Jid) ->
             []
         end;
       CachedValue ->
-        ?WARNING_MSG("Cache Hit for get_subscribed_rooms", []),
         CachedValue
     end
 .
