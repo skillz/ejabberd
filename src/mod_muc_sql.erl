@@ -477,7 +477,8 @@ get_subscribed_rooms(LServer, Host, Jid) ->
           "where m.jid = %(JidS)s "
           "and m.host = %(Host)s "
           "group by m.room "
-          "order by max(a.timestamp) desc, m.created_at desc")
+          "order by max(a.timestamp) desc, m.created_at desc"),
+          secondary
         ) of
           {selected, Subs} ->
             Resp = [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs],
