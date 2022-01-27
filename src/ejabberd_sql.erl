@@ -905,7 +905,7 @@ pgsql_execute_to_odbc(_) -> {updated, undefined}.
 
 %% == Native MySQL code
 
-%% part of init/1
+%% part of init/1 
 %% Open a database connection to MySQL
 mysql_connect(Server, Port, DB, Username, Password, ConnectTimeout,  _, _) ->
     case p1_mysql_conn:start(binary_to_list(Server), Port,
