@@ -482,7 +482,7 @@ get_subscribed_rooms(LServer, Host, Jid) ->
         ) of
           {selected, Subs} ->
             Resp = [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs],
-            %% ejabberd_rdbms:put_subscribed_rooms_cache_item(Key, Resp),
+            ejabberd_rdbms:put_subscribed_rooms_cache_item(Key, Resp),
             Resp;
           _Error ->
             []
