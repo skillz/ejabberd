@@ -232,8 +232,7 @@ get_subscribed_rooms_cache_key(JidS, Host) ->
 .
 
 get_subscribed_rooms_cache_item(Key) ->
-  none
-  %% get_cache_item(get_subscribed_rooms_cache, Key)
+  get_cache_item(get_subscribed_rooms_cache, Key)
 .
 
 put_subscribed_rooms_cache_item(Key, Value) ->
