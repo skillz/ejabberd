@@ -3,6 +3,9 @@
 ##
 modules:
   mod_blocking: {} # requires mod_privacy
+  mod_block_incoming: {
+    blocking_users: ["test2@localhost", "test3@localhost"]
+  }
   mod_disco: {}
   mod_pres_counter:
     count: 100
