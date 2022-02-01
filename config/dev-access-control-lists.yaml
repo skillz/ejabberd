@@ -1,0 +1,16 @@
+###.   ====================
+###'   ACCESS CONTROL LISTS
+acl:
+  ##
+  ## The 'admin' ACL grants administrative privileges to XMPP accounts.
+  ## You can put here as many accounts as you want.
+  ##
+  local:
+    user_regexp: ""
+  loopback:
+    ip:
+      - "127.0.0.0/8"
+  admin:
+    user:
+      - skillz-cas: localhost
+

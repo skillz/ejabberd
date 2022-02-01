@@ -102,9 +102,10 @@ defmodule Ejabberd.MixProject do
      {:distillery, "~> 2.0"},
      {:pkix, "~> 1.0"},
      {:ex_doc, ">= 0.0.0", only: :dev},
-     {:base64url, tag: "v1.0", git: "https://github.com/dvv/base64url.git"},
+     {:base64url, tag: "v1.0", git: "https://github.com/dvv/base64url.git", override: true},
      {:jose, "~> 1.8"},
      {:meck, "0.8.13", only: :test},
+     {:iconv, "1.0.13"},
      {:excoveralls, "~> 0.11.0", only: :test}]
     ++ cond_deps()
   end

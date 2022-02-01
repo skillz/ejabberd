@@ -1,0 +1,11 @@
+default_db: sql
+sql_type: mysql
+sql_server: "localhost"
+sql_port: 3306
+sql_database: "ejabberd"
+sql_username: "ejabberd"
+sql_password: "ejabberd"
+sql_keepalive_interval: 60
+sql_start_interval: 5
+sql_pool_size: 10
+sql_secondary_servers: ["localhost"]
