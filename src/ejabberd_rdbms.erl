@@ -58,7 +58,7 @@ init([]) ->
     ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
 
     %% sql cache pids
-    mnesia:create_table(sql_cache, attributes: [ name, pid ], type: set, local_content: true),
+    mnesia:create_table(sql_cache, [{attributes, [ name, pid ]}, {type, set}, {local_content, true}]),
 
     {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
 
