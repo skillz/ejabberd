@@ -36,7 +36,7 @@
 -export([add_sql_cache_pid/2, remove_cache_pid/2,
     get_subscribed_rooms_cache_key/2, get_subscribed_rooms_cache_item/1,
     put_subscribed_rooms_cache_item/2, invalidate_subscribed_rooms/2, flush_subscribed_rooms_cache/0,
-    remove_subscribed_rooms_by_room/2, refresh_cache_pid/1]).
+    remove_subscribed_rooms_by_room/2, refresh_cache_pid/1, get_cache_pid/1]).
 
 -include("logger.hrl").
 
@@ -58,7 +58,7 @@ init([]) ->
     ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
 
     %% sql cache pids
-    mnesia:create_table(sql_cache, [{attributes, [ name, pid ]}, {type, set}, {local_content, true}]),
+    mnesia:create_table(ejabberd_cache:get_node_table_name("sql_cache"), [{attributes, [ name, pid ]}, {type, set}, {local_content, true}]),
 
     {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
 
@@ -142,10 +142,7 @@ needs_sql(Host) ->
 %% GENERIC CACHE FUNS
 
 add_sql_cache_pid(Name, Pid) ->
-  F = fun () ->
-    mnesia:write(#sql_cache{name = Name, pid = Pid})
-      end,
-  mnesia:ets(F)
+  mnesia:dirty_write({ejabberd_cache:get_node_table_name("sql_cache"), Name, Pid})
 .
 
 refresh_cache_pid(Name) ->
@@ -155,8 +152,8 @@ refresh_cache_pid(Name) ->
 .
 
 get_cache_pid(Name) ->
-  Rs = mnesia:dirty_read(sql_cache, Name),
-  try case [R#sql_cache.pid || R <- Rs, gen_server:call(R#sql_cache.pid, {is_alive})] of
+  Rs = mnesia:dirty_read(ejabberd_cache:get_node_table_name("sql_cache"), Name),
+  try case [Pid || { _TableName, _CacheName, Pid } <- Rs, gen_server:call(Pid, {is_alive})] of
         [] ->
           refresh_cache_pid(Name),
           none;
@@ -170,10 +167,7 @@ get_cache_pid(Name) ->
 .
 
 remove_cache_pid(Name, Pid) ->
-  F = fun () ->
-    mnesia:delete_object(#sql_cache{name = Name, pid = Pid})
-      end,
-  mnesia:ets(F)
+  mnesia:dirty_delete_object({ejabberd_cache:get_node_table_name("sql_cache"), Name, Pid})
 .
 
 get_cache_item(Name, Key) ->

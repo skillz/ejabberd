@@ -13,19 +13,17 @@
 -export([start_link/2]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, terminate/3, handle_info/3]).
+-export([init/1, handle_call/3, handle_cast/2, terminate/3, handle_info/3, get_node_table_name/1]).
 
 -include("logger.hrl").
 
--record(sql_cache, {name :: atom(), pid  :: pid()}).
+get_node_table_name(TableName) ->
+  list_to_atom(TableName ++ "__" ++ atom_to_list(node()))
+.
 
 start_link(CacheName, MaxCacheSize) ->
   %% delete any entries in the sql caches
-  mnesia:ets(
-    fun() ->
-      mnesia:delete({sql_cache, CacheName})
-    end
-  ),
+  mnesia:dirty_delete(get_node_table_name("sql_cache"), CacheName),
 
   case gen_server:start_link({global, ?MODULE}, ?MODULE, [CacheName, MaxCacheSize], []) of
     {ok, Pid} ->
