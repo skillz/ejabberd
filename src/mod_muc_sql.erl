@@ -475,7 +475,7 @@ get_subscribed_rooms(LServer, Host, Jid) ->
         ?DEBUG("Subscribed Rooms Cache Miss: Jid: ~p, Host: ~p", [JidS, Host]),
         case catch ejabberd_sql:sql_query(
           LServer,
-          ?SQL("select @(m.room)s, @(m.nodes)s "
+          ?SQL("select @(m.room)s, @(m.nodes)s, @(coalesce(max(a.timestamp), unix_timestamp(m.created_at)))d "
           "from muc_room_subscribers m "
           "left join archive as a on a.username = concat(m.room, concat('@', %(Host)s)) "
           "where m.jid = %(JidS)s "
@@ -485,7 +485,8 @@ get_subscribed_rooms(LServer, Host, Jid) ->
           secondary
         ) of
           {selected, Subs} ->
-            Resp = [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs],
+            Resp = [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes, _Timestamp} <- Subs],
+            lists:foreach(fun({Room, _Nodes, Timestamp}) -> ejabberd_rdbms:put_max_room_timestamp_cache_item(Room, Host, Timestamp) end, Subs),
             ejabberd_rdbms:put_subscribed_rooms_cache_item(Key, Resp),
             Resp;
           _Error ->
