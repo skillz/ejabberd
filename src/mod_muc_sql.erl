@@ -76,6 +76,7 @@ store_room(LServer, Host, Name, Opts, ChangesHints) ->
                     Changes when is_list(Changes) ->
                         [change_room(Host, Name, Change) || Change <- Changes];
                     _ ->
+                        ?DEBUG("Remove Specific Room From Cache Entries: Room: ~p, Host: ~p", [Name, Host]),
                         ejabberd_rdbms:remove_subscribed_rooms_by_room(Name, Host),
                         ejabberd_sql:sql_query_t(
                           ?SQL("delete from muc_room_subscribers where "
@@ -88,6 +89,7 @@ store_room(LServer, Host, Name, Opts, ChangesHints) ->
 
 change_room(Host, Room, {add_subscription, JID, Nick, Nodes}) ->
     SJID = jid:encode(JID),
+    ?DEBUG("Invalidate Subscribed Rooms Cache Entry: Jid: ~p, Host: ~p", [SJID, Host]),
     ejabberd_rdbms:invalidate_subscribed_rooms(SJID, Host),
     SNodes = misc:term_to_expr(Nodes),
     ?SQL_UPSERT_T(
@@ -99,6 +101,7 @@ change_room(Host, Room, {add_subscription, JID, Nick, Nodes}) ->
   "nodes=%(SNodes)s"]);
 change_room(Host, Room, {del_subscription, JID}) ->
     SJID = jid:encode(JID),
+    ?DEBUG("Invalidate Subscribed Rooms Cache Entry: Jid: ~p, Host: ~p", [SJID, Host]),
     ejabberd_rdbms:invalidate_subscribed_rooms(SJID, Host),
     ejabberd_sql:sql_query_t(?SQL("delete from muc_room_subscribers where "
           "room=%(Room)s and host=%(Host)s and jid=%(SJID)s"));
@@ -469,6 +472,7 @@ get_subscribed_rooms(LServer, Host, Jid) ->
     Key = ejabberd_rdbms:get_subscribed_rooms_cache_key(JidS, Host),
     case ejabberd_rdbms:get_subscribed_rooms_cache_item(Key) of
       none ->
+        ?DEBUG("Subscribed Rooms Cache Miss: Jid: ~p, Host: ~p", [JidS, Host]),
         case catch ejabberd_sql:sql_query(
           LServer,
           ?SQL("select @(m.room)s, @(m.nodes)s "
@@ -487,8 +491,47 @@ get_subscribed_rooms(LServer, Host, Jid) ->
           _Error ->
             []
         end;
-      CachedValue ->
-        CachedValue
+      CachedSubs ->
+        ?DEBUG("Subscribed Rooms Cache Hit: Key: ~p", [Key]),
+        lists:map(fun({_, RoomJid, DecodedNodes}) -> { RoomJid, DecodedNodes } end,
+          lists:sort(fun({TimestampA, _, _}, {TimestampB, _, _}) ->
+            A = case TimestampA of none -> -1; _ -> TimestampA end,
+            B = case TimestampB of none -> -1; _ -> TimestampB end,
+            B =< A end, [{
+              case ejabberd_rdbms:get_max_room_timestamp_cache_item(Room, Host) of
+                none ->
+                  ?DEBUG("Max Room Timestamp Cache Miss: Room: ~p, Host: ~p", [Room, Host]),
+                  case ejabberd_sql:sql_query(
+                    LServer,
+                    ?SQL("select @(coalesce(max(a.timestamp), unix_timestamp(m.created_at)))d "
+                    "from muc_room_subscribers m "
+                    "left join archive as a on a.username = concat(m.room, concat('@', %(Host)s)) "
+                    "where m.jid = %(JidS)s "
+                    "and m.host = %(Host)s "
+                    "and m.room = %(Room)s "
+                    "group by m.room "),
+                    secondary
+                  ) of
+                    {selected, [{Timestamp}]} ->
+                      ejabberd_rdbms:put_max_room_timestamp_cache_item(Room, Host, Timestamp),
+                      Timestamp;
+                    {selected, []} ->
+                      ?DEBUG("Room Not Found: Initializing Max Timestamp as -1", []),
+                      ejabberd_rdbms:put_max_room_timestamp_cache_item(Room, Host, -1),
+                      -1;
+                    OtherValue ->
+                      ?DEBUG("Max Room Timestamp SQL Mismatch: Response: ~p", [OtherValue]),
+                      none
+                  end;
+                Timestamp ->
+                  ?DEBUG("Max Room Timestamp Cache Hit: Room: ~p, Host: ~p", [Room, Host]),
+                  Timestamp
+              end,
+              RoomJid,
+              DecodedNodes
+            } || {{ jid, Room, _, _, _, _, _ } = RoomJid, DecodedNodes} <- CachedSubs
+          ])
+        )
     end
 .
 
