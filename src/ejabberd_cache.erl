@@ -18,14 +18,14 @@
 -include("logger.hrl").
 
 get_node_table_name(TableName) ->
-  list_to_atom(TableName ++ "__" ++ atom_to_list(node()))
+  list_to_atom(TableName ++ "_" ++ atom_to_list(node()))
 .
 
 start_link(CacheName, MaxCacheSize) ->
   %% delete any entries in the sql caches
   mnesia:dirty_delete(get_node_table_name("sql_cache"), CacheName),
 
-  case gen_server:start_link({global, ?MODULE}, ?MODULE, [CacheName, MaxCacheSize], []) of
+  case gen_server:start_link({global, list_to_atom(atom_to_list(?MODULE) ++ atom_to_list(CacheName))}, ?MODULE, [CacheName, MaxCacheSize], []) of
     {ok, Pid} ->
       ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
       {ok, Pid};
