@@ -8,29 +8,54 @@
 -module(mod_block_incoming).
 -author('dsills@skillz.com').
 
+-behaviour(gen_server).
 -behaviour(gen_mod).
 
 %% gen_mod callbacks.
 -export([start/2, stop/1, reload/3, depends/2, mod_options/1, mod_opt_type/1]).
 
+%% gen_server callbacks.
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+
+%% ejabberd_commands callbacks.
+-export([get_commands_spec/0, add_blocking_user/2, remove_blocking_user/2, get_blocking_users/1, reset_blocking_users/1, clear_blocking_users/1]).
+
 %% hook handlers
 -export([filter_packet/1, filter_offline_msg/1, filter_subscription/2]).
 
--include_lib("xmpp/include/xmpp.hrl").
+-include("ejabberd_commands.hrl").
 -include("logger.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 -define(HOOK_PRIORITY, 25).
+
+-define(COMMAND_TIMEOUT, timer:seconds(30)).
 
 %%%===================================================================
 %%% Callbacks and hooks
 %%%===================================================================
-start(Host, _Opts) ->
+start(Host, Opts) ->
+  ejabberd_commands:register_commands(get_commands_spec()),
+  gen_mod:start_child(?MODULE, Host, Opts)
+.
+
+init([Host, _Opts]) ->
   ejabberd_hooks:add(user_receive_packet, Host, ?MODULE, filter_packet, ?HOOK_PRIORITY),
   ejabberd_hooks:add(roster_in_subscription, Host, ?MODULE, filter_subscription, ?HOOK_PRIORITY),
-  ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, filter_offline_msg, ?HOOK_PRIORITY)
+  ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, filter_offline_msg, ?HOOK_PRIORITY),
+  {ok, { Host, gen_mod:get_module_opt(Host, ?MODULE, blocking_users, []) } }
 .
 
 stop(Host) ->
+  case gen_mod:is_loaded_elsewhere(Host, ?MODULE) of
+    false -> ejabberd_commands:unregister_commands(get_commands_spec());
+    true -> ok
+  end,
+  gen_mod:stop_child(?MODULE, Host)
+.
+
+terminate(Reason, { Host, _BlockingUsers }) ->
+  ?DEBUG("Terminating mod_block_incoming process for [~p] with reason: [~p]", [Host, Reason]),
   ejabberd_hooks:delete(user_receive_packet, Host, ?MODULE, filter_packet, ?HOOK_PRIORITY),
   ejabberd_hooks:delete(roster_in_subscription, Host, ?MODULE, filter_subscription, ?HOOK_PRIORITY),
   ejabberd_hooks:delete(offline_message_hook, Host, ?MODULE, filter_offline_msg, ?HOOK_PRIORITY)
@@ -38,6 +63,49 @@ stop(Host) ->
 
 reload(_Host, _NewOpts, _OldOpts) ->
   ok
+.
+
+handle_call({get_blocking_users}, _From, {_Host, BlockingUsers} = State) ->
+  {reply, BlockingUsers, State}
+;
+
+handle_call({add_blocking_user, User}, _From, {Host, BlockingUsers} = State) ->
+  case lists:member(User, BlockingUsers) of
+    true -> {reply, ok, State};
+    _ -> {reply, ok, { Host, [User | BlockingUsers] }}
+  end
+;
+
+handle_call({remove_blocking_user, User}, _From, {Host, BlockingUsers}) ->
+  {reply, ok, {Host, lists:delete(User, BlockingUsers)}}
+;
+
+handle_call({reset_blocking_users}, _From, {Host, _BlockingUsers}) ->
+  {reply, ok, { Host, gen_mod:get_module_opt(Host, ?MODULE, blocking_users, []) }}
+;
+
+handle_call({clear_blocking_users}, _From, {Host, _BlockingUsers}) ->
+  {reply, ok, { Host, [] }}
+;
+
+handle_call(Request, From, State) ->
+  ?ERROR_MSG("Unexpected handle_call from [~p] for [~p]", [From, Request]),
+  {noreply, State}
+.
+
+handle_cast(Request, State) ->
+  ?ERROR_MSG("Unexpected handle_cast: [~p]", [Request]),
+  {noreply, State}
+.
+
+handle_info(Info, State) ->
+  ?ERROR_MSG("Unexpected handle_info: [~p]", [Info]),
+  {noreply, State}
+.
+
+code_change(_OldVsn, { Host, _BlockingUsers } = State, _Extra) ->
+  ?DEBUG("Updating code for mod_block_incoming process on host [~p]", [Host]),
+  {ok, State}
 .
 
 %% filter messages
@@ -104,19 +172,25 @@ check_subscription(From, To) ->
 
 need_check(Pkt) ->
   To = xmpp:get_to(Pkt),
-  ToLServer = To#jid.lserver,
-  BlockingUsers = gen_mod:get_module_opt(ToLServer, ?MODULE, blocking_users, []),
   From = xmpp:get_from(Pkt),
 
-  IsToUserBlockingIncoming = lists:member(jid:encode(To), BlockingUsers),
-  IsToAnotherUser = To#jid.luser /= From#jid.luser orelse To#jid.lserver /= From#jid.lserver,
-  HasMessageContent = case Pkt of
+  %% IsToAnotherUser:
+  (To#jid.luser /= From#jid.luser orelse To#jid.lserver /= From#jid.lserver) andalso
+
+  %% HasMessageContent:
+  case Pkt of
     #message{body = [], subject = []} -> false;
     _ -> true
-  end,
-  IsFromActualUserOrRemoteServer = From#jid.luser /= <<"">> orelse not ejabberd_router:is_my_host(From#jid.lserver),
+  end andalso
 
-  IsToUserBlockingIncoming andalso IsToAnotherUser andalso HasMessageContent andalso IsFromActualUserOrRemoteServer
+  %% IsFromActualUserOrRemoteServer:
+  (From#jid.luser /= <<"">> orelse not ejabberd_router:is_my_host(From#jid.lserver)) andalso
+
+  %% IsToUserBlockingIncoming:
+  lists:member(
+    jid:encode(To),
+    get_blocking_users(To#jid.lserver)
+  )
 .
 
 maybe_adjust_from(#message{type = groupchat, from = From} = Msg) -> Msg#message{from = jid:remove_resource(From)};
@@ -128,6 +202,88 @@ sets_bare_member({User, Server, <<"">>} = LBareJID, Set) ->
     {{User, Server, _}, _} -> true;
     _ -> false
   end
+.
+
+get_proc_name(Host) ->
+  gen_mod:get_module_proc(Host, ?MODULE)
+.
+
+get_blocking_users(Host) ->
+  try gen_server:call(get_proc_name(Host), {get_blocking_users}, ?COMMAND_TIMEOUT)
+  catch _:_ ->
+    ?ERROR_MSG("Failed to get blocking users. Falling back to initial list from mod opts.", []),
+    gen_mod:get_module_opt(Host, ?MODULE, blocking_users, [])
+  end
+.
+
+reset_blocking_users(Host) ->
+  gen_server:call(get_proc_name(Host), {reset_blocking_users}, ?COMMAND_TIMEOUT)
+.
+
+clear_blocking_users(Host) ->
+  gen_server:call(get_proc_name(Host), {clear_blocking_users}, ?COMMAND_TIMEOUT)
+.
+
+add_blocking_user(Host, User) ->
+  gen_server:call(get_proc_name(Host), {add_blocking_user, User}, ?COMMAND_TIMEOUT)
+.
+
+remove_blocking_user(Host, User) ->
+  gen_server:call(get_proc_name(Host), {remove_blocking_user, User}, ?COMMAND_TIMEOUT)
+.
+
+get_commands_spec() ->
+  [
+    #ejabberd_commands{
+      name = add_blocking_user,
+      tags = [block],
+      desc = "Add a user to the list of users blocking incoming subscriptions (friend) requests and unsolicited messages",
+      module = ?MODULE,
+      function = add_blocking_user,
+      args = [{host, binary}, {jid, binary}],
+      result = {res, rescode}
+    },
+
+    #ejabberd_commands{
+      name = remove_blocking_user,
+      tags = [block],
+      desc = "Remove a user from the list of users blocking incoming subscriptions (friend) requests and unsolicited messages",
+      module = ?MODULE,
+      function = remove_blocking_user,
+      args = [{host, binary}, {jid, binary}],
+      result = {res, rescode}
+    },
+
+    #ejabberd_commands{
+      name = reset_blocking_users,
+      tags = [block],
+      desc = "Reset the list of blocking users to the initial module configuration",
+      module = ?MODULE,
+      function = reset_blocking_users,
+      args = [{host, binary}],
+      result = {res, rescode}
+    },
+
+    #ejabberd_commands{
+      name = clear_blocking_users,
+      tags = [block],
+      desc = "Clear the list of blocking users such that the list is empty",
+      module = ?MODULE,
+      function = clear_blocking_users,
+      args = [{host, binary}],
+      result = {res, rescode}
+    },
+
+    #ejabberd_commands{
+      name = get_blocking_users,
+      tags = [block],
+      desc = "Get the list of blocking users",
+      module = ?MODULE,
+      function = get_blocking_users,
+      args = [{host, binary}],
+      result = {blocking_users, {list, {blocking_user, string}}}
+    }
+  ]
 .
 
 depends(_Host, _Opts) -> [].
