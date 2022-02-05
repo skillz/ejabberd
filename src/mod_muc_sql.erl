@@ -77,7 +77,7 @@ store_room(LServer, Host, Name, Opts, ChangesHints) ->
                         [change_room(Host, Name, Change) || Change <- Changes];
                     _ ->
                         ?DEBUG("Remove Specific Room From Cache Entries: Room: ~p, Host: ~p", [Name, Host]),
-                        ejabberd_rdbms:remove_subscribed_rooms_by_room(Name, Host),
+                        ejabberd_rdbms:invalidate_by_room(Name, Host),
                         ejabberd_sql:sql_query_t(
                           ?SQL("delete from muc_room_subscribers where "
                                "room=%(Name)s and host=%(Host)s")),
@@ -143,7 +143,7 @@ restore_room(LServer, Host, Name) ->
     end.
 
 forget_room(LServer, Host, Name) ->
-    ejabberd_rdbms:remove_subscribed_rooms_by_room(Name, Host),
+    ejabberd_rdbms:invalidate_by_room(Name, Host),
     F = fun () ->
       ejabberd_sql:sql_query_t(
                     ?SQL("delete from muc_room where name=%(Name)s"

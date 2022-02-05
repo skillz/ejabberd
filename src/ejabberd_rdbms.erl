@@ -32,43 +32,36 @@
 
 -export([start_link/0, init/1, opt_type/1, config_reloaded/0, start_host/1, stop_host/1]).
 
--export([add_sql_cache_pid/2, remove_cache_pid/2, get_cache_pid/1, refresh_cache_pid/1,
-  put_max_room_timestamp_cache_item/3, get_max_room_timestamp_cache_item/2,
+-export([put_max_room_timestamp_cache_item/3, get_max_room_timestamp_cache_item/2,
   get_subscribed_rooms_cache_key/2, get_subscribed_rooms_cache_item/1,
   put_subscribed_rooms_cache_item/2, invalidate_subscribed_rooms/2,
-  remove_subscribed_rooms_by_room/2]).
+  invalidate_by_room/2]).
 
 -include("logger.hrl").
 
--define(SQL_CACHES, [
+-define(MNESIA_SQL_CACHES, [
   {get_subscribed_rooms_cache, 10000},
   {get_max_room_timestamp_cache, 10000}
 ]).
 
--record(sql_cache, {name :: atom(), pid  :: pid()}).
-
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    file:delete(ejabberd_sql:freetds_config()),
-    file:delete(ejabberd_sql:odbc_config()),
-    file:delete(ejabberd_sql:odbcinst_config()),
-    ejabberd_hooks:add(host_up, ?MODULE, start_host, 20),
-    ejabberd_hooks:add(host_down, ?MODULE, stop_host, 90),
-    ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
-
-    %% sql cache pids
-    mnesia:create_table(ejabberd_cache:get_node_table_name("sql_cache"), [{attributes, [ name, pid ]}, {type, set}, {local_content, true}]),
-
-    {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
+  file:delete(ejabberd_sql:freetds_config()),
+  file:delete(ejabberd_sql:odbc_config()),
+  file:delete(ejabberd_sql:odbcinst_config()),
+  ejabberd_hooks:add(host_up, ?MODULE, start_host, 20),
+  ejabberd_hooks:add(host_down, ?MODULE, stop_host, 90),
+  ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
+  {ok, {{one_for_one, 10, 1}, get_specs() ++ sql_cache_child_specs()}}.
 
 sql_cache_child_specs() ->
   lists:map(
     fun({ CacheName, MaxCacheSize }) ->
-      {CacheName, {ejabberd_cache, start_link, [CacheName, MaxCacheSize]}, transient, 2000, worker, [?MODULE]}
+      {CacheName, {ejabberd_cache_mnesia, start_link, [CacheName, MaxCacheSize]}, transient, 2000, worker, [?MODULE]}
     end,
-    ?SQL_CACHES
+    ?MNESIA_SQL_CACHES
   )
 .
 
@@ -140,69 +133,41 @@ needs_sql(Host) ->
         undefined -> false
     end.
 
+
+
+
+
 %% GENERIC CACHE FUNS
 
-add_sql_cache_pid(Name, Pid) ->
-  mnesia:dirty_write({ejabberd_cache:get_node_table_name("sql_cache"), Name, Pid})
-.
-
-refresh_cache_pid(Name) ->
-  supervisor:terminate_child(ejabberd_rdbms, Name),
-  supervisor:delete_child(ejabberd_rdbms, Name),
-  supervisor:start_child(?MODULE, hd(lists:filter(fun({CacheName, _, _, _, _, _}) -> CacheName == Name end, sql_cache_child_specs())))
-.
-
-get_cache_pid(Name) ->
-  Rs = mnesia:dirty_read(ejabberd_cache:get_node_table_name("sql_cache"), Name),
-  try case [Pid || { _TableName, _CacheName, Pid } <- Rs, gen_server:call(Pid, {is_alive})] of
-        [] ->
-          refresh_cache_pid(Name),
-          none;
-        Pids -> hd(Pids)
-      end of
-    Value -> Value
+get_mnesia_cache_item(Name, Key) ->
+  try
+    gen_server:call(ejabberd_cache_mnesia:get_proc_name(Name), {get_item, Key})
   catch _:_ ->
-    refresh_cache_pid(Name),
     none
   end
 .
 
-remove_cache_pid(Name, Pid) ->
-  mnesia:dirty_delete_object({ejabberd_cache:get_node_table_name("sql_cache"), Name, Pid})
-.
-
-get_cache_item(Name, Key) ->
-  case get_cache_pid(Name) of
-    none -> none;
-    Pid -> gen_server:call(Pid, {get_item, Key})
+put_mnesia_cache_item(Name, Key, Value) ->
+  try
+    gen_server:cast(ejabberd_cache_mnesia:get_proc_name(Name), {put_item, Key, Value})
+  catch _:_ ->
+    none
   end
 .
 
-get_cache(Name) ->
-  case get_cache_pid(Name) of
-    none -> none;
-    Pid -> gen_server:call(Pid, {get_all})
+delete_mnesia_cache_item(Name, Key) ->
+  try
+    gen_server:cast(ejabberd_cache_mnesia:get_proc_name(Name), {delete_item, Key})
+  catch _:_ ->
+    none
   end
 .
 
-put_cache(Name, Dict) ->
-  case get_cache_pid(Name) of
-    none -> none;
-    Pid -> gen_server:cast(Pid, {put_all, Dict})
-  end
-.
-
-put_cache_item(Name, Key, Value) ->
-  case get_cache_pid(Name) of
-    none -> none;
-    Pid -> gen_server:cast(Pid, {put_item, Key, Value})
-  end
-.
-
-delete_cache_item(Name, Key) ->
-  case get_cache_pid(Name) of
-    none -> none;
-    Pid -> gen_server:cast(Pid, {delete_item, Key})
+delete_mnesia_cache_items(Name, ShouldRemoveFun) ->
+  try
+    gen_server:cast(ejabberd_cache_mnesia:get_proc_name(Name), {delete_items_by_fun, ShouldRemoveFun})
+  catch _:_ ->
+    none
   end
 .
 %% END GENERIC CACHE FUNS
@@ -213,78 +178,62 @@ delete_cache_item(Name, Key) ->
 
 %% GET_SUBSCRIBED_ROOMS CACHE FUNS
 get_subscribed_rooms_cache_key(JidS, Host) ->
-  unicode:characters_to_list("get_subscribed_rooms&") ++
-  unicode:characters_to_list(JidS) ++
-  unicode:characters_to_list("&") ++
-  unicode:characters_to_list(Host)
+  binary:list_to_bin(
+    unicode:characters_to_list("get_subscribed_rooms&") ++
+    unicode:characters_to_list(JidS) ++
+    unicode:characters_to_list("&") ++
+    unicode:characters_to_list(Host)
+  )
 .
 
 get_subscribed_rooms_cache_item(Key) ->
-  get_cache_item(get_subscribed_rooms_cache, Key)
+  get_mnesia_cache_item(get_subscribed_rooms_cache, Key)
 .
 
 put_subscribed_rooms_cache_item(Key, Value) ->
-  put_cache_item(get_subscribed_rooms_cache, Key, Value)
+  put_mnesia_cache_item(get_subscribed_rooms_cache, Key, Value)
 .
 
 invalidate_subscribed_rooms(Key) ->
-  delete_cache_item(get_subscribed_rooms_cache, Key)
+  delete_mnesia_cache_item(get_subscribed_rooms_cache, Key)
 .
 
 invalidate_subscribed_rooms(JidS, Host) ->
   invalidate_subscribed_rooms(get_subscribed_rooms_cache_key(JidS, Host))
 .
 
-%% filter InputRoom and InputHost out of any cache entries with them
-remove_subscribed_rooms_by_room(InputRoom, InputHost) ->
-  case get_cache(get_subscribed_rooms_cache) of
-    none -> none;
-    Dict ->
-      NewDict = dict:map(
-        fun(_, Value) ->
-          %% list of rooms and nodes from get_subscribed_rooms(...) call
-          case is_list(Value) of
-            true ->
-              %% filter entries to remove ones containing both InputRoom, InputHost
-              lists:filter(
-                fun(Entry) ->
-                  case Entry of
-                    %% jid:make from jid.erl has signature: { jid, User, Server, Resource, LUser, LServer, LResource }
-                    { { jid, Room, Host, _, _, _, _ }, _ } ->
-                      %% only keep entries where Room != InputRoom or Host != InputHost
-                      %% which is equiv to only removing entries where Room == InputRoom and Host == InputHost
-                      Room /= InputRoom orelse Host /= InputHost;
-                    OtherValue ->
-                      %% unknown entry signature so keep it included to be safe
-                      ?DEBUG("Unknown get_subscribed_rooms_cache entry signature: ~p", [OtherValue]),
-                      true
-                  end
-                end,
-                Value
-              );
-            %% not a list so keep it in the dict to be safe
-            _ -> Value
-          end
-        end,
-        Dict
-      ),
-
-      %% put back the new cache with InputRoom entries removed
-      put_cache(get_subscribed_rooms_cache, NewDict)
-  end
+invalidate_by_room(InputRoom, InputHost) ->
+  delete_mnesia_cache_items(get_subscribed_rooms_cache, fun(_Key, Value) ->
+    case Value of
+      { cache_item, CacheItem } ->
+        lists:any(
+          fun({ { jid, Room, Host, _, _, _, _ }, _Nodes }) ->
+            Room == InputRoom andalso Host == InputHost
+          end,
+          CacheItem
+        );
+      _ -> false
+    end
+  end)
 .
 %% END GET_SUBSCRIBED_ROOMS FUNS
 
+
+
+
+
 %% GET_MAX_ROOM_TIMESTAMP CACHE FUNS
 get_max_room_timestamp_cache_key(Room, Host) ->
-  unicode:characters_to_list("get_max_room_timestamp_&") ++
-  unicode:characters_to_list(Room) ++
-  unicode:characters_to_list("&") ++
-  unicode:characters_to_list(Host)
+  binary:list_to_bin(
+    unicode:characters_to_list("get_max_room_timestamp&") ++
+    unicode:characters_to_list(Room) ++
+    unicode:characters_to_list("&") ++
+    unicode:characters_to_list(Host)
+  )
 .
 
 get_max_room_timestamp_cache_item(Key) ->
-  get_cache_item(get_max_room_timestamp_cache, Key)
+  get_mnesia_cache_item(get_max_room_timestamp_cache, Key)
 .
 
 get_max_room_timestamp_cache_item(Room, Host) ->
@@ -301,11 +250,11 @@ put_max_room_timestamp_cache_item(Room, Host, Timestamp) ->
   case get_max_room_timestamp_cache_item(Key) of
     none ->
       ?DEBUG("Max Room Key Not Found: Put New Key: ~p, Timestamp: ~p", [Key, Value]),
-      put_cache_item(get_max_room_timestamp_cache, Key, Value);
+      put_mnesia_cache_item(get_max_room_timestamp_cache, Key, Value);
     CurrentValue ->
       if Value > CurrentValue ->
         ?DEBUG("New Max Room Value: Key: ~p, New Timestamp: ~p, Old Timestamp: ~p", [Key, Value, CurrentValue]),
-        put_cache_item(get_max_room_timestamp_cache, Key, Value);
+        put_mnesia_cache_item(get_max_room_timestamp_cache, Key, Value);
       true ->
         ?DEBUG("Old Max Room Value Ignored: Key: ~p, New Timestamp: ~p, Old Timestamp: ~p", [Key, Value, CurrentValue]),
         none
@@ -313,6 +262,11 @@ put_max_room_timestamp_cache_item(Room, Host, Timestamp) ->
   end
 .
 %% END GET_MAX_ROOM_TIMESTAMP CACHE FUNS
+
+
+
+
+
 
 -spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
 opt_type(sql_type) ->

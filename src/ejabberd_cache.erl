@@ -17,23 +17,25 @@
 
 -include("logger.hrl").
 
+-define(CACHE_MAX_SIZE, 10000).
+
 get_node_table_name(TableName) ->
   list_to_atom(TableName ++ "_" ++ atom_to_list(node()))
 .
 
 start_link(CacheName, MaxCacheSize) ->
-  %% delete any entries in the sql caches
+  %% create table
+  mnesia:create_table(get_node_table_name("sql_cache"), [{attributes, [ name, pid ]}, {type, set}, {local_content, true}]),
+
+  %% delete any entries in the sql cache
   mnesia:dirty_delete(get_node_table_name("sql_cache"), CacheName),
 
   case gen_server:start_link({global, list_to_atom(atom_to_list(?MODULE) ++ atom_to_list(CacheName))}, ?MODULE, [CacheName, MaxCacheSize], []) of
     {ok, Pid} ->
-      ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
+      mnesia:dirty_write(get_node_table_name("sql_cache"), CacheName, self()),
       {ok, Pid};
-    {ok, {Pid, Mon}} ->
-      ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
-      {ok, {Pid, Mon}};
     {error, {already_started, Pid}} ->
-      ejabberd_rdbms:add_sql_cache_pid(CacheName, Pid),
+      mnesia:dirty_write(get_node_table_name("sql_cache"), CacheName, self()),
       {ok, Pid};
     ignore -> ignore;
     {error, Error} -> {error, Error};
@@ -42,7 +44,35 @@ start_link(CacheName, MaxCacheSize) ->
 .
 
 init([CacheName, MaxCacheSize]) ->
-  {ok, {CacheName, queue:new(), dict:new(), 0, MaxCacheSize}}.
+  {ok, {CacheName, queue:new(), dict:new(), 0, MaxCacheSize}}
+.
+
+refresh_cache_pid(CacheName) -> refresh_cache_pid(CacheName, ?CACHE_MAX_SIZE).
+
+refresh_cache_pid(CacheName, MaxCacheSize) ->
+  case start_link(CacheName, MaxCacheSize) of
+    {ok, Pid} -> Pid;
+    _ -> none
+  end
+.
+
+get_cache_pid(CacheName) -> get_cache_pid(CacheName, ?CACHE_MAX_SIZE).
+
+get_cache_pid(CacheName, MaxCacheSize) ->
+  Rs = mnesia:dirty_read(get_node_table_name("sql_cache"), CacheName),
+  try
+    case [Pid || { _TableName, _CacheName, Pid } <- Rs, gen_server:call(Pid, {is_alive})] of
+      [] -> refresh_cache_pid(CacheName, MaxCacheSize);
+      Pids -> hd(Pids)
+    end
+  catch _:_ ->
+    refresh_cache_pid(CacheName, MaxCacheSize)
+  end
+.
+
+handle_call({get_cache_pid}, _From, { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }) ->
+  {reply, get_cache_pid(CacheName, MaxCacheSize), { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }}
+;
 
 handle_call({is_alive}, _From, { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }) ->
   {reply, true, { CacheName, KeyQueue, CacheDict, Size, MaxCacheSize }}
@@ -87,7 +117,8 @@ handle_info({'DOWN', _, _, _, _}, _StateName, StateData) ->
 .
 
 terminate(_Reason, _StateName, { CacheName, _, _, _, _ }) ->
-  ejabberd_rdbms:remove_cache_pid(CacheName, self())
+  mnesia:dirty_delete(get_node_table_name("sql_cache"), CacheName),
+  ok
 .
 
 %% avg O(1)
