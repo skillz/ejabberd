@@ -29,7 +29,7 @@
 
 -define(HOOK_PRIORITY, 25).
 
--define(COMMAND_TIMEOUT, timer:seconds(30)).
+-define(COMMAND_TIMEOUT, timer:seconds(2)).
 
 %%%===================================================================
 %%% Callbacks and hooks
@@ -43,7 +43,7 @@ init([Host, _Opts]) ->
   ejabberd_hooks:add(user_receive_packet, Host, ?MODULE, filter_packet, ?HOOK_PRIORITY),
   ejabberd_hooks:add(roster_in_subscription, Host, ?MODULE, filter_subscription, ?HOOK_PRIORITY),
   ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, filter_offline_msg, ?HOOK_PRIORITY),
-  {ok, { Host, gen_mod:get_module_opt(Host, ?MODULE, blocking_users, []) } }
+  {ok, { Host, get_config_users_dict(Host) } }
 .
 
 stop(Host) ->
@@ -66,26 +66,27 @@ reload(_Host, _NewOpts, _OldOpts) ->
 .
 
 handle_call({get_blocking_users}, _From, {_Host, BlockingUsers} = State) ->
-  {reply, BlockingUsers, State}
+  {reply, lists:sort(lists:map(fun({Key, _}) -> Key end, dict:to_list(BlockingUsers))), State}
 ;
 
-handle_call({add_blocking_user, User}, _From, {Host, BlockingUsers} = State) ->
-  case lists:member(User, BlockingUsers) of
-    true -> {reply, ok, State};
-    _ -> {reply, ok, { Host, [User | BlockingUsers] }}
-  end
+handle_call({is_blocking_user, User}, _From, {_Host, BlockingUsers} = State) ->
+  {reply, dict:is_key(User, BlockingUsers), State}
+;
+
+handle_call({add_blocking_user, User}, _From, {Host, BlockingUsers}) ->
+  {reply, ok, { Host, dict:store(User, User, BlockingUsers) }}
 ;
 
 handle_call({remove_blocking_user, User}, _From, {Host, BlockingUsers}) ->
-  {reply, ok, {Host, lists:delete(User, BlockingUsers)}}
+  {reply, ok, {Host, dict:erase(User, BlockingUsers)}}
 ;
 
 handle_call({reset_blocking_users}, _From, {Host, _BlockingUsers}) ->
-  {reply, ok, { Host, gen_mod:get_module_opt(Host, ?MODULE, blocking_users, []) }}
+  {reply, ok, { Host, get_config_users_dict(Host) }}
 ;
 
 handle_call({clear_blocking_users}, _From, {Host, _BlockingUsers}) ->
-  {reply, ok, { Host, [] }}
+  {reply, ok, { Host, dict:new() }}
 ;
 
 handle_call(Request, From, State) ->
@@ -115,7 +116,7 @@ filter_packet({#message{from = From} = Msg, State} = Acc) ->
   #{pres_a := PresA} = State,
   FromUserInPresencePacket = gb_sets:is_element(LFrom, PresA) orelse gb_sets:is_element(LBareFrom, PresA) orelse sets_bare_member(LBareFrom, PresA),
   case FromUserInPresencePacket of
-    false -> %% from-user not in presence struct so this is an outgoing DM to someone else
+    false -> %% from-user not in presence struct so this is an outgoing DM to someone else who might be blocking incoming
       case check_message(Msg) of
         allow -> Acc;
         deny -> {stop, {drop, State}}
@@ -135,7 +136,7 @@ filter_offline_msg({_Action, #message{} = Msg} = Acc) ->
 .
 
 filter_subscription(Acc, #presence{from = From, to = To, type = subscribe} = Pres) ->
-  case need_check(Pres) of
+  case is_blocking(Pres) of
     true ->
       case check_subscription(From, To) of
         false -> {stop, false};
@@ -151,7 +152,7 @@ filter_subscription(Acc, _) -> Acc.
 %%% Internal functions
 %%%===================================================================
 check_message(#message{from = From, to = To, lang = Lang} = Msg) ->
-  case need_check(Msg) of
+  case is_blocking(Msg) of
     true ->
       case check_subscription(From, To) of
         false ->
@@ -170,27 +171,19 @@ check_subscription(From, To) ->
   mod_roster:is_subscribed(From, To)
 .
 
-need_check(Pkt) ->
+is_blocking(Pkt) ->
   To = xmpp:get_to(Pkt),
   From = xmpp:get_from(Pkt),
 
-  %% IsToAnotherUser:
-  (To#jid.luser /= From#jid.luser orelse To#jid.lserver /= From#jid.lserver) andalso
+  IsToAnotherUser = (To#jid.luser /= From#jid.luser orelse To#jid.lserver /= From#jid.lserver),
+  HasMessageContent = case Pkt of
+      #message{body = [], subject = []} -> false;
+      _ -> true
+    end,
+  IsFromActualUserOrRemoteServer = (From#jid.luser /= <<"">> orelse not ejabberd_router:is_my_host(From#jid.lserver)),
+  IsToUserBlockingIncoming = is_blocking_user(To#jid.lserver, jid:encode(To)),
 
-  %% HasMessageContent:
-  case Pkt of
-    #message{body = [], subject = []} -> false;
-    _ -> true
-  end andalso
-
-  %% IsFromActualUserOrRemoteServer:
-  (From#jid.luser /= <<"">> orelse not ejabberd_router:is_my_host(From#jid.lserver)) andalso
-
-  %% IsToUserBlockingIncoming:
-  lists:member(
-    jid:encode(To),
-    get_blocking_users(To#jid.lserver)
-  )
+  IsToAnotherUser andalso HasMessageContent andalso IsFromActualUserOrRemoteServer andalso IsToUserBlockingIncoming
 .
 
 maybe_adjust_from(#message{type = groupchat, from = From} = Msg) -> Msg#message{from = jid:remove_resource(From)};
@@ -208,11 +201,23 @@ get_proc_name(Host) ->
   gen_mod:get_module_proc(Host, ?MODULE)
 .
 
+get_config_users_dict(Host) ->
+  dict:from_list(lists:map(fun(User) -> {User, User} end, gen_mod:get_module_opt(Host, ?MODULE, blocking_users, [])))
+.
+
 get_blocking_users(Host) ->
   try gen_server:call(get_proc_name(Host), {get_blocking_users}, ?COMMAND_TIMEOUT)
   catch _:_ ->
     ?ERROR_MSG("Failed to get blocking users. Falling back to initial list from mod opts.", []),
     gen_mod:get_module_opt(Host, ?MODULE, blocking_users, [])
+  end
+.
+
+is_blocking_user(Host, User) ->
+  try gen_server:call(get_proc_name(Host), {is_blocking_user, User}, ?COMMAND_TIMEOUT)
+  catch _:_ ->
+    ?ERROR_MSG("Failed to check if user is blocking. Falling back to false.", []),
+    false
   end
 .
 
