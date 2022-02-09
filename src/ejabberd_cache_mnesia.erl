@@ -34,7 +34,7 @@ start_link(CacheName, MaxCacheSize) ->
 
 init([CacheName, MaxCacheSize]) ->
   FullCacheName = get_cache_table_name(CacheName),
-  {ok, {FullCacheName, MaxCacheSize, get_size(FullCacheName)}}.
+  {ok, {FullCacheName, MaxCacheSize, get_size(FullCacheName, MaxCacheSize)}}.
 
 handle_call({get_item, Key}, _From, { CacheName, MaxCacheSize, Size }) ->
   {reply, get_item(CacheName, Key), { CacheName, MaxCacheSize, Size }}
@@ -104,14 +104,14 @@ get_cache_table_name(CacheName) ->
 .
 
 % O(N); expensive bc it syncs with other nodes ONLY at start up to get most accurate size possible before fully staring the cache
-get_size(CacheName) ->
+get_size(CacheName, MaxCacheSize) ->
   Keys = try
     {atomic, AllKeys} = mnesia:sync_transaction(fun() -> mnesia:all_keys(CacheName) end),
     AllKeys
   catch _:_ ->
     mnesia:dirty_all_keys(CacheName)
   end,
-  length(Keys)
+  lists:min([length(Keys), MaxCacheSize])
 .
 
 %% avg O(1)

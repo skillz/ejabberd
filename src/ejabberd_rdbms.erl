@@ -32,16 +32,12 @@
 
 -export([start_link/0, init/1, opt_type/1, config_reloaded/0, start_host/1, stop_host/1]).
 
--export([put_max_room_timestamp_cache_item/3, get_max_room_timestamp_cache_item/2,
-  get_subscribed_rooms_cache_key/2, get_subscribed_rooms_cache_item/1,
-  put_subscribed_rooms_cache_item/2, invalidate_subscribed_rooms/2,
-  invalidate_by_room/2]).
+-export([put_max_room_timestamp_cache_item/3, get_max_room_timestamp_cache_item/2]).
 
 -include("logger.hrl").
 
 -define(MNESIA_SQL_CACHES, [
-  {get_subscribed_rooms_cache, 10000},
-  {get_max_room_timestamp_cache, 10000}
+  {get_max_room_timestamp_cache, 50000}
 ]).
 
 start_link() ->
@@ -138,7 +134,6 @@ needs_sql(Host) ->
 
 
 %% GENERIC CACHE FUNS
-
 get_mnesia_cache_item(Name, Key) ->
   try
     gen_server:call(ejabberd_cache_mnesia:get_proc_name(Name), {get_item, Key})
@@ -154,69 +149,7 @@ put_mnesia_cache_item(Name, Key, Value) ->
     none
   end
 .
-
-delete_mnesia_cache_item(Name, Key) ->
-  try
-    gen_server:cast(ejabberd_cache_mnesia:get_proc_name(Name), {delete_item, Key})
-  catch _:_ ->
-    none
-  end
-.
-
-delete_mnesia_cache_items(Name, ShouldRemoveFun) ->
-  try
-    gen_server:cast(ejabberd_cache_mnesia:get_proc_name(Name), {delete_items_by_fun, ShouldRemoveFun})
-  catch _:_ ->
-    none
-  end
-.
 %% END GENERIC CACHE FUNS
-
-
-
-
-
-%% GET_SUBSCRIBED_ROOMS CACHE FUNS
-get_subscribed_rooms_cache_key(JidS, Host) ->
-  binary:list_to_bin(
-    unicode:characters_to_list("get_subscribed_rooms&") ++
-    unicode:characters_to_list(JidS) ++
-    unicode:characters_to_list("&") ++
-    unicode:characters_to_list(Host)
-  )
-.
-
-get_subscribed_rooms_cache_item(Key) ->
-  get_mnesia_cache_item(get_subscribed_rooms_cache, Key)
-.
-
-put_subscribed_rooms_cache_item(Key, Value) ->
-  put_mnesia_cache_item(get_subscribed_rooms_cache, Key, Value)
-.
-
-invalidate_subscribed_rooms(Key) ->
-  delete_mnesia_cache_item(get_subscribed_rooms_cache, Key)
-.
-
-invalidate_subscribed_rooms(JidS, Host) ->
-  invalidate_subscribed_rooms(get_subscribed_rooms_cache_key(JidS, Host))
-.
-
-invalidate_by_room(InputRoom, InputHost) ->
-  delete_mnesia_cache_items(get_subscribed_rooms_cache, fun(_Key, Value) ->
-    case Value of
-      { cache_item, CacheItem } ->
-        lists:any(
-          fun({ { jid, Room, Host, _, _, _, _ }, _Nodes }) ->
-            Room == InputRoom andalso Host == InputHost
-          end,
-          CacheItem
-        );
-      _ -> false
-    end
-  end)
-.
-%% END GET_SUBSCRIBED_ROOMS FUNS
 
 
 

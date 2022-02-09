@@ -469,70 +469,62 @@ import(_, _, _) ->
 
 get_subscribed_rooms(LServer, Host, Jid) ->
     JidS = jid:encode(Jid),
-    Key = ejabberd_rdbms:get_subscribed_rooms_cache_key(JidS, Host),
-    case ejabberd_rdbms:get_subscribed_rooms_cache_item(Key) of
-      none ->
-        ?DEBUG("Subscribed Rooms Cache Miss: Jid: ~p, Host: ~p", [JidS, Host]),
-        case catch ejabberd_sql:sql_query(
-          LServer,
-          ?SQL("select @(m.room)s, @(m.nodes)s, @(coalesce(max(a.timestamp), unix_timestamp(m.created_at)))d "
-          "from muc_room_subscribers m "
-          "left join archive as a on a.username = concat(m.room, concat('@', %(Host)s)) "
-          "where m.jid = %(JidS)s "
-          "and m.host = %(Host)s "
-          "group by m.room "
-          "order by max(a.timestamp) desc, m.created_at desc"),
-          secondary
-        ) of
-          {selected, Subs} ->
-            Resp = [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes, _Timestamp} <- Subs],
-            lists:foreach(fun({Room, _Nodes, Timestamp}) -> ejabberd_rdbms:put_max_room_timestamp_cache_item(Room, Host, Timestamp) end, Subs),
-            ejabberd_rdbms:put_subscribed_rooms_cache_item(Key, Resp),
-            Resp;
-          _Error ->
-            []
-        end;
-      CachedSubs ->
-        ?DEBUG("Subscribed Rooms Cache Hit: Key: ~p", [Key]),
-        lists:map(fun({_, RoomJid, DecodedNodes}) -> { RoomJid, DecodedNodes } end,
-          lists:sort(fun({TimestampA, _, _}, {TimestampB, _, _}) ->
-            A = case TimestampA of none -> -1; _ -> TimestampA end,
-            B = case TimestampB of none -> -1; _ -> TimestampB end,
-            B =< A end, [{
-              case ejabberd_rdbms:get_max_room_timestamp_cache_item(Room, Host) of
-                none ->
-                  ?DEBUG("Max Room Timestamp Cache Miss: Room: ~p, Host: ~p", [Room, Host]),
-                  case ejabberd_sql:sql_query(
-                    LServer,
-                    ?SQL("select @(coalesce(max(a.timestamp), unix_timestamp(m.created_at)))d "
-                    "from muc_room_subscribers m "
-                    "left join archive as a on a.username = concat(m.room, concat('@', %(Host)s)) "
-                    "where m.jid = %(JidS)s "
-                    "and m.host = %(Host)s "
-                    "and m.room = %(Room)s "
-                    "group by m.room "),
-                    secondary
-                  ) of
-                    {selected, [{Timestamp}]} ->
-                      ejabberd_rdbms:put_max_room_timestamp_cache_item(Room, Host, Timestamp),
-                      Timestamp;
-                    {selected, []} ->
-                      ?DEBUG("Room Not Found: Initializing Max Timestamp as -1", []),
-                      ejabberd_rdbms:put_max_room_timestamp_cache_item(Room, Host, -1),
-                      -1;
-                    OtherValue ->
-                      ?DEBUG("Max Room Timestamp SQL Mismatch: Response: ~p", [OtherValue]),
-                      none
-                  end;
-                Timestamp ->
-                  ?DEBUG("Max Room Timestamp Cache Hit: Room: ~p, Host: ~p", [Room, Host]),
-                  Timestamp
-              end,
-              RoomJid,
-              DecodedNodes
-            } || {{ jid, Room, _, _, _, _, _ } = RoomJid, DecodedNodes} <- CachedSubs
-          ])
-        )
+    case catch ejabberd_sql:sql_query(
+      LServer,
+%%      ?SQL("select @(m.room)s, @(m.nodes)s "
+%%      "from muc_room_subscribers m "
+%%      "where m.jid = %(JidS)s "
+%%      "and m.host = %(Host)s "),
+      ?SQL("select @(m.room)s, @(m.nodes)s, @(coalesce(max(a.timestamp), unix_timestamp(m.created_at)))d "
+      "from muc_room_subscribers m "
+      "left join archive as a on a.username = concat(m.room, concat('@', %(Host)s)) "
+      "where m.jid = %(JidS)s "
+      "and m.host = %(Host)s "
+      "group by m.room "
+      "order by max(a.timestamp) desc, m.created_at desc"),
+      secondary
+    ) of
+      {selected, Subs} ->
+        [
+          {
+            jid:make(Room, Host, <<>>),
+            ejabberd_sql:decode_term(Nodes)
+          } || {Room, Nodes} <- Subs
+        ];
+%%        Resp = [
+%%          [
+%%            ejabberd_rdbms:get_max_room_timestamp_cache_item(Room, Host),
+%%            Room,
+%%            Nodes
+%%          ] || {Room, Nodes} <- Subs
+%%        ],
+%%
+%%        NoTimestamp = lists:filter(fun([Timestamp, _, _]) -> Timestamp == none end, Resp),
+%%        WithTimestamp = lists:filter(fun([Timestamp, _, _]) -> Timestamp /= none end, Resp),
+%%
+%%        lists:map(fun([_, Room, Nodes]) -> { jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes) } end,
+%%          lists:sort(fun([TimestampA, _, _], [TimestampB, _, _]) ->
+%%            case TimestampB of none -> -1; _ -> TimestampB end =< case TimestampA of none -> -1; _ -> TimestampA end
+%%          end, case NoTimestamp == [] of
+%%            true -> WithTimestamp;
+%%            _ ->
+%%              NoTimestampRoomList = str:join([[<<"'">>, ejabberd_sql:escape(Room), <<"'">>] || [ _, Room, _ ] <- NoTimestamp], <<",">>),
+%%              SQLStr = [<<"select coalesce(max(a.timestamp), unix_timestamp(m.created_at)) ts, m.room, m.nodes "
+%%              "from muc_room_subscribers m "
+%%              "left join archive as a on a.username = concat(m.room, concat('@', ">>, <<"'">>, ejabberd_sql:escape(Host), <<"'">>, <<")) "
+%%              "where m.jid = ">>, <<"'">>, ejabberd_sql:escape(JidS), <<"' ">>,
+%%              <<"and m.host = ">>, <<"'">>, ejabberd_sql:escape(Host), <<"' ">>,
+%%              <<"and m.room in (">>, NoTimestampRoomList, <<") "
+%%              "group by m.room">>],
+%%              case catch ejabberd_sql:sql_query(LServer, SQLStr, secondary) of
+%%                {selected, _Cols, Results} ->
+%%                  lists:foreach(fun([Timestamp, Room, _]) -> ejabberd_rdbms:put_max_room_timestamp_cache_item(Room, Host, Timestamp) end, Results),
+%%                  WithTimestamp ++ Results;
+%%                Error -> WithTimestamp
+%%              end
+%%          end)
+%%        );
+      _Error -> []
     end
 .
 
