@@ -85,10 +85,10 @@ defmodule Ejabberd.MixProject do
 
   defp deps do
     [{:lager, "~> 3.6.0"},
-     {:p1_utils, "~> 1.0"},
+     {:p1_utils, "1.0.24", override: true},
      {:fast_xml, "~> 1.1"},
      {:xmpp, "~> 1.3.0"},
-     {:cache_tab, "~> 1.0"},
+     {:cache_tab, "1.0.29", override: true},
      {:stringprep, "~> 1.0"},
      {:fast_yaml, "~> 1.0"},
      {:fast_tls, "~> 1.1"},
