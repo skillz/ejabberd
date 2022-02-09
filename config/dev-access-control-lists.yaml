@@ -13,4 +13,14 @@ acl:
   admin:
     user:
       - skillz-cas: localhost
+      - admin: localhost
+      - admin@localhost
+      - testuser: localhost
 
+host_config:
+  "localhost":
+    acl:
+      admin:
+        user:
+          - "admin": "localhost"
+          - "testuser": "localhost"

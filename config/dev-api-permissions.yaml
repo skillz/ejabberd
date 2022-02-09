@@ -32,6 +32,12 @@ api_permissions:
       - "get_room_options"
       - "get_roster"
       - "rooms_unused_destroy"
+      - "registered_users"
+      - "add_blocking_user"
+      - "remove_blocking_user"
+      - "get_blocking_users"
+      - "reset_blocking_users"
+      - "clear_blocking_users"
 
 shaper:
   ##
