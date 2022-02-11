@@ -1,7 +1,7 @@
 %{
   "artificery": {:hex, :artificery, "0.4.0", "e0b8d3eb9dfe8f42c08a620f90a2aa9cef5dba9fcdfcecad5c2be451df159a77", [:mix], [], "hexpm", "2cdf0748823aa0a9a10739bbd131a2d47f4f11021ad99b5b970f738c0428dab8"},
   "base64url": {:git, "https://github.com/dvv/base64url.git", "f2c64ed8b9bebc536fad37ad97243452b674b837", [tag: "v1.0"]},
-  "cache_tab": {:hex, :cache_tab, "1.0.18", "3c703adef8da7aa91a9ee044426e18465f93a2e162e66165131c53bf37bc0a02", [:rebar3], [{:p1_utils, "1.0.14", [hex: :p1_utils, repo: "hexpm", optional: false]}], "hexpm", "0eb98fbda2779cba4aee1c370b5f63eca9faa32bc1038b53aee26b3bf34e7793"},
+  "cache_tab": {:hex, :cache_tab, "1.0.29", "6c161988620b788d8df28c8f6af557571609c8e4b671dbadab295a4722cd501b", [:rebar3], [{:p1_utils, "1.0.23", [hex: :p1_utils, repo: "hexpm", optional: false]}], "hexpm", "a02a638021cce91ed1a8628dcbb4795bf5c01c9d11db8c613065923142824ce9"},
   "certifi": {:hex, :certifi, "2.5.1", "867ce347f7c7d78563450a18a6a28a8090331e77fa02380b4a21962a65d36ee5", [:rebar3], [{:parse_trans, "~>3.3", [hex: :parse_trans, repo: "hexpm", optional: false]}], "hexpm", "805abd97539caf89ec6d4732c91e62ba9da0cda51ac462380bbd28ee697a8c42"},
   "distillery": {:hex, :distillery, "2.0.12", "6e78fe042df82610ac3fa50bd7d2d8190ad287d120d3cd1682d83a44e8b34dfb", [:mix], [{:artificery, "~> 0.2", [hex: :artificery, repo: "hexpm", optional: false]}], "hexpm", "ad094bfbbd69a39f6118265bc7d76a56534df9af2f06aca0d3fd03e1220fbe31"},
   "earmark": {:hex, :earmark, "1.3.1", "73812f447f7a42358d3ba79283cfa3075a7580a3a2ed457616d6517ac3738cb9", [:mix], [], "hexpm", "000aaeff08919e95e7aea13e4af7b2b9734577b3e6a7c50ee31ee88cab6ec4fb"},
@@ -35,7 +35,7 @@
   "p1_mysql": {:hex, :p1_mysql, "1.0.9", "43ca869d3797b0248630cac0e05042e5e1b77d5cc3164206b10079c8d9182e0e", [:rebar3], [], "hexpm", "5b9a2972b4e73b3f4b7e570868858ccd7656f8d7572f68f28a1f5ca65cb1a5d1"},
   "p1_oauth2": {:hex, :p1_oauth2, "0.6.4", "7898999a940814707a26a5b113f39ff1b1fd7f6ea3d31fcd414cd765b2f1fd28", [:rebar3], [], "hexpm", "18102c0d56c5c2fbf1a244b2e20efb996cfda2a53329423fbbe4245d361c0a5e"},
   "p1_pgsql": {:hex, :p1_pgsql, "1.1.7", "ef64d34adbbe08258cc10b1532649446d8c086ff8663d44f430d837ec31a89f8", [:rebar3], [], "hexpm", "099894468eaa49510b8fd2e9d300dc7ff0cf54bb18a1e90b0a406cc3e2192c44"},
-  "p1_utils": {:hex, :p1_utils, "1.0.14", "1f8176b02d787b858d099c1a2276c452ee2e4952766a13837dc93db3e1413a43", [:rebar3], [], "hexpm", "74034be47a55d105113851247e2b387a3f4b84e495be4d6aa092544742bd4ad2"},
+  "p1_utils": {:hex, :p1_utils, "1.0.24", "9debe3626f8041d20e13098526b95a144239ac2fd4afc88bcf09db6a5d0dcc35", [:rebar3], [], "hexpm", "c913e237cca316193e243b6bb06f01f8189a38aad7824fba0c7acaa8fb9d7cb6"},
   "parse_trans": {:hex, :parse_trans, "3.3.0", "09765507a3c7590a784615cfd421d101aec25098d50b89d7aa1d66646bc571c1", [:rebar3], [], "hexpm", "17ef63abde837ad30680ea7f857dd9e7ced9476cdd7b0394432af4bfc241b960"},
   "pkix": {:hex, :pkix, "1.0.1", "e1f6f9418bd871db842f31e96c7e1ecfcc7f8c4868f5bd384a8a24de9be5d3a1", [:rebar3], [], "hexpm", "7d6322660382198435a8951e86a63f710d9fe1330171ce2f07680de54b9b4082"},
   "riak_pb": {:hex, :riak_pb, "2.3.2", "48ffbf66dbb3f136ab9a7134bac4e496754baa5ef58c4f50a61326736d996390", [:make, :mix, :rebar3], [{:hamcrest, "~> 0.4.1", [hex: :basho_hamcrest, repo: "hexpm", optional: false]}], "hexpm"},

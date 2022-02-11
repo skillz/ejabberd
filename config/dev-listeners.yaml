@@ -28,4 +28,9 @@ listen:
     request_handlers:
       "/api": mod_http_api
     http_bind: true
-
+  - port: 5223
+    ip: "::"
+    module: ejabberd_http
+    tls: false
+    request_handlers:
+      "/admin": ejabberd_web_admin
