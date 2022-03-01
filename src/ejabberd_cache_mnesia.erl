@@ -34,7 +34,8 @@ start_link(CacheName, MaxCacheSize) ->
 
 init([CacheName, MaxCacheSize]) ->
   FullCacheName = get_cache_table_name(CacheName),
-  {ok, {FullCacheName, MaxCacheSize, get_size(FullCacheName, MaxCacheSize)}}.
+  {ok, {FullCacheName, MaxCacheSize, get_size(FullCacheName, MaxCacheSize)}}
+.
 
 handle_call({get_item, Key}, _From, { CacheName, MaxCacheSize, Size }) ->
   {reply, get_item(CacheName, Key), { CacheName, MaxCacheSize, Size }}
@@ -77,7 +78,6 @@ handle_cast({delete_items_by_fun, ShouldRemoveFun}, { CacheName, MaxCacheSize, S
   end
 .
 
-% got stop message
 handle_info(stop, _StateName, StateData) ->
   {stop, normal, StateData}
 ;
