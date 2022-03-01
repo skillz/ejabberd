@@ -70,7 +70,7 @@ get_roster(LUser, LServer) ->
 	   ?SQL("select @(username)s, @(jid)s, @(nick)s, @(subscription)s, "
 		"@(ask)s, @(askmessage)s, @(server)s, @(subscribe)s, "
 		"@(type)s from rosterusers "
-                "where username=%(LUser)s and %(LServer)H")) of
+                "where username=%(LUser)s and %(LServer)H"), secondary) of
         {selected, Items} when is_list(Items) ->
             JIDGroups = case get_roster_jid_groups(LServer, LUser) of
                             {selected, JGrps} when is_list(JGrps) ->
@@ -225,7 +225,7 @@ get_roster_jid_groups(LServer, LUser) ->
     ejabberd_sql:sql_query(
       LServer,
       ?SQL("select @(jid)s, @(grp)s from rostergroups where "
-           "username=%(LUser)s and %(LServer)H")).
+           "username=%(LUser)s and %(LServer)H"), secondary).
 
 get_roster_groups(LServer, LUser, SJID) ->
     ejabberd_sql:sql_query_t(
