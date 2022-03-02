@@ -30,7 +30,7 @@
 
 -define(HOOK_PRIORITY, 25).
 
--define(COMMAND_TIMEOUT, timer:seconds(2)).
+-define(COMMAND_TIMEOUT, timer:seconds(5)).
 
 %%%===================================================================
 %%% Callbacks and hooks
@@ -212,16 +212,16 @@ get_config_users_dict(Host) ->
 
 get_blocking_users(Host) ->
   try gen_server:call(get_proc_name(Host), {get_blocking_users}, ?COMMAND_TIMEOUT)
-  catch _:_ ->
-    ?ERROR_MSG("Failed to get blocking users. Falling back to initial list from mod opts.", []),
+  catch TypeOfError:Error ->
+    ?ERROR_MSG("Failed to get blocking users. Falling back to initial list from mod opts. Type of Error: [~p]. Error: [~p].", [TypeOfError, Error]),
     gen_mod:get_module_opt(Host, ?MODULE, blocking_users, [])
   end
 .
 
 is_blocking_user(Host, User) ->
   try gen_server:call(get_proc_name(Host), {is_blocking_user, User}, ?COMMAND_TIMEOUT)
-  catch _:_ ->
-    ?ERROR_MSG("Failed to check if user is blocking. Falling back to false.", []),
+  catch TypeOfError:Error ->
+    ?ERROR_MSG("Failed to check if user is blocking. Falling back to false. Type of Error: [~p]. Error: [~p].", [TypeOfError, Error]),
     false
   end
 .
