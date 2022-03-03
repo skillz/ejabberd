@@ -30,7 +30,7 @@
 
 -define(HOOK_PRIORITY, 25).
 
--define(COMMAND_TIMEOUT, timer:seconds(5)).
+-define(COMMAND_TIMEOUT, timer:seconds(2)).
 
 %%%===================================================================
 %%% Callbacks and hooks
