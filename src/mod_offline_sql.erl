@@ -68,8 +68,8 @@ store_message(#offline_msg{us = {LUser, LServer}} = M) ->
     end.
 
 pop_messages(LUser, LServer) ->
-    case get_spool_msg_t(LServer, LUser) of
-	{atomic, {selected, Rs}} ->
+    case get_spool_msg(LServer, LUser) of
+	{selected, Rs} ->
 	    {ok, lists:flatmap(
 		   fun({_, XML}) ->
 			   case xml_to_offline_msg(XML) of
@@ -184,7 +184,7 @@ count_messages(LUser, LServer) ->
     case catch ejabberd_sql:sql_query(
                  LServer,
                  ?SQL("select @(count(*))d from spool "
-                      "where username=%(LUser)s and %(LServer)H")) of
+                      "where username=%(LUser)s and %(LServer)H"), secondary) of
         {selected, [{Res}]} ->
             Res;
         _ -> 0
@@ -259,12 +259,7 @@ el_to_offline_msg(El) ->
 	    {error, bad_jid_from}
     end.
 
-get_spool_msg_t(LServer, LUser) ->
-    F = fun () ->
-		Result =
-		    ejabberd_sql:sql_query_t(
-                      ?SQL("select @(username)s, @(xml)s from spool where "
-                           "username=%(LUser)s and %(LServer)H order by seq;")),
-		Result
-	end,
-    ejabberd_sql:sql_transaction(LServer, F).
+get_spool_msg(LServer, LUser) ->
+	ejabberd_sql:sql_query(LServer,
+		?SQL("select @(username)s, @(xml)s from spool where "
+		"username=%(LUser)s and %(LServer)H order by seq;"), secondary).
