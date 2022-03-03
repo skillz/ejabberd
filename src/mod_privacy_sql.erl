@@ -319,7 +319,7 @@ get_default_privacy_list(LUser, LServer) ->
     ejabberd_sql:sql_query(
       LServer,
       ?SQL("select @(name)s from privacy_default_list "
-           "where username=%(LUser)s and %(LServer)H")).
+           "where username=%(LUser)s and %(LServer)H"), secondary).
 
 get_default_privacy_list_t(LUser, LServer) ->
     ejabberd_sql:sql_query_t(
@@ -351,7 +351,7 @@ get_privacy_list_data(LUser, LServer, Name) ->
            "where id ="
            " (select id from privacy_list"
            " where username=%(LUser)s and %(LServer)H and name=%(Name)s) "
-           "order by ord")).
+           "order by ord"), secondary).
 
 set_default_privacy_list(LUser, LServer, Name) ->
     ?SQL_UPSERT_T(
