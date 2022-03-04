@@ -102,8 +102,6 @@ store(Pkt, LServer, {LUser, LHost}, Type, Peer, Nick, _Dir, TS) ->
     end,
     BarePeer = jid:encode(jid:tolower(jid:remove_resource(Peer))),
     LPeer = jid:encode(jid:tolower(Peer)),
-    %% ?DEBUG("Update Max Room Timestamp: Room: ~p, Host: ~p, Timestamp: ~p", [LUser, LHost, TS]),
-    %% ejabberd_rdbms:put_max_room_timestamp_cache_item(LUser, LHost, TS),
     Body = fxml:get_subtag_cdata(Pkt, <<"body">>),
     SType = misc:atom_to_binary(Type),
     XML = case gen_mod:get_module_opt(LServer, mod_mam, compress_xml) of
@@ -186,7 +184,7 @@ select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
     % and the client did not specify a limit using RSM then the server should
     % return a policy-violation error to the client." We currently don't do this
     % for v0.2 requests, but we do limit #rsm_in.max for v0.3 and newer.
-    case {ejabberd_sql:sql_query(LServer, Query), CountQuery} of
+    case {ejabberd_sql:sql_query(LServer, Query, secondary), CountQuery} of
   {{selected, _, Res}, _} ->
       {Max, Direction, _} = get_max_direction_id(RSM),
       {Res1, IsComplete} =
@@ -247,8 +245,6 @@ export(_Server) ->
                     end,
                 BarePeer = jid:encode(jid:tolower(jid:remove_resource(Peer))),
                 LPeer = jid:encode(jid:tolower(Peer)),
-                %% ?DEBUG("Update Max Room Timestamp: Room: ~p, Host: ~p, Timestamp: ~p", [LUser, Host, TStmp]),
-                %% ejabberd_rdbms:put_max_room_timestamp_cache_item(LUser, Host, TStmp),
                 XML = fxml:element_to_binary(Pkt),
                 Body = fxml:get_subtag_cdata(Pkt, <<"body">>),
                 SType = misc:atom_to_binary(Type),

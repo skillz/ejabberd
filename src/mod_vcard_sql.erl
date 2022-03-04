@@ -55,7 +55,7 @@ get_vcard(LUser, LServer) ->
     case ejabberd_sql:sql_query(
 	   LServer,
 	   ?SQL("select @(vcard)s from vcard"
-                " where username=%(LUser)s and %(LServer)H")) of
+                " where username=%(LUser)s and %(LServer)H"), secondary) of
 	{selected, [{SVCARD}]} ->
 	    case fxml_stream:parse_element(SVCARD) of
 		{error, _Reason} -> error;
