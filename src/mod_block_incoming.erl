@@ -19,17 +19,16 @@
 
 %% ejabberd_commands callbacks.
 -export([get_commands_spec/0, add_blocking_user/2, remove_blocking_user/2, get_blocking_users/1, reset_blocking_users/1, clear_blocking_users/1,
-  add_blocking_user_all/2, remove_blocking_user_all/2, reset_blocking_users_all/1, clear_blocking_users_all/1]).
+  add_blocking_user_all/2, remove_blocking_user_all/2, reset_blocking_users_all/1, clear_blocking_users_all/1, is_blocking_user/2]).
 
 %% hook handlers
--export([filter_packet/1, filter_offline_msg/1, filter_subscription/2]).
+-export([filter_subscription/2]).
 
 -include("ejabberd_commands.hrl").
 -include("logger.hrl").
 -include_lib("xmpp/include/xmpp.hrl").
 
 -define(HOOK_PRIORITY, 25).
-
 -define(COMMAND_TIMEOUT, timer:seconds(2)).
 
 %%%===================================================================
@@ -41,9 +40,7 @@ start(Host, Opts) ->
 .
 
 init([Host, _Opts]) ->
-  ejabberd_hooks:add(user_receive_packet, Host, ?MODULE, filter_packet, ?HOOK_PRIORITY),
   ejabberd_hooks:add(roster_in_subscription, Host, ?MODULE, filter_subscription, ?HOOK_PRIORITY),
-  ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, filter_offline_msg, ?HOOK_PRIORITY),
   {ok, { Host, get_config_users_dict(Host) } }
 .
 
@@ -57,9 +54,7 @@ stop(Host) ->
 
 terminate(Reason, { Host, _BlockingUsers }) ->
   ?DEBUG("Terminating mod_block_incoming process for [~p] with reason: [~p]", [Host, Reason]),
-  ejabberd_hooks:delete(user_receive_packet, Host, ?MODULE, filter_packet, ?HOOK_PRIORITY),
-  ejabberd_hooks:delete(roster_in_subscription, Host, ?MODULE, filter_subscription, ?HOOK_PRIORITY),
-  ejabberd_hooks:delete(offline_message_hook, Host, ?MODULE, filter_offline_msg, ?HOOK_PRIORITY)
+  ejabberd_hooks:delete(roster_in_subscription, Host, ?MODULE, filter_subscription, ?HOOK_PRIORITY)
 .
 
 reload(_Host, _NewOpts, _OldOpts) ->
@@ -110,37 +105,13 @@ code_change(_OldVsn, { Host, _BlockingUsers } = State, _Extra) ->
   {ok, State}
 .
 
-%% filter messages
-filter_packet({#message{from = From} = Msg, State} = Acc) ->
-  LFrom = jid:tolower(From),
-  LBareFrom = jid:remove_resource(LFrom),
-  #{pres_a := PresA} = State,
-  FromUserInPresencePacket = gb_sets:is_element(LFrom, PresA) orelse gb_sets:is_element(LBareFrom, PresA) orelse sets_bare_member(LBareFrom, PresA),
-  case FromUserInPresencePacket of
-    false -> %% from-user not in presence struct so this is an outgoing DM to someone else who might be blocking incoming
-      case check_message(Msg) of
-        allow -> Acc;
-        deny -> {stop, {drop, State}}
-      end;
-    true -> %% from-user is in the presence struct so either a self-message or a room chat with them in it
-      Acc
-  end
-;
-
-filter_packet(Acc) -> Acc.
-
-filter_offline_msg({_Action, #message{} = Msg} = Acc) ->
-  case check_message(Msg) of
-    allow -> Acc;
-    deny -> {stop, {drop, Msg}}
-  end
-.
-
 filter_subscription(Acc, #presence{from = From, to = To, type = subscribe} = Pres) ->
   case is_blocking(Pres) of
     true ->
       case check_subscription(From, To) of
-        false -> {stop, false};
+        false ->
+          ?INFO_MSG("Auto denied subscription request from [~p] to [~p]", [From#jid.luser, To#jid.luser]),
+          {stop, false};
         true -> Acc
       end;
     false -> Acc
@@ -152,22 +123,6 @@ filter_subscription(Acc, _) -> Acc.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-check_message(#message{from = From, to = To, lang = Lang} = Msg) ->
-  case is_blocking(Msg) of
-    true ->
-      case check_subscription(From, To) of
-        false ->
-          Txt = <<"Messages from strangers are rejected for this recipient">>,
-          Err = xmpp:err_policy_violation(Txt, Lang),
-          Msg1 = maybe_adjust_from(Msg),
-          ejabberd_router:route_error(Msg1, Err),
-          deny;
-        true -> allow
-      end;
-    false -> allow
-  end
-.
-
 check_subscription(From, To) ->
   mod_roster:is_subscribed(From, To)
 .
@@ -189,17 +144,6 @@ is_blocking(Pkt) ->
   %% basically we block if to-user is blocking and everything else is normal
   %% also we do not block if both users are blocking bc both are then higher priv moderators and can be trusted
   IsToAnotherUser andalso HasMessageContent andalso IsFromActualUserOrRemoteServer andalso IsToUserBlockingIncoming andalso not IsFromUserBlockingIncoming
-.
-
-maybe_adjust_from(#message{type = groupchat, from = From} = Msg) -> Msg#message{from = jid:remove_resource(From)};
-
-maybe_adjust_from(#message{} = Msg) -> Msg.
-
-sets_bare_member({User, Server, <<"">>} = LBareJID, Set) ->
-  case gb_sets:next(gb_sets:iterator_from(LBareJID, Set)) of
-    {{User, Server, _}, _} -> true;
-    _ -> false
-  end
 .
 
 get_proc_name(Host) ->
