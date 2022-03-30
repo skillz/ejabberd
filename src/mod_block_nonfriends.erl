@@ -88,11 +88,7 @@ check_subscription(From, To) ->
 
 check_message(#message{type = groupchat, from = From, to = To, lang = Lang} = Msg) ->
   case check_subscription(From, To) of
-    false ->
-      Txt = <<"Messages to non-friends are disallowed">>,
-      Err = xmpp:err_policy_violation(Txt, Lang),
-      ejabberd_router:route_error(Msg, Err),
-      deny;
+    false -> deny;
     true -> allow
   end
 ;
