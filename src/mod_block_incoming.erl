@@ -41,6 +41,7 @@ start(Host, Opts) ->
 
 init([Host, _Opts]) ->
   ejabberd_hooks:add(roster_in_subscription, Host, ?MODULE, filter_subscription, ?HOOK_PRIORITY),
+  erlang:send_after(2000, self(), sync_users_across_cluster),
   {ok, { Host, get_config_users_dict(Host) } }
 .
 
@@ -95,6 +96,27 @@ handle_cast(Request, State) ->
   {noreply, State}
 .
 
+handle_info(sync_users_across_cluster, {Host, _BlockingUsers} = State) ->
+  lists:foreach(fun(Node) ->
+    if Node == node() ->
+      ok;
+      true ->
+        try
+          case rpc:call(Node, ?MODULE, get_blocking_users, [Host], ?COMMAND_TIMEOUT) of
+            Users ->
+              lists:foreach(fun(User) ->
+                add_blocking_user(Host, User)
+              end, Users);
+            _ -> ok
+          end
+        catch TypeOfError:Error ->
+          ?ERROR_MSG("Failed to sync blocking users on node: [~p]. Type of Error: [~p]. Error: [~p].", [Node, TypeOfError, Error])
+        end
+    end
+  end, ejabberd_admin:list_cluster()),
+  {noreply, State}
+;
+
 handle_info(Info, State) ->
   ?ERROR_MSG("Unexpected handle_info: [~p]", [Info]),
   {noreply, State}
@@ -127,6 +149,10 @@ check_subscription(From, To) ->
   mod_roster:is_subscribed(From, To)
 .
 
+get_host_from_server(Server) ->
+  binary:replace(Server, <<"conference.">>, <<"">>)
+.
+
 is_blocking(Pkt) ->
   To = xmpp:get_to(Pkt),
   From = xmpp:get_from(Pkt),
@@ -137,8 +163,8 @@ is_blocking(Pkt) ->
       _ -> true
     end,
   IsFromActualUserOrRemoteServer = (From#jid.luser /= <<"">> orelse not ejabberd_router:is_my_host(From#jid.lserver)),
-  IsToUserBlockingIncoming = is_blocking_user(To#jid.lserver, To#jid.luser),
-  IsFromUserBlockingIncoming = is_blocking_user(From#jid.lserver, From#jid.luser),
+  IsToUserBlockingIncoming = is_blocking_user(get_host_from_server(To#jid.lserver), To#jid.luser),
+  IsFromUserBlockingIncoming = is_blocking_user(get_host_from_server(From#jid.lserver), From#jid.luser),
 
   %% if to someone else with content and from a real user and to-user is blocking and from user is not blocking, then block msg
   %% basically we block if to-user is blocking and everything else is normal
