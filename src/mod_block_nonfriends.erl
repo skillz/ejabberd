@@ -14,7 +14,7 @@
 -export([start/2, stop/1, reload/3, depends/2, mod_options/1]).
 
 %% hook handlers
--export([filter_packet/1]).
+-export([user_send_packet_handler/1]).
 
 -include("logger.hrl").
 -include_lib("xmpp/include/xmpp.hrl").
@@ -25,11 +25,11 @@
 %%% Callbacks and hooks
 %%%===================================================================
 start(Host, _Opts) ->
-  ejabberd_hooks:add(user_send_packet, Host, ?MODULE, filter_packet, ?HOOK_PRIORITY)
+  ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet_handler, ?HOOK_PRIORITY)
 .
 
 stop(Host) ->
-  ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, filter_packet, ?HOOK_PRIORITY)
+  ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, user_send_packet_handler, ?HOOK_PRIORITY)
 .
 
 reload(_Host, _NewOpts, _OldOpts) ->
@@ -63,7 +63,7 @@ get_host_from_server(Server) ->
   binary:replace(Server, <<"conference.">>, <<"">>)
 .
 
-filter_packet({#message{} = Msg, State} = Acc) ->
+user_send_packet_handler({#message{} = Msg, State} = Acc) ->
   case is_duo_direct_message(Msg) of
     false -> Acc;
     _ ->
@@ -76,7 +76,7 @@ filter_packet({#message{} = Msg, State} = Acc) ->
   end
 ;
 
-filter_packet(Acc) -> Acc.
+user_send_packet_handler(Acc) -> Acc.
 
 %%%===================================================================
 %%% Internal functions
