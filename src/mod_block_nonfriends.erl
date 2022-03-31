@@ -14,7 +14,7 @@
 -export([start/2, stop/1, reload/3, depends/2, mod_options/1]).
 
 %% hook handlers
--export([filter_packet/1]).
+-export([user_send_packet_handler/1]).
 
 -include("logger.hrl").
 -include_lib("xmpp/include/xmpp.hrl").
@@ -25,11 +25,11 @@
 %%% Callbacks and hooks
 %%%===================================================================
 start(Host, _Opts) ->
-  ejabberd_hooks:add(user_send_packet, Host, ?MODULE, filter_packet, ?HOOK_PRIORITY)
+  ejabberd_hooks:add(user_send_packet, Host, ?MODULE, user_send_packet_handler, ?HOOK_PRIORITY)
 .
 
 stop(Host) ->
-  ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, filter_packet, ?HOOK_PRIORITY)
+  ejabberd_hooks:delete(user_send_packet, Host, ?MODULE, user_send_packet_handler, ?HOOK_PRIORITY)
 .
 
 reload(_Host, _NewOpts, _OldOpts) ->
@@ -63,7 +63,7 @@ get_host_from_server(Server) ->
   binary:replace(Server, <<"conference.">>, <<"">>)
 .
 
-filter_packet({#message{} = Msg, State} = Acc) ->
+user_send_packet_handler({#message{} = Msg, State} = Acc) ->
   case is_duo_direct_message(Msg) of
     false -> Acc;
     _ ->
@@ -76,7 +76,7 @@ filter_packet({#message{} = Msg, State} = Acc) ->
   end
 ;
 
-filter_packet(Acc) -> Acc.
+user_send_packet_handler(Acc) -> Acc.
 
 %%%===================================================================
 %%% Internal functions
@@ -88,11 +88,7 @@ check_subscription(From, To) ->
 
 check_message(#message{type = groupchat, from = From, to = To, lang = Lang} = Msg) ->
   case check_subscription(From, To) of
-    false ->
-      Txt = <<"Messages to non-friends are disallowed">>,
-      Err = xmpp:err_policy_violation(Txt, Lang),
-      ejabberd_router:route_error(Msg, Err),
-      deny;
+    false -> deny;
     true -> allow
   end
 ;
