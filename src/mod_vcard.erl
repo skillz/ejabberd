@@ -38,7 +38,7 @@
 	 remove_user/2, export/1, import_info/0, import/5, import_start/2,
 	 depends/2, process_search/1, process_vcard/1, get_vcard/2,
 	 disco_items/5, disco_features/5, disco_identity/5,
-	 vcard_iq_set/1, mod_opt_type/1, set_vcard/3, make_vcard_search/4]).
+	 vcard_iq_set/1, mod_opt_type/1, set_vcard/3, make_vcard_search/4, get_nickname/2]).
 -export([init/1, handle_call/3, handle_cast/2,
 	 handle_info/2, terminate/2, code_change/3]).
 
@@ -306,6 +306,27 @@ get_vcard(LUser, LServer) ->
 	{ok, Els} -> Els;
 	error -> error
     end.
+
+get_vcard_field(LUser, LServer, FieldName) ->
+	try
+		case get_vcard(LUser, LServer) of
+			[{xmlel, <<"vCard">>, _, VCardElems}] when is_list(VCardElems) ->
+				case lists:keyfind(FieldName, 2, VCardElems) of
+					{xmlel, _, _, PropList} ->
+						proplists:get_value(xmlcdata, PropList);
+					_ -> none
+				end;
+			[] -> none;
+			_ -> none
+		end
+	catch _:_ ->
+		none
+	end
+.
+
+get_nickname(LUser, LServer) ->
+	get_vcard_field(LUser, LServer, <<"NICKNAME">>)
+.
 
 -spec make_vcard_search(binary(), binary(), binary(), xmlel()) -> #vcard_search{}.
 make_vcard_search(User, LUser, LServer, VCARD) ->
