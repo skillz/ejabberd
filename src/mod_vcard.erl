@@ -316,7 +316,6 @@ get_vcard_field(LUser, LServer, FieldName) ->
 						proplists:get_value(xmlcdata, PropList);
 					_ -> none
 				end;
-			[] -> none;
 			_ -> none
 		end
 	catch _:_ ->
