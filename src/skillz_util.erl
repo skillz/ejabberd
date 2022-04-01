@@ -66,14 +66,12 @@ get_flag_url() ->
 .
 
 get_cas_jid() ->
-  binary:list_to_bin(
-    case get_env() of
-      "production" -> "skillz-cas@chat-admin.skillz.com/skillz-cas";
-      "staging" ->    "skillz-cas@chat-admin.staging.skillz.com/skillz-cas";
-      "qa" ->         "skillz-cas@chat-admin.qa.skillz.com/skillz-cas";
-      "dev" ->        "skillz-cas@localhost/skillz-cas"
-    end
-  )
+  case get_env() of
+    "production" -> <<"skillz-cas@chat-admin.skillz.com/skillz-cas">>;
+    "staging" ->    <<"skillz-cas@chat-admin.staging.skillz.com/skillz-cas">>;
+    "qa" ->         <<"skillz-cas@chat-admin.qa.skillz.com/skillz-cas">>;
+    "dev" ->        <<"skillz-cas@localhost/skillz-cas">>
+  end
 .
 
 get_host(Prefix) ->
