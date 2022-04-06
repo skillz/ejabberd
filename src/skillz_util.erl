@@ -8,22 +8,29 @@
 -module(skillz_util).
 
 %% Exports
--export([send_cas_message/3, send_message/4, get_message_xml_bin/4, get_env/0,
+-export([send_cas_message/3, send_cas_message/4, send_message/6, get_message_xml_bin/4, get_env/0,
   get_admin_logo/0, get_flag_url/0, get_cas_jid/0, get_host/0, get_host/1,
   get_uuid/0]).
 
 -include("logger.hrl").
 
-send_cas_message(GameIdBin, SenderUsernameBin, BodyBin) ->
-  RoomJidBin = <<GameIdBin/binary, (<<"@">>)/binary, (get_host("conference."))/binary>>,
-  send_message(get_cas_jid(), RoomJidBin, SenderUsernameBin, BodyBin)
+send_cas_message(RoomNameBin, SenderDisplayNameBin, BodyBin) ->
+  send_cas_message(RoomNameBin, SenderDisplayNameBin, BodyBin, none)
 .
 
-send_message(FromJidBin, RoomJidBin, SenderUsernameBin, BodyBin) ->
-  mod_admin_extra:send_stanza(FromJidBin, RoomJidBin, get_message_xml_bin(FromJidBin, RoomJidBin, SenderUsernameBin, BodyBin))
+send_cas_message(RoomNameBin, SenderDisplayNameBin, BodyBin, DefaultFromResource) ->
+  send_message(get_cas_jid(), RoomNameBin, SenderDisplayNameBin, BodyBin, "moderator", DefaultFromResource)
 .
 
-get_message_xml_bin(FromJidBin, ToJidBin, SenderUsernameBin, BodyBin) ->
+send_message(FromJidBin, RoomNameBin, SenderDisplayNameBin, BodyBin, FromUserType, DefaultFromResource) ->
+  Host = get_host("conference."),
+  ToJidBin = <<RoomNameBin/binary, (<<"@">>)/binary, Host/binary>>,
+  FromJidWithResourceBin = add_uuid_as_resource(Host, FromJidBin, RoomNameBin, FromUserType, DefaultFromResource),
+  Msg = get_message_xml_bin(FromJidWithResourceBin, ToJidBin, SenderDisplayNameBin, BodyBin),
+  mod_admin_extra:send_stanza(FromJidWithResourceBin, ToJidBin, Msg)
+.
+
+get_message_xml_bin(FromJidBin, ToJidBin, SenderDisplayNameBin, BodyBin) ->
   UserId = "-1", %% unused but required as part of schema in SDK
   UserRole = "3", %% Admin role in SDK
   UserMentions = "@none", %% unused but required as part of schema in SDK
@@ -45,8 +52,42 @@ get_message_xml_bin(FromJidBin, ToJidBin, SenderUsernameBin, BodyBin) ->
         <message_type>~s</message_type>
       </skillz_sdk>
     </message>",
-    [FromJidBin, ToJidBin, get_uuid(), BodyBin, get_admin_logo(), get_flag_url(), UserId, SenderUsernameBin, UserRole, UserMentions, MessageType]
+    [FromJidBin, ToJidBin, get_uuid(), BodyBin, get_admin_logo(), get_flag_url(), UserId, SenderDisplayNameBin, UserRole, UserMentions, MessageType]
   )))
+.
+
+get_resource_of_jid_in_room(HostBin, JidBin, RoomNameBin, UserType, DefaultResource) ->
+  try
+    case mod_muc_admin:get_room_occupants(RoomNameBin, HostBin) of
+      ListOfUsers when is_list(ListOfUsers) ->
+        case lists:filtermap(
+          fun({User, Resource, Type}) ->
+            case Type == UserType andalso binary:match(User, JidBin) /= nomatch of
+              true -> {true, Resource};
+              _ -> false
+            end
+          end, ListOfUsers
+        ) of
+          [] -> DefaultResource;
+          ListOfResource -> lists:last(ListOfResource)
+        end;
+      _ -> DefaultResource
+    end
+  catch TypeOfError:Error ->
+    ?ERROR_MSG("Failed to get resource of jid in room. Host: [~p]. Jid: [~p]. Room: [~p]. Type of Error: [~p]. Error: [~p].", [HostBin, JidBin, RoomNameBin, TypeOfError, Error]),
+    DefaultResource
+  end
+.
+
+add_resource(JidBin, ResourceBin) ->
+  <<JidBin/binary, (<<"/">>)/binary, ResourceBin/binary>>
+.
+
+add_uuid_as_resource(HostBin, JidBin, RoomNameBin, UserType, DefaultResource) ->
+  case get_resource_of_jid_in_room(HostBin, JidBin, RoomNameBin, UserType, DefaultResource) of
+    none -> JidBin;
+    Resource -> add_resource(JidBin, Resource)
+  end
 .
 
 get_admin_logo() ->
@@ -67,10 +108,10 @@ get_flag_url() ->
 
 get_cas_jid() ->
   case get_env() of
-    "production" -> <<"skillz-cas@chat-admin.skillz.com/skillz-cas">>;
-    "staging" ->    <<"skillz-cas@chat-admin.staging.skillz.com/skillz-cas">>;
-    "qa" ->         <<"skillz-cas@chat-admin.qa.skillz.com/skillz-cas">>;
-    "dev" ->        <<"skillz-cas@localhost/skillz-cas">>
+    "production" -> <<"skillz-cas@chat-admin.skillz.com">>;
+    "staging" ->    <<"skillz-cas@chat-admin.staging.skillz.com">>;
+    "qa" ->         <<"skillz-cas@chat-admin.qa.skillz.com">>;
+    "dev" ->        <<"skillz-cas@localhost">>
   end
 .
 
@@ -98,9 +139,9 @@ get_env() ->
       case in_node(".staging.") of
         true -> "staging";
         _ -> case in_node(".qa.") of
-          true -> "qa";
-          _ -> "dev"
-        end
+               true -> "qa";
+               _ -> "dev"
+             end
       end
   end
 .
@@ -110,5 +151,5 @@ get_hex_digits(NumDigits) ->
 .
 
 get_uuid() ->
-  get_hex_digits(8) ++ "-" ++ get_hex_digits(4) ++ "-" ++ get_hex_digits(4) ++ "-" ++ get_hex_digits(4) ++ "-" ++ get_hex_digits(12)
+  string:lowercase(get_hex_digits(8) ++ "-" ++ get_hex_digits(4) ++ "-" ++ get_hex_digits(4) ++ "-" ++ get_hex_digits(4) ++ "-" ++ get_hex_digits(12))
 .
