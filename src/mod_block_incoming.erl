@@ -86,39 +86,36 @@ handle_call({clear_blocking_users}, _From, {Host, _BlockingUsers}) ->
   {reply, ok, { Host, dict:new() }}
 ;
 
-handle_call(Request, From, State) ->
-  ?ERROR_MSG("Unexpected handle_call from [~p] for [~p]", [From, Request]),
+handle_call(_Request, _From, State) ->
   {noreply, State}
 .
 
-handle_cast(Request, State) ->
-  ?ERROR_MSG("Unexpected handle_cast: [~p]", [Request]),
+handle_cast(_Request, State) ->
   {noreply, State}
 .
 
-handle_info(sync_users_across_cluster, {Host, _BlockingUsers} = State) ->
-  lists:foreach(fun(Node) ->
-    if Node == node() ->
-      ok;
-      true ->
-        try
+handle_info(sync_users_across_cluster, {Host, BlockingUsers}) ->
+  AllBlockingUsers = lists:usort(lists:foldl(fun(Node, Acc) ->
+    Acc ++
+      try
+        if (Node == node()) ->
+          [];
+        true ->
           case rpc:call(Node, ?MODULE, get_blocking_users, [Host], ?COMMAND_TIMEOUT) of
-            Users ->
-              lists:foreach(fun(User) ->
-                add_blocking_user(Host, User)
-              end, Users);
-            _ -> ok
+            Users when is_list(Users) -> Users;
+            _ -> []
           end
-        catch TypeOfError:Error ->
-          ?ERROR_MSG("Failed to sync blocking users on node: [~p]. Type of Error: [~p]. Error: [~p].", [Node, TypeOfError, Error])
         end
-    end
-  end, ejabberd_admin:list_cluster()),
-  {noreply, State}
+      catch TypeOfError:Error ->
+        ?ERROR_MSG("Failed to sync blocking users on node: [~p] from node [~p]. Type of Error: [~p]. Error: [~p].", [Node, node(), TypeOfError, Error]),
+        []
+      end
+  end, lists:map(fun({Key, _}) -> Key end, dict:to_list(BlockingUsers)), ejabberd_admin:list_cluster())),
+
+  { noreply, { Host, dict:from_list(lists:map(fun(User) -> {User, User} end, AllBlockingUsers)) } }
 ;
 
-handle_info(Info, State) ->
-  ?ERROR_MSG("Unexpected handle_info: [~p]", [Info]),
+handle_info(_Info, State) ->
   {noreply, State}
 .
 
@@ -183,7 +180,8 @@ get_config_users_dict(Host) ->
 get_blocking_users(Host) ->
   try gen_server:call(get_proc_name(Host), {get_blocking_users}, ?COMMAND_TIMEOUT)
   catch TypeOfError:Error ->
-    ?ERROR_MSG("Failed to get blocking users. Falling back to initial list from mod opts. Type of Error: [~p]. Error: [~p].", [TypeOfError, Error]),
+    ?ERROR_MSG("Failed to get blocking users for host [~p] using module proc [~p]. Falling back to initial list from mod opts. Type of Error: [~p]. Error: [~p].",
+      [Host, get_proc_name(Host), TypeOfError, Error]),
     gen_mod:get_module_opt(Host, ?MODULE, blocking_users, [])
   end
 .
@@ -191,7 +189,7 @@ get_blocking_users(Host) ->
 is_blocking_user(Host, User) ->
   try gen_server:call(get_proc_name(Host), {is_blocking_user, User}, ?COMMAND_TIMEOUT)
   catch TypeOfError:Error ->
-    ?ERROR_MSG("Failed to check if user is blocking. Falling back to false. Type of Error: [~p]. Error: [~p].", [TypeOfError, Error]),
+    ?ERROR_MSG("Failed to check if user is blocking from host [~p]. Falling back to false. Type of Error: [~p]. Error: [~p].", [Host, TypeOfError, Error]),
     false
   end
 .
