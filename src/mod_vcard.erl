@@ -226,7 +226,7 @@ process_sm_iq(#iq{type = get, from = From, to = To, lang = Lang, sub_els = SubEl
 						JabberId, _, _, _, _, _, _, _, _, _,
             _, _, _, _, _, _, _, _, _
 					}
-				] when is_binary(JabberId) -> get_vcards(binary:split(JabberId, <<"+">>), LServer);
+				] when is_binary(JabberId) -> get_vcards(binary:split(JabberId, <<"+">>, [global]), LServer);
 				_ -> get_vcard(LUser, LServer)
 			end of
 				error ->
