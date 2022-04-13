@@ -216,13 +216,18 @@ process_sm_iq(#iq{type = set, lang = Lang, from = From} = IQ) ->
 	    Txt = <<"The query is only allowed from local users">>,
 	    xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang))
     end;
-process_sm_iq(#iq{type = get, from = From, to = To, lang = Lang} = IQ) ->
+process_sm_iq(#iq{type = get, from = From, to = To, lang = Lang, sub_els = SubEls} = IQ) ->
     #jid{luser = LUser, lserver = LServer} = To,
-	 	LUsers = binary:split(LUser, <<"+">>),
 		case
-			case LUsers of
-				[User] -> get_vcard(User, LServer);
-				Users  -> get_vcards(Users, LServer)
+			case SubEls of
+				[
+					{
+						vcard_temp, _, _, _, _, _, _, _, _, _, _,
+						JabberId, _, _, _, _, _, _, _, _, _,
+            _, _, _, _, _, _, _, _, _
+					}
+				] when is_binary(JabberId) -> get_vcards(binary:split(JabberId, <<"+">>), LServer);
+				_ -> get_vcard(LUser, LServer)
 			end of
 				error ->
 					Txt = <<"Database failure">>,
