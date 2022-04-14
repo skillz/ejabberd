@@ -36,7 +36,7 @@
 -export([start/2, stop/1, get_sm_features/5, mod_options/1,
 	 process_local_iq/1, process_sm_iq/1, string2lower/1,
 	 remove_user/2, export/1, import_info/0, import/5, import_start/2,
-	 depends/2, process_search/1, process_vcard/1, get_vcard/2, get_vcards/2,
+	 depends/2, process_search/1, process_vcard/1, get_vcard/2,
 	 disco_items/5, disco_features/5, disco_identity/5,
 	 vcard_iq_set/1, mod_opt_type/1, set_vcard/3, make_vcard_search/4, get_nickname/2]).
 -export([init/1, handle_call/3, handle_cast/2,
@@ -216,28 +216,17 @@ process_sm_iq(#iq{type = set, lang = Lang, from = From} = IQ) ->
 	    Txt = <<"The query is only allowed from local users">>,
 	    xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang))
     end;
-process_sm_iq(#iq{type = get, from = From, to = To, lang = Lang, sub_els = SubEls} = IQ) ->
+process_sm_iq(#iq{type = get, from = From, to = To, lang = Lang} = IQ) ->
     #jid{luser = LUser, lserver = LServer} = To,
-		case
-			case SubEls of
-				[
-					{
-						vcard_temp, _, _, _, _, _, _, _, _, _, _,
-						JabberId, _, _, _, _, _, _, _, _, _,
-            _, _, _, _, _, _, _, _, _
-					}
-				] when is_binary(JabberId) -> get_vcards(binary:split(JabberId, <<"+">>, [global]), LServer);
-				_ -> get_vcard(LUser, LServer)
-			end of
-				error ->
-					Txt = <<"Database failure">>,
-					xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang));
-				[] ->
-					xmpp:make_iq_result(IQ, #vcard_temp{});
-				Els ->
-					IQ#iq{type = result, to = From, from = To, sub_els = Els}
-		end
-.
+    case get_vcard(LUser, LServer) of
+	error ->
+	    Txt = <<"Database failure">>,
+	    xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang));
+	[] ->
+	    xmpp:make_iq_result(IQ, #vcard_temp{});
+	Els ->
+	    IQ#iq{type = result, to = From, from = To, sub_els = Els}
+    end.
 
 -spec process_vcard(iq()) -> iq().
 process_vcard(#iq{type = set, lang = Lang} = IQ) ->
@@ -317,12 +306,6 @@ get_vcard(LUser, LServer) ->
 	{ok, Els} -> Els;
 	error -> error
     end.
-
--spec get_vcards(binary(), binary()) -> [{list(), xmlel()}] | error.
-get_vcards(LUsers, LServer) ->
-	Mod = gen_mod:db_mod(LServer, ?MODULE),
-	Mod:get_vcards(LUsers, LServer)
-.
 
 get_vcard_field(LUser, LServer, FieldName) ->
 	try
