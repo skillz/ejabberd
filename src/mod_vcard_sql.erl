@@ -29,7 +29,7 @@
 -behaviour(mod_vcard).
 
 %% API
--export([init/2, stop/1, get_vcard/2, get_vcards/2, set_vcard/4, search/4, remove_user/2,
+-export([init/2, stop/1, get_vcard/2, set_vcard/4, search/4, remove_user/2,
 	 search_fields/1, search_reported/1, import/3, export/1]).
 -export([is_search_supported/1]).
 
@@ -64,31 +64,6 @@ get_vcard(LUser, LServer) ->
 	{selected, []} -> {ok, []};
 	_ -> error
     end.
-
-get_vcards(LUsers, LServer) ->
-  UserInStr = str:join([[<<"'">>, ejabberd_sql:escape(User), <<"'">>] || User <- LUsers], <<",">>),
-  Query = <<(<<"select username, vcard from vcard where username in (">>)/binary, UserInStr/binary, (<<")">>)/binary>>,
-  ?DEBUG("get_vcards: [~p]", [Query]),
-  case ejabberd_sql:sql_query(LServer, Query, secondary) of
-    {selected, _, []} -> [];
-    {selected, _, Results} -> [
-      %% note: every elem needs an xmlns (jabber:client is default)
-      #xmlel{name = <<"vCards">>, attrs = [{<<"xmlns">>, <<"jabber:client">>}], children = [
-        case fxml_stream:parse_element(SVCARD) of
-          {error, _Reason} -> #xmlel{
-            name = <<"vCard">>,
-            attrs = [{<<"xmlns">>, <<"jabber:client">>}, {<<"username">>, Username}],
-            children = [ {xmlcdata, <<"error">>} ]
-          };
-          VCARD -> VCARD#xmlel{attrs = VCARD#xmlel.attrs ++ [{<<"username">>, Username}]}
-        end || [Username, SVCARD] <- Results
-      ]}
-    ];
-    Error ->
-      ?ERROR_MSG("get_vcards database error: [~p]", [Error]),
-      error
-  end
-.
 
 set_vcard(LUser, LServer, VCARD,
 	  #vcard_search{user = {User, _},
