@@ -131,23 +131,14 @@ listitems_to_jids([_ | Items], JIDs) ->
 is_blocking(FromLUser, ToLUser, Server) ->
 	try
 		case mod_privacy:get_user_list(FromLUser, Server, default) of
-			{error, _} -> false;
-			error -> false;
-			Res ->
-				case Res of
-					{ok, NameList} ->
-						case NameList of
-							{ _Name, List } when is_list(List) ->
-								%% from all privacy entries for from-user (List), get all deny (blocked) ones
-								lists:filter(fun({LUser, _LServer, _LResource}) ->
-									%% if the to-user is in the deny list for the from-user, then
-									%% from-user is blocking to-user
-									LUser == ToLUser
-								end, listitems_to_jids(List, [])) /= [];
-							_ -> false
-						end;
-					_ -> false
-				end
+			{ok, { _Name, List } }  when is_list(List) ->
+				%% from all privacy entries for from-user (List), get all deny (blocked) ones using listitems_to_jids
+				lists:filter(fun({LUser, _LServer, _LResource}) ->
+					%% if the to-user is in the deny list for the from-user, then
+					%% from-user is blocking to-user
+					LUser == ToLUser
+			 end, listitems_to_jids(List, [])) /= [];
+			_ -> false
 		end
 	catch _:_ ->
 		false
