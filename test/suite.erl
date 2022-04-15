@@ -188,8 +188,7 @@ get_config_backends(Types) ->
 			    _ ->
 				Backends
 			end
-		end, EnvBackends, ["odbc", "mysql", "pgsql",
-				   "sqlite", "riak", "redis"]).
+		end, EnvBackends, ["odbc", "mysql"]).
 
 process_config_tpl(Content, []) ->
     Content;

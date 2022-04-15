@@ -76,7 +76,7 @@ start_ejabberd(Config) ->
 end_per_suite(_Config) ->
     application:stop(ejabberd).
 
--define(BACKENDS, [mnesia,redis,mysql,pgsql,sqlite,ldap,extauth,riak]).
+-define(BACKENDS, [mysql]).
 
 init_per_group(Group, Config) ->
     case lists:member(Group, ?BACKENDS) of
@@ -339,111 +339,6 @@ legacy_auth_tests() ->
       test_legacy_auth_bad_jid,
       test_legacy_auth_fail]}.
 
-no_db_tests() ->
-    [{anonymous, [parallel],
-      [test_connect_bad_xml,
-       test_connect_unexpected_xml,
-       test_connect_unknown_ns,
-       test_connect_bad_xmlns,
-       test_connect_bad_ns_stream,
-       test_connect_bad_lang,
-       test_connect_bad_to,
-       test_connect_missing_to,
-       test_connect,
-       unauthenticated_iq,
-       unauthenticated_message,
-       unauthenticated_presence,
-       test_starttls,
-       test_zlib,
-       test_auth,
-       test_bind,
-       test_open_session,
-       codec_failure,
-       unsupported_query,
-       bad_nonza,
-       invalid_from,
-       ping,
-       version,
-       time,
-       stats,
-       disco]},
-     {presence_and_s2s, [sequence],
-      [test_auth_fail,
-       presence,
-       s2s_dialback,
-       s2s_optional,
-       s2s_required,
-       s2s_required_trusted]},
-     auth_external,
-     auth_external_no_jid,
-     auth_external_no_user,
-     auth_external_malformed_jid,
-     auth_external_wrong_jid,
-     auth_external_wrong_server,
-     auth_external_invalid_cert,
-     sm_tests:single_cases(),
-     sm_tests:master_slave_cases(),
-     muc_tests:single_cases(),
-     muc_tests:master_slave_cases(),
-     proxy65_tests:single_cases(),
-     proxy65_tests:master_slave_cases(),
-     replaced_tests:master_slave_cases()].
-
-db_tests(riak) ->
-    %% No support for mod_pubsub
-    [{single_user, [sequence],
-      [test_register,
-       legacy_auth_tests(),
-       auth_plain,
-       auth_md5,
-       presence_broadcast,
-       last,
-       roster_tests:single_cases(),
-       %%private_tests:single_cases(),
-       privacy_tests:single_cases(),
-       vcard_tests:single_cases(),
-       muc_tests:single_cases(),
-       offline_tests:single_cases(),
-       carbons_tests:single_cases(),
-       test_unregister]},
-     muc_tests:master_slave_cases(),
-     privacy_tests:master_slave_cases(),
-     roster_tests:master_slave_cases(),
-     offline_tests:master_slave_cases(),
-     vcard_tests:master_slave_cases(),
-     announce_tests:master_slave_cases(),
-     carbons_tests:master_slave_cases()];
-db_tests(DB) when DB == mnesia; DB == redis ->
-    [{single_user, [sequence],
-      [test_register,
-       legacy_auth_tests(),
-       auth_plain,
-       auth_md5,
-       presence_broadcast,
-       last,
-       roster_tests:single_cases(),
-       private_tests:single_cases(),
-       privacy_tests:single_cases(),
-       vcard_tests:single_cases(),
-       pubsub_tests:single_cases(),
-       muc_tests:single_cases(),
-       offline_tests:single_cases(),
-       mam_tests:single_cases(),
-       carbons_tests:single_cases(),
-       csi_tests:single_cases(),
-       push_tests:single_cases(),
-       test_unregister]},
-     muc_tests:master_slave_cases(),
-     privacy_tests:master_slave_cases(),
-     pubsub_tests:master_slave_cases(),
-     roster_tests:master_slave_cases(),
-     offline_tests:master_slave_cases(),
-     mam_tests:master_slave_cases(),
-     vcard_tests:master_slave_cases(),
-     announce_tests:master_slave_cases(),
-     carbons_tests:master_slave_cases(),
-     csi_tests:master_slave_cases(),
-     push_tests:master_slave_cases()];
 db_tests(_) ->
     [{single_user, [sequence],
       [test_register,
@@ -461,29 +356,6 @@ db_tests(_) ->
        offline_tests:single_cases(),
        mam_tests:single_cases(),
        push_tests:single_cases(),
-       test_unregister]},
-     muc_tests:master_slave_cases(),
-     privacy_tests:master_slave_cases(),
-     pubsub_tests:master_slave_cases(),
-     roster_tests:master_slave_cases(),
-     offline_tests:master_slave_cases(),
-     mam_tests:master_slave_cases(),
-     vcard_tests:master_slave_cases(),
-     announce_tests:master_slave_cases(),
-     carbons_tests:master_slave_cases(),
-     push_tests:master_slave_cases()].
-
-ldap_tests() ->
-    [{ldap_tests, [sequence],
-      [test_auth,
-       test_auth_fail,
-       vcard_get,
-       ldap_shared_roster_get]}].
-
-extauth_tests() ->
-    [{extauth_tests, [sequence],
-      [test_auth,
-       test_auth_fail,
        test_unregister]}].
 
 component_tests() ->
@@ -525,28 +397,12 @@ s2s_tests() ->
        codec_failure]}].
 
 groups() ->
-    [{ldap, [sequence], ldap_tests()},
-     {extauth, [sequence], extauth_tests()},
-     {no_db, [sequence], no_db_tests()},
-     {component, [sequence], component_tests()},
+    [{component, [sequence], component_tests()},
      {s2s, [sequence], s2s_tests()},
-     {mnesia, [sequence], db_tests(mnesia)},
-     {redis, [sequence], db_tests(redis)},
-     {mysql, [sequence], db_tests(mysql)},
-     {pgsql, [sequence], db_tests(pgsql)},
-     {sqlite, [sequence], db_tests(sqlite)},
-     {riak, [sequence], db_tests(riak)}].
+     {mysql, [sequence], db_tests(mysql)}].
 
 all() ->
-    [{group, ldap},
-     {group, no_db},
-     {group, mnesia},
-     {group, redis},
-     {group, mysql},
-     {group, pgsql},
-     {group, sqlite},
-     {group, extauth},
-     {group, riak},
+    [{group, mysql},
      {group, component},
      {group, s2s},
      stop_ejabberd].

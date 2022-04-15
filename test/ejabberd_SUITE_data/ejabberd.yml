@@ -1,138 +1,5 @@
-host_config: 
-  "pgsql.localhost": 
-    sql_username: "@@pgsql_user@@"
-    sql_type: pgsql
-    sql_server: "@@pgsql_server@@"
-    sql_port: @@pgsql_port@@
-    sql_pool_size: 1
-    sql_password: "@@pgsql_pass@@"
-    sql_database: "@@pgsql_db@@"
-    auth_method: sql
-    sm_db_type: sql
-    modules: 
-      mod_announce: 
-        db_type: sql
-        access: local
-      mod_blocking: []
-      mod_caps: 
-        db_type: sql
-      mod_last: 
-        db_type: sql
-      mod_muc: 
-        db_type: sql
-        ram_db_type: sql
-      mod_offline: 
-        db_type: sql
-      mod_privacy: 
-        db_type: sql
-      mod_private: 
-        db_type: sql
-      mod_pubsub: 
-        db_type: sql
-        access_createnode: pubsub_createnode
-        ignore_pep_from_offline: true
-        last_item_cache: false
-        plugins: 
-          - "flat"
-          - "hometree"
-          - "pep"
-      mod_roster:
-        versioning: true
-        store_current_id: true
-        db_type: sql
-      mod_mam:
-        db_type: sql
-      mod_vcard: 
-        db_type: sql
-      mod_vcard_xupdate: []
-      mod_carboncopy:
-        ram_db_type: sql
-      mod_adhoc: []
-      mod_configure: []
-      mod_disco: []
-      mod_ping: []
-      mod_proxy65: []
-      mod_push:
-        db_type: sql
-        include_body: false
-      mod_push_keepalive: []
-      mod_s2s_dialback: []
-      mod_stream_mgmt:
-        resume_timeout: 3
-      mod_legacy_auth: []
-      mod_register: 
-        welcome_message: 
-          subject: "Welcome!"
-          body: "Hi.
-Welcome to this XMPP server."
-      mod_stats: []
-      mod_time: []
-      mod_version: []
-  "sqlite.localhost": 
-    sql_type: sqlite
-    sql_pool_size: 1
-    auth_method: sql
-    sm_db_type: sql
-    modules: 
-      mod_announce: 
-        db_type: sql
-        access: local
-      mod_blocking: []
-      mod_caps: 
-        db_type: sql
-      mod_last: 
-        db_type: sql
-      mod_muc: 
-        db_type: sql
-        ram_db_type: sql
-      mod_offline: 
-        db_type: sql
-      mod_privacy: 
-        db_type: sql
-      mod_private: 
-        db_type: sql
-      mod_pubsub: 
-        db_type: sql
-        access_createnode: pubsub_createnode
-        ignore_pep_from_offline: true
-        last_item_cache: false
-        plugins: 
-          - "flat"
-          - "hometree"
-          - "pep"
-      mod_roster:
-        versioning: true
-        store_current_id: true
-        db_type: sql
-      mod_mam:
-        db_type: sql
-      mod_vcard: 
-        db_type: sql
-      mod_vcard_xupdate: []
-      mod_carboncopy:
-        ram_db_type: sql
-      mod_adhoc: []
-      mod_configure: []
-      mod_disco: []
-      mod_ping: []
-      mod_proxy65: []
-      mod_push:
-        db_type: sql
-        include_body: false
-      mod_push_keepalive: []
-      mod_s2s_dialback: []
-      mod_stream_mgmt:
-        resume_timeout: 3
-      mod_legacy_auth: []
-      mod_register: 
-        welcome_message: 
-          subject: "Welcome!"
-          body: "Hi.
-Welcome to this XMPP server."
-      mod_stats: []
-      mod_time: []
-      mod_version: []
-  "mysql.localhost": 
+host_config:
+  "mysql.localhost":
     sql_username: "@@mysql_user@@"
     sql_type: mysql
     sql_server: "@@mysql_server@@"
@@ -201,229 +68,12 @@ Welcome to this XMPP server."
       mod_stats: []
       mod_time: []
       mod_version: []
-  "mnesia.localhost":
-    queue_type: ram
-    auth_method: internal
-    modules: 
-      mod_announce: 
-        db_type: internal
-        access: local
-      mod_blocking: []
-      mod_caps: 
-        db_type: internal
-      mod_last: 
-        db_type: internal
-      mod_muc: 
-        db_type: internal
-      mod_offline: 
-        db_type: internal
-      mod_privacy: 
-        db_type: internal
-      mod_private: 
-        db_type: internal
-      mod_pubsub: 
-        access_createnode: pubsub_createnode
-        ignore_pep_from_offline: true
-        last_item_cache: false
-        plugins: 
-          - "flat"
-          - "hometree"
-          - "pep"
-      mod_roster: 
-        versioning: true
-        store_current_id: true
-        db_type: internal
-      mod_mam:
-        db_type: internal
-      mod_vcard: 
-        db_type: internal
-      mod_vcard_xupdate: []
-      mod_carboncopy:
-        ram_db_type: internal
-      mod_client_state:
-        queue_presence: true
-        queue_chat_states: true
-        queue_pep: true
-      mod_adhoc: []
-      mod_configure: []
-      mod_disco: []
-      mod_ping: []
-      mod_proxy65: []
-      mod_push:
-        include_body: false
-      mod_push_keepalive: []
-      mod_s2s_dialback: []
-      mod_stream_mgmt:
-        resume_timeout: 3
-      mod_legacy_auth: []
-      mod_register: 
-        welcome_message: 
-          subject: "Welcome!"
-          body: "Hi.
-Welcome to this XMPP server."
-      mod_stats: []
-      mod_time: []
-      mod_version: []
-  "redis.localhost":
-    queue_type: ram
-    auth_method: internal
-    sm_db_type: redis
-    modules: 
-      mod_announce: 
-        db_type: internal
-        access: local
-      mod_blocking: []
-      mod_caps: 
-        db_type: internal
-      mod_last: 
-        db_type: internal
-      mod_muc: 
-        db_type: internal
-      mod_offline: 
-        db_type: internal
-      mod_privacy: 
-        db_type: internal
-      mod_private: 
-        db_type: internal
-      mod_pubsub: 
-        access_createnode: pubsub_createnode
-        ignore_pep_from_offline: true
-        last_item_cache: false
-        plugins: 
-          - "flat"
-          - "hometree"
-          - "pep"
-      mod_roster: 
-        versioning: true
-        store_current_id: true
-        db_type: internal
-      mod_mam:
-        db_type: internal
-      mod_vcard: 
-        db_type: internal
-      mod_vcard_xupdate: []
-      mod_carboncopy:
-        ram_db_type: redis
-      mod_client_state:
-        queue_presence: true
-        queue_chat_states: true
-        queue_pep: true
-      mod_adhoc: []
-      mod_configure: []
-      mod_disco: []
-      mod_ping: []
-      mod_proxy65: []
-      mod_push:
-        include_body: false
-      mod_push_keepalive: []
-      mod_s2s_dialback: []
-      mod_stream_mgmt:
-        resume_timeout: 3
-      mod_legacy_auth: []
-      mod_register: 
-        welcome_message: 
-          subject: "Welcome!"
-          body: "Hi.
-Welcome to this XMPP server."
-      mod_stats: []
-      mod_time: []
-      mod_version: []
-  "riak.localhost":
-    queue_type: ram
-    auth_method: riak
-    sm_db_type: riak
-    modules: 
-      mod_announce: 
-        db_type: riak
-        access: local
-      mod_blocking: []
-      mod_caps: 
-        db_type: riak
-      mod_last: 
-        db_type: riak
-      mod_muc: 
-        db_type: riak
-      mod_offline: 
-        db_type: riak
-      mod_privacy: 
-        db_type: riak
-      mod_private: 
-        db_type: riak
-      mod_roster: 
-        versioning: true
-        store_current_id: true
-        db_type: riak
-      mod_vcard: 
-        db_type: riak
-      mod_vcard_xupdate: []
-      mod_carboncopy:
-        ram_db_type: riak
-      mod_adhoc: []
-      mod_configure: []
-      mod_disco: []
-      mod_ping: []
-      mod_proxy65: []
-      mod_s2s_dialback: []
-      mod_legacy_auth: []
-      mod_register: 
-        welcome_message: 
-          subject: "Welcome!"
-          body: "Hi.
-Welcome to this XMPP server."
-      mod_stats: []
-      mod_time: []
-      mod_version: []
-  "localhost": 
+  "localhost":
     auth_method: [internal, anonymous]
-  "ldap.localhost":
-    queue_type: ram
-    ldap_servers: 
-      - "localhost"
-    ldap_rootdn: "cn=admin,dc=localhost"
-    ldap_port: 1389
-    ldap_password: "password"
-    ldap_base: "ou=users,dc=localhost"
-    auth_method: ldap
-    modules: 
-      mod_vcard:
-        db_type: ldap
-      mod_roster: [] # mod_roster is required by mod_shared_roster
-      mod_shared_roster_ldap:
-        ldap_auth_check: off
-        ldap_base: "dc=localhost"
-        ldap_rfilter: "(objectClass=posixGroup)"
-        ldap_gfilter: "(&(objectClass=posixGroup)(cn=%g))"
-        ldap_memberattr: "memberUid"
-        ldap_ufilter: "(uid=%u)"
-        ldap_userdesc: "cn"
-      mod_adhoc: []
-      mod_configure: []
-      mod_disco: []
-      mod_ping: []
-      mod_proxy65: []
-      mod_register: 
-        welcome_message: 
-          subject: "Welcome!"
-          body: "Hi.
-Welcome to this XMPP server."
-      mod_stats: []
-      mod_time: []
-      mod_version: []
-  "extauth.localhost":
-    queue_type: ram
-    extauth_program: "python extauth.py"
-    auth_method: external
 hosts: 
   - "localhost"
-  - "mnesia.localhost"
-  - "redis.localhost"
   - "mysql.localhost"
-  - "pgsql.localhost"
-  - "extauth.localhost"
-  - "ldap.localhost"
-  - "riak.localhost"
-  - "sqlite.localhost"
-access: 
+access:
   announce: 
     admin: allow
   c2s: 
@@ -439,7 +89,7 @@ access:
   max_user_offline_messages: 
     all: infinity
   max_user_sessions: 
-    all: 10
+    all: 100
   muc: 
     all: allow
   muc_admin: 
@@ -486,7 +136,7 @@ listen:
     password: >-
       @@password@@
 loglevel: @@loglevel@@
-max_fsm_queue: 1000
+max_fsm_queue: 10000
 queue_type: file
 modules: 
   mod_adhoc: []
@@ -505,7 +155,7 @@ Welcome to this XMPP server."
   mod_s2s_dialback: []
   mod_legacy_auth: []
   mod_stream_mgmt:
-    max_ack_queue: 10
+    max_ack_queue: 100
     resume_timeout: 3
   mod_time: []
   mod_version: []
