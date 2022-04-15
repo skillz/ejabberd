@@ -30,7 +30,7 @@
 -protocol({xep, 191, '1.2'}).
 
 -export([start/2, stop/1, reload/3, process_iq/1, depends/2,
-	 disco_features/5, mod_options/1]).
+	 disco_features/5, mod_options/1, is_blocking/3]).
 
 -include("logger.hrl").
 
@@ -126,6 +126,24 @@ listitems_to_jids([#listitem{type = jid,
 % Skip Privacy List items than cannot be mapped to Blocking items
 listitems_to_jids([_ | Items], JIDs) ->
     listitems_to_jids(Items, JIDs).
+
+% is from-user blocking to-user on server
+is_blocking(FromLUser, ToLUser, Server) ->
+	try
+		case mod_privacy:get_user_list(FromLUser, Server, default) of
+			{ok, { _Name, List } }  when is_list(List) ->
+				%% from all privacy entries for from-user (List), get all deny (blocked) ones using listitems_to_jids
+				lists:filter(fun({LUser, _LServer, _LResource}) ->
+					%% if the to-user is in the deny list for the from-user, then
+					%% from-user is blocking to-user
+					LUser == ToLUser
+			 end, listitems_to_jids(List, [])) /= [];
+			_ -> false
+		end
+	catch _:_ ->
+		false
+	end
+.
 
 -spec process_block(iq(), [ljid()]) -> iq().
 process_block(#iq{from = From} = IQ, LJIDs) ->
