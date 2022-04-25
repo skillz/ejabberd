@@ -218,22 +218,27 @@ process_sm_iq(#iq{type = set, lang = Lang, from = From} = IQ) ->
     end;
 process_sm_iq(#iq{type = get, from = From, to = To, lang = Lang, sub_els = SubEls} = IQ) ->
     #jid{luser = LUser, lserver = LServer} = To,
+		JabberIdList = case SubEls of
+			[{
+			 vcard_temp, _, _, _, _, _, _, _, _, _, _,
+			 JabberId, _, _, _, _, _, _, _, _, _,
+			 _, _, _, _, _, _, _, _, _
+			}] when is_binary(JabberId) andalso byte_size(JabberId) > 0 -> binary:split(JabberId, <<"+">>, [global]);
+			_ -> undefined
+		end,
 		case
-			case SubEls of
-				[
-					{
-						vcard_temp, _, _, _, _, _, _, _, _, _, _,
-						JabberId, _, _, _, _, _, _, _, _, _,
-            _, _, _, _, _, _, _, _, _
-					}
-				] when is_binary(JabberId) -> get_vcards(binary:split(JabberId, <<"+">>, [global]), LServer);
-				_ -> get_vcard(LUser, LServer)
+			case JabberIdList of
+				undefined -> get_vcard(LUser, LServer);
+				_ -> get_vcards(JabberIdList, LServer)
 			end of
 				error ->
 					Txt = <<"Database failure">>,
 					xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang));
 				[] ->
-					xmpp:make_iq_result(IQ, #vcard_temp{});
+					case JabberIdList of
+						undefined -> xmpp:make_iq_result(IQ, #vcard_temp{});
+						_ -> xmpp:make_iq_result(IQ, #xmlel{name = <<"vCards">>, attrs = [{<<"xmlns">>, <<"jabber:client">>}]})
+					end;
 				Els ->
 					IQ#iq{type = result, to = From, from = To, sub_els = Els}
 		end
