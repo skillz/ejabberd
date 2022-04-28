@@ -43,7 +43,7 @@ defmodule Ejabberd.MixProject do
   def application do
     [mod: {:ejabberd_app, []},
      applications: [:kernel, :stdlib, :sasl, :ssl],
-     included_applications: [:logger, :mnesia, :inets, :p1_utils, :cache_tab,
+     included_applications: [:lager, :logger, :mnesia, :inets, :p1_utils, :cache_tab,
                              :fast_tls, :stringprep, :fast_xml, :xmpp,
                              :stun, :fast_yaml, :esip, :jiffy, :p1_oauth2,
                              :base64url, :jose, :pkix, :os_mon]
@@ -84,30 +84,39 @@ defmodule Ejabberd.MixProject do
   end
 
   defp deps do
-    [{:lager, "~> 3.6.0"},
-     {:p1_utils, "1.0.24", override: true},
-     {:fast_xml, "~> 1.1"},
-     {:xmpp, "~> 1.3.0"},
-     {:cache_tab, "1.0.29", override: true},
-     {:stringprep, "~> 1.0"},
-     {:fast_yaml, "~> 1.0"},
-     {:fast_tls, "~> 1.1"},
-     {:stun, "~> 1.0"},
-     {:esip, "~> 1.0"},
-     {:p1_mysql, "~> 1.0"},
-     {:mqtree, "~> 1.0"},
-     {:p1_pgsql, "~> 1.1"},
-     {:jiffy, "~> 0.14.7"},
-     {:p1_oauth2, "~> 0.6.1"},
-     {:distillery, "~> 2.0"},
-     {:pkix, "~> 1.0"},
-     {:ex_doc, ">= 0.0.0", only: :dev},
-     {:base64url, tag: "v1.0", git: "https://github.com/dvv/base64url.git", override: true},
-     {:jose, "~> 1.8"},
-     {:meck, "0.8.13", only: :test},
-     {:iconv, "1.0.13"},
-     {:excoveralls, "~> 0.11.0", only: :test}]
-    ++ cond_deps()
+    [
+      {:p1_utils, "1.0.24", override: true},
+      {:cache_tab, "1.0.29", override: true},
+      {:base64url, tag: "v1.0", git: "https://github.com/dvv/base64url.git", override: true},
+      {:lager, "~> 3.6.0"},
+      {:fast_xml, "~> 1.1"},
+      {:xmpp, "~> 1.3.0"},
+      {:stringprep, "~> 1.0"},
+      {:fast_yaml, "~> 1.0"},
+      {:fast_tls, "~> 1.1"},
+      {:stun, "~> 1.0"},
+      {:esip, "~> 1.0"},
+      {:p1_mysql, "~> 1.0"},
+      {:mqtree, "~> 1.0"},
+      {:p1_pgsql, "~> 1.1"},
+      {:jiffy, "~> 0.14.7"},
+      {:p1_oauth2, "~> 0.6.1"},
+      {:distillery, "~> 2.0"},
+      {:pkix, "~> 1.0"},
+      {:jose, "~> 1.8"},
+      {:iconv, "1.0.13"},
+      {:ezlib, "~> 1.0"},
+
+      {:meck, "0.8.13", only: :test},
+      {:excoveralls, "~> 0.11.0", only: :test},
+      {:sqlite3, "~> 1.1", only: :test},
+      {:riakc, "~> 2.4", only: :test},
+      {:eredis, "~> 1.0", only: :test},
+      {:epam, "~> 1.0", only: :test},
+      {:luerl, "~> 0.3.1", only: :test},
+
+      {:ex_doc, ">= 0.0.0", only: :dev},
+    ]
   end
 
   defp deps_include(deps) do
@@ -120,16 +129,6 @@ defmodule Ejabberd.MixProject do
       end
     end
     Enum.map(deps, fn dep -> base<>"/#{dep}/include" end)
-  end
-
-  defp cond_deps do
-    for {:true, dep} <- [{config(:sqlite), {:sqlite3, "~> 1.1"}},
-                         {config(:riak), {:riakc, "~> 2.4"}},
-                         {config(:redis), {:eredis, "~> 1.0"}},
-                         {config(:zlib), {:ezlib, "~> 1.0"}},
-                         {config(:pam), {:epam, "~> 1.0"}},
-                         {config(:tools), {:luerl, "~> 0.3.1"}}], do:
-      dep
   end
 
   defp cond_apps do
