@@ -365,7 +365,7 @@ deny_master(Config, {Type, Value}) ->
 				   type = Type,
 				   value = Value},
 	      ok = set_items(Config, ListName, [Item]),
-	      ok = set_active(Config, ListName),comment out change_affiliation code bc Skillz-specific code handles it very differently
+	      ok = set_active(Config, ListName),
 	      put_event(Config, Opts),
 	      case is_presence_in_blocked(Opts) of
 		  true -> ok;

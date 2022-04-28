@@ -76,7 +76,16 @@ start_ejabberd(Config) ->
 end_per_suite(_Config) ->
     application:stop(ejabberd).
 
--define(BACKENDS, [mysql]).
+-define(BACKENDS, [
+%%  mnesia,
+%%  redis,
+  mysql %% ,
+%%  pgsql,
+%%  sqlite,
+%%  ldap,
+%%  extauth,
+%%  riak
+]).
 
 init_per_group(Group, Config) ->
     case lists:member(Group, ?BACKENDS) of
