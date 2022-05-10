@@ -144,7 +144,20 @@ unsupported_iq(Config) ->
 master_slave_cases() ->
     {offline_master_slave, [sequence],
      [master_slave_test(flex),
-      master_slave_test(send_all)]}.
+      master_slave_test(send_all),
+		  master_slave_test(last)]}.
+
+last_master(Config) ->
+	Server = ?config(server, Config),
+	mod_mam_sql:delete_old_messages(Server, {4133923200000, 0, 0}, all),
+	clean(disconnect(Config))
+.
+
+last_slave(Config) ->
+	Server = ?config(server, Config),
+	mod_mam_sql:delete_old_messages(Server, {4133923200000, 0, 0}, all),
+	clean(disconnect(Config))
+.
 
 flex_master(Config) ->
     send_messages(Config, 5),
