@@ -67,7 +67,7 @@ done
 : "${EJABBERD_LOG_PATH:="$LOGS_DIR/ejabberd.log"}"
 
 # define erl parameters
-ERLANG_OPTS="+K $POLL -smp $SMP +P $ERL_PROCESSES $ERL_OPTIONS -mnesia dump_log_write_threshold 1000 -mnesia dc_dump_limit 40"
+ERLANG_OPTS="+K $POLL -smp $SMP +P $ERL_PROCESSES $ERL_OPTIONS -mnesia dump_log_write_threshold 10000 -mnesia dc_dump_limit 40"
 if [ -n "$FIREWALL_WINDOW" ] ; then
     ERLANG_OPTS="$ERLANG_OPTS -kernel inet_dist_listen_min ${FIREWALL_WINDOW%-*} inet_dist_listen_max ${FIREWALL_WINDOW#*-}"
 fi
