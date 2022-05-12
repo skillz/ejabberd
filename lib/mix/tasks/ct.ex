@@ -38,9 +38,9 @@ defmodule Mix.Tasks.Ct do
   @default_includes [
     "include/",
     "tools",
-    "../../deps/p1_utils/include",
-    "../../deps/fast_xml/include",
-    "../../deps/xmpp/include"
+    "deps/p1_utils/include",
+    "deps/fast_xml/include",
+    "deps/xmpp/include"
   ]
 
   def run(args) do
@@ -64,7 +64,7 @@ defmodule Mix.Tasks.Ct do
     default_label   = "ct_test_run_#{datetime_string}_#{hostname}"
 
     cwd       = File.cwd!
-    child_cwd = "#{cwd}/apps/ejabberd" # TODO: kind of a hack.  this should be fixed forsure.
+    child_cwd = "#{cwd}"
     dir       = Keyword.get(options, :dir, "#{child_cwd}/test")                       |> String.to_charlist
     logdir    = Keyword.get(options, :logdir, "#{cwd}/logs")                          |> String.to_charlist
     suite     = Keyword.get(options, :suite, "#{child_cwd}/test/ejabberd_SUITE.erl")  |> String.to_charlist

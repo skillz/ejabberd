@@ -259,7 +259,8 @@ set_get_block(Config) ->
 %%%===================================================================
 master_slave_cases() ->
     {privacy_master_slave, [sequence],
-     [master_slave_test(deny_bare_jid),
+     [
+      master_slave_test(deny_bare_jid),
       master_slave_test(deny_full_jid),
       master_slave_test(deny_server_bare_jid),
       master_slave_test(deny_server_full_jid),
@@ -272,7 +273,8 @@ master_slave_cases() ->
       master_slave_test(deny_offline),
       master_slave_test(block),
       master_slave_test(unblock),
-      master_slave_test(unblock_all)]}.
+      master_slave_test(unblock_all)
+     ]}.
 
 deny_bare_jid_master(Config) ->
     PeerJID = ?config(peer, Config),
@@ -399,8 +401,18 @@ deny_master(Config, {Type, Value}) ->
 	      ct:comment("Waiting for slave to finish processing our stanzas"),
 	      done = get_event(Config)
       end,
-      [[iq], [message], [presence_in], [presence_out],
-       [iq, message, presence_in, presence_out], []]),
+%% SKILLZ NOTE: privacy processing of messages has been significantly changed for Skillz:
+      [
+        [iq],
+%%      [message],
+        [presence_in],
+        [presence_out],
+       [
+         iq,
+%%       message,
+         presence_in,
+         presence_out
+       ], []]),
     put_event(Config, disconnect),
     clean_up(disconnect(Config)).
 
