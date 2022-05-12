@@ -8,4 +8,5 @@ sql_password: "ejabberd"
 sql_keepalive_interval: 60
 sql_start_interval: 5
 sql_pool_size: 10
-sql_secondary_servers: ["localhost"]
+sql_secondary_servers:
+  - "localhost"

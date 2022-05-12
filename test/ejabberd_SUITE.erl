@@ -76,7 +76,16 @@ start_ejabberd(Config) ->
 end_per_suite(_Config) ->
     application:stop(ejabberd).
 
--define(BACKENDS, [mnesia,redis,mysql,pgsql,sqlite,ldap,extauth,riak]).
+-define(BACKENDS, [
+%%  mnesia,
+%%  redis,
+  mysql %% ,
+%%  pgsql,
+%%  sqlite,
+%%  ldap,
+%%  extauth,
+%%  riak
+]).
 
 init_per_group(Group, Config) ->
     case lists:member(Group, ?BACKENDS) of
@@ -390,101 +399,111 @@ no_db_tests() ->
      replaced_tests:master_slave_cases()].
 
 db_tests(riak) ->
-    %% No support for mod_pubsub
-    [{single_user, [sequence],
-      [test_register,
-       legacy_auth_tests(),
-       auth_plain,
-       auth_md5,
-       presence_broadcast,
-       last,
-       roster_tests:single_cases(),
-       %%private_tests:single_cases(),
-       privacy_tests:single_cases(),
-       vcard_tests:single_cases(),
-       muc_tests:single_cases(),
-       offline_tests:single_cases(),
-       carbons_tests:single_cases(),
-       test_unregister]},
-     muc_tests:master_slave_cases(),
-     privacy_tests:master_slave_cases(),
-     roster_tests:master_slave_cases(),
-     offline_tests:master_slave_cases(),
-     vcard_tests:master_slave_cases(),
-     announce_tests:master_slave_cases(),
-     carbons_tests:master_slave_cases()];
+  %% No support for mod_pubsub
+  [{single_user, [sequence],
+    [test_register,
+      legacy_auth_tests(),
+      auth_plain,
+      auth_md5,
+      presence_broadcast,
+      last,
+      roster_tests:single_cases(),
+      %%private_tests:single_cases(),
+      privacy_tests:single_cases(),
+      vcard_tests:single_cases(),
+      muc_tests:single_cases(),
+      offline_tests:single_cases(),
+      carbons_tests:single_cases(),
+      test_unregister]},
+    muc_tests:master_slave_cases(),
+    privacy_tests:master_slave_cases(),
+    roster_tests:master_slave_cases(),
+    offline_tests:master_slave_cases(),
+    vcard_tests:master_slave_cases(),
+    announce_tests:master_slave_cases(),
+    carbons_tests:master_slave_cases()];
+
 db_tests(DB) when DB == mnesia; DB == redis ->
-    [{single_user, [sequence],
-      [test_register,
-       legacy_auth_tests(),
-       auth_plain,
-       auth_md5,
-       presence_broadcast,
-       last,
-       roster_tests:single_cases(),
-       private_tests:single_cases(),
-       privacy_tests:single_cases(),
-       vcard_tests:single_cases(),
-       pubsub_tests:single_cases(),
-       muc_tests:single_cases(),
-       offline_tests:single_cases(),
-       mam_tests:single_cases(),
-       carbons_tests:single_cases(),
-       csi_tests:single_cases(),
-       push_tests:single_cases(),
-       test_unregister]},
-     muc_tests:master_slave_cases(),
-     privacy_tests:master_slave_cases(),
-     pubsub_tests:master_slave_cases(),
-     roster_tests:master_slave_cases(),
-     offline_tests:master_slave_cases(),
-     mam_tests:master_slave_cases(),
-     vcard_tests:master_slave_cases(),
-     announce_tests:master_slave_cases(),
-     carbons_tests:master_slave_cases(),
-     csi_tests:master_slave_cases(),
-     push_tests:master_slave_cases()];
+  [{single_user, [sequence],
+    [test_register,
+      legacy_auth_tests(),
+      auth_plain,
+      auth_md5,
+      presence_broadcast,
+      last,
+      roster_tests:single_cases(),
+      private_tests:single_cases(),
+      privacy_tests:single_cases(),
+      vcard_tests:single_cases(),
+      pubsub_tests:single_cases(),
+      muc_tests:single_cases(),
+      offline_tests:single_cases(),
+      mam_tests:single_cases(),
+      carbons_tests:single_cases(),
+      csi_tests:single_cases(),
+      push_tests:single_cases(),
+      test_unregister]},
+    muc_tests:master_slave_cases(),
+    privacy_tests:master_slave_cases(),
+    pubsub_tests:master_slave_cases(),
+    roster_tests:master_slave_cases(),
+    offline_tests:master_slave_cases(),
+    mam_tests:master_slave_cases(),
+    vcard_tests:master_slave_cases(),
+    announce_tests:master_slave_cases(),
+    carbons_tests:master_slave_cases(),
+    csi_tests:master_slave_cases(),
+    push_tests:master_slave_cases()];
+
 db_tests(_) ->
-    [{single_user, [sequence],
-      [test_register,
-       legacy_auth_tests(),
-       auth_plain,
-       auth_md5,
-       presence_broadcast,
-       last,
-       roster_tests:single_cases(),
-       private_tests:single_cases(),
-       privacy_tests:single_cases(),
-       vcard_tests:single_cases(),
-       pubsub_tests:single_cases(),
-       muc_tests:single_cases(),
-       offline_tests:single_cases(),
-       mam_tests:single_cases(),
-       push_tests:single_cases(),
-       test_unregister]},
-     muc_tests:master_slave_cases(),
-     privacy_tests:master_slave_cases(),
-     pubsub_tests:master_slave_cases(),
-     roster_tests:master_slave_cases(),
-     offline_tests:master_slave_cases(),
-     mam_tests:master_slave_cases(),
-     vcard_tests:master_slave_cases(),
-     announce_tests:master_slave_cases(),
-     carbons_tests:master_slave_cases(),
-     push_tests:master_slave_cases()].
+  [{single_user, [sequence],
+    [test_register,
+      legacy_auth_tests(),
+      auth_plain,
+      auth_md5,
+      presence_broadcast,
+      last,
+      roster_tests:single_cases(),
+      private_tests:single_cases(),
+      privacy_tests:single_cases(),
+      vcard_tests:single_cases(),
+      pubsub_tests:single_cases(),
+      muc_tests:single_cases(),
+      offline_tests:single_cases(),
+      mam_tests:single_cases(),
+      push_tests:single_cases(),
+      test_unregister]}
+  ] ++
+  [
+    {multiple_user, [sequence],
+      [
+        muc_tests:master_slave_cases(),
+        privacy_tests:master_slave_cases(),
+        pubsub_tests:master_slave_cases(),
+        roster_tests:master_slave_cases(),
+        offline_tests:master_slave_cases(),
+        mam_tests:master_slave_cases(),
+        vcard_tests:master_slave_cases(),
+        announce_tests:master_slave_cases(),
+        carbons_tests:master_slave_cases(),
+        push_tests:master_slave_cases()
+      ]
+    }
+  ]
+.
 
 ldap_tests() ->
-    [{ldap_tests, [sequence],
-      [test_auth,
-       test_auth_fail,
-       vcard_get,
-       ldap_shared_roster_get]}].
+  [{ldap_tests, [sequence],
+    [test_auth,
+      test_auth_fail,
+      vcard_get,
+      ldap_shared_roster_get]}].
 
 extauth_tests() ->
-    [{extauth_tests, [sequence],
-      [test_auth,
-       test_auth_fail,
-       test_unregister]}].
+  [{extauth_tests, [sequence],
+    [test_auth,
+      test_auth_fail,
+      test_unregister]}].
 
 component_tests() ->
     [{component_connect, [parallel],
@@ -525,31 +544,36 @@ s2s_tests() ->
        codec_failure]}].
 
 groups() ->
-    [{ldap, [sequence], ldap_tests()},
-     {extauth, [sequence], extauth_tests()},
-     {no_db, [sequence], no_db_tests()},
-     {component, [sequence], component_tests()},
-     {s2s, [sequence], s2s_tests()},
-     {mnesia, [sequence], db_tests(mnesia)},
-     {redis, [sequence], db_tests(redis)},
-     {mysql, [sequence], db_tests(mysql)},
-     {pgsql, [sequence], db_tests(pgsql)},
-     {sqlite, [sequence], db_tests(sqlite)},
-     {riak, [sequence], db_tests(riak)}].
+  [
+%%    {ldap, [sequence], ldap_tests()},
+%%    {extauth, [sequence], extauth_tests()},
+%%    {no_db, [sequence], no_db_tests()},
+    {component, [sequence], component_tests()},
+    {s2s, [sequence], s2s_tests()},
+%%    {mnesia, [sequence], db_tests(mnesia)},
+%%    {redis, [sequence], db_tests(redis)},
+    {mysql, [sequence], db_tests(mysql)} %% ,
+%%    {pgsql, [sequence], db_tests(pgsql)},
+%%    {sqlite, [sequence], db_tests(sqlite)},
+%%    {riak, [sequence], db_tests(riak)}
+ ]
+.
 
 all() ->
-    [{group, ldap},
-     {group, no_db},
-     {group, mnesia},
-     {group, redis},
-     {group, mysql},
-     {group, pgsql},
-     {group, sqlite},
-     {group, extauth},
-     {group, riak},
-     {group, component},
-     {group, s2s},
-     stop_ejabberd].
+  [
+%%    {group, ldap},
+%%    {group, no_db},
+%%    {group, mnesia},
+%%    {group, redis},
+    {group, mysql},
+%%    {group, pgsql},
+%%    {group, sqlite},
+%%    {group, extauth},
+%%    {group, riak},
+    {group, component},
+    {group, s2s},
+    stop_ejabberd]
+.
 
 stop_ejabberd(Config) ->
     ok = application:stop(ejabberd),

@@ -275,7 +275,8 @@ set_room_affiliation(Config) ->
 %%%===================================================================
 master_slave_cases() ->
     {muc_master_slave, [sequence],
-     [master_slave_test(register),
+     [
+      master_slave_test(register),
       master_slave_test(groupchat_msg),
       master_slave_test(private_msg),
       master_slave_test(set_subject),
@@ -286,7 +287,8 @@ master_slave_cases() ->
       master_slave_test(voice_request),
       master_slave_test(change_role),
       master_slave_test(kick),
-      master_slave_test(change_affiliation),
+%% SKILLZ NOTE: user affiliation has been significantly changed for Skillz:
+%%    master_slave_test(change_affiliation),
       master_slave_test(destroy),
       master_slave_test(vcard),
       master_slave_test(nick_change),
@@ -303,7 +305,8 @@ master_slave_cases() ->
       master_slave_test(config_allow_voice_requests),
       master_slave_test(config_voice_request_interval),
       master_slave_test(config_visitor_nickchange),
-      master_slave_test(join_conflict)]}.
+      master_slave_test(join_conflict)
+     ]}.
 
 join_conflict_master(Config) ->
     ok = join_new(Config),
