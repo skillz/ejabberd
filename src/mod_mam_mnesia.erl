@@ -31,7 +31,7 @@
 	 extended_fields/0, store/8, write_prefs/4, get_prefs/2, select/6, remove_from_archive/3,
 	 is_empty_for_user/2, is_empty_for_room/3]).
 
--export([get_room_history/3]).
+-export([get_room_history/4]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("xmpp.hrl").
@@ -275,5 +275,5 @@ filter_by_max(Msgs, Len) when is_integer(Len), Len >= 0 ->
 filter_by_max(_Msgs, _Junk) ->
     {[], true}.
 
-get_room_history(_LServer, _Host, _Room) ->
+get_room_history(_LServer, _Host, _Room, _HistorySize) ->
 	{error, not_implemented}.
