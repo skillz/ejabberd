@@ -44,7 +44,7 @@
 	 is_empty_for_user/2, is_empty_for_room/3, check_create_room/4,
 	 process_iq/3, store_mam_message/7, make_id/0]).
 
--export([get_room_history/3]).
+-export([get_room_history/4]).
 
 -include("xmpp.hrl").
 -include("logger.hrl").
@@ -1166,10 +1166,11 @@ send(Msgs, Count, IsComplete,
 	    ignore
     end.
 
-get_room_history(ServerHost, Room, Host) ->
+get_room_history(ServerHost, Room, Host, HistorySize) ->
     LServer = jid:nameprep(ServerHost),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
-    Mod:get_room_history(LServer, Room, Host).
+    Mod:get_room_history(LServer, Room, Host, HistorySize)
+.
 
 -spec make_rsm_out([{binary(), integer(), xmlel()}], count()) -> rsm_set().
 make_rsm_out([], Count) ->

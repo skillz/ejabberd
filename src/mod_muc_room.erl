@@ -134,7 +134,7 @@ init([Host, ServerHost, Access, Room, HistorySize,
 		   room_shaper = Shaper}),
     State1 = set_opts(DefRoomOpts, State),
     store_room(State1),
-    NewState = get_history_upon_init(State),
+    NewState = get_history_upon_init(State, HistorySize),
     ?INFO_MSG("Created MUC room ~s@~s by ~s",
 	      [Room, Host, jid:encode(Creator)]),
     add_to_log(room_existence, created, State1),
@@ -152,7 +152,7 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
 				  jid = jid:make(Room, Host),
 				  room_queue = RoomQueue,
 				  room_shaper = Shaper}),
-    NewState = get_history_upon_init(State),
+    NewState = get_history_upon_init(State, HistorySize),
     add_to_log(room_existence, started, NewState),
     {ok, normal_state, NewState}.
 
@@ -2135,11 +2135,11 @@ extract_password(#iq{} = IQ) ->
 	    false
     end.
 
-get_history_upon_init(StateData) ->
+get_history_upon_init(StateData, HistorySize) ->
     ServerHost = StateData#state.server_host,
     Room = StateData#state.room,
     Host = StateData#state.host,
-    MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host),
+    MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host, HistorySize),
     case MessageHistory of
         {error, _} ->
             StateData;
@@ -4055,8 +4055,8 @@ process_iq_vcard(_From, #iq{type = get}, StateData) ->
 	    {error, xmpp:err_item_not_found()}
     end;
 process_iq_vcard(From, #iq{type = set, lang = Lang, sub_els = [Pkt]},
-		 StateData) -> 
-	case get_affiliation(From, StateData) of 
+		 StateData) ->
+	case get_affiliation(From, StateData) of
 	owner ->
 	    SubEl = xmpp:encode(Pkt),
 	    VCardRaw = fxml:element_to_binary(SubEl),
@@ -4510,10 +4510,10 @@ should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
 -spec send_to_room_or_offline(boolean(), boolean(), stanza(), stanza(), binary()) -> any().
 send_to_room_or_offline(false, true, Packet, PrivacyCheckPacket, LServer) ->
 	case is_offline_privacy_allow(PrivacyCheckPacket) of
-		true -> 
+		true ->
 		  ?DEBUG("offline_privacy_allowed, sending offline_message", []),
 		  ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet}, []);
-		_ -> 
+		_ ->
 		  ?DEBUG("Failed to allow offline_privacy_allowed, doing nothing", []),
 		  ok
 	end;
