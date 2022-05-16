@@ -33,7 +33,7 @@
    extended_fields/0, store/8, write_prefs/4, get_prefs/2, select/6, export/1, remove_from_archive/3,
    is_empty_for_user/2, is_empty_for_room/3]).
 
--export([get_room_history/3]).
+-export([get_room_history/4]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("xmpp.hrl").
@@ -470,14 +470,14 @@ make_archive_el(User, TS, XML, Peer, Kind, Nick, MsgType, JidRequestor, JidArchi
       {error, invalid_xml}
     end.
 
-get_room_history(LServer, Room, Host) ->
+get_room_history(LServer, Room, Host, HistorySize) ->
      JidArchive = jid:make(Room, Host),
      RoomJid = jid:encode(JidArchive),
      case catch ejabberd_sql:sql_query(
         LServer,
         ?SQL("select @(bare_peer)s, @(nick)s, @(xml)s, @(timestamp)d from archive "
              "where username=%(RoomJid)s "
-             "order by timestamp desc limit 50;")) of
+             "order by timestamp desc limit %(HistorySize)d;")) of
   {selected, Rows} ->
      lists:map(
         fun({FromJID, FromNick, XML, TS}) ->

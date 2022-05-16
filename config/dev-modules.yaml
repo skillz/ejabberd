@@ -28,7 +28,7 @@ modules:
       allow: admin
     access_create: muc_create
     access_persistent: muc_create
-    history_size: 200
+    history_size: 300
     max_users: 10000
     max_user_conferences: 200
     max_room_id: 1024
