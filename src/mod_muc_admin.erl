@@ -28,7 +28,7 @@
 
 -behaviour(gen_mod).
 
--export([start/2, stop/1, reload/3, depends/2, 
+-export([start/2, stop/1, reload/3, depends/2,
 	 muc_online_rooms/1, muc_online_rooms_by_regex/2,
 	 muc_register_nick/3, muc_unregister_nick/2,
 	 create_room_with_opts/4, create_room/3, destroy_room/2,
@@ -858,6 +858,30 @@ seconds_to_days(S) ->
 %%---------------
 %% Act
 
+act_on_rooms(Method, destroy, Rooms, ServerHost) ->
+	case Rooms of
+		[] -> ok;
+		_ ->
+			ServerHosts = [ {A, find_host(A)} || A <- ejabberd_config:get_myhosts() ],
+			Delete = fun({_N, H, _Pid} = Room) ->
+				SH = case ServerHost of
+					global -> find_serverhost(H, ServerHosts);
+					O -> O
+				end,
+				act_on_room(Method, destroy_not_forget, Room, SH)
+		 	end,
+			lists:foreach(Delete, Rooms),
+
+			%% all rooms have the same host
+			{_, Host, _} = lists:nth(1, Rooms),
+			SH = case ServerHost of
+				global -> find_serverhost(Host, ServerHosts);
+				O -> O
+		 	end,
+			mod_muc:forget_rooms(SH, Host, [Name || {Name, _, _} <- Rooms])
+	end
+;
+
 act_on_rooms(Method, Action, Rooms, ServerHost) ->
     ServerHosts = [ {A, find_host(A)} || A <- ejabberd_config:get_myhosts() ],
     Delete = fun({_N, H, _Pid} = Room) ->
@@ -875,12 +899,15 @@ find_serverhost(Host, ServerHosts) ->
     ServerHost.
 
 act_on_room(Method, destroy, {N, H, Pid}, SH) ->
-    Message = iolist_to_binary(io_lib:format(
-        <<"Room destroyed by rooms_~s_destroy.">>, [Method])),
-    p1_fsm:send_all_state_event(
-      Pid, {destroy, Message}),
-    mod_muc:room_destroyed(H, N, Pid, SH),
-    mod_muc:forget_room(SH, H, N);
+		act_on_room(Method, destroy_not_forget, {N, H, Pid}, SH),
+    mod_muc:forget_room(SH, H, N)
+;
+
+act_on_room(Method, destroy_not_forget, {N, H, Pid}, SH) ->
+	Message = iolist_to_binary(io_lib:format(<<"Room destroyed by rooms_~s_destroy.">>, [Method])),
+	p1_fsm:send_all_state_event(Pid, {destroy, Message}),
+	mod_muc:room_destroyed(H, N, Pid, SH)
+;
 
 act_on_room(_Method, list, _, _) ->
     ok.

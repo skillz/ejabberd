@@ -10,7 +10,7 @@
 %% Exports
 -export([send_cas_message/3, send_cas_message/4, send_message/6, get_message_xml_bin/4, get_env/0,
   get_admin_logo/0, get_flag_url/0, get_cas_jid/0, get_host/0, get_host/1,
-  get_uuid/0]).
+  get_uuid/0, dynamic_batch/7, dynamic_batch/6]).
 
 -include("logger.hrl").
 
@@ -152,4 +152,59 @@ get_hex_digits(NumDigits) ->
 
 get_uuid() ->
   string:lowercase(get_hex_digits(8) ++ "-" ++ get_hex_digits(4) ++ "-" ++ get_hex_digits(4) ++ "-" ++ get_hex_digits(4) ++ "-" ++ get_hex_digits(12))
+.
+
+%% @spec dynamic_batch(BatchFunc, ListToProcess, MaxDesiredMS, DesiredMSBuffer, SleepMSBetweenBatches, StartingBatchSize) -> ok
+dynamic_batch(BatchFunc, ListToProcess, MaxDesiredMS, DesiredMSBuffer, SleepMSBetweenBatches, StartingBatchSize) ->
+  dynamic_batch(BatchFunc, ListToProcess, MaxDesiredMS, DesiredMSBuffer, SleepMSBetweenBatches, StartingBatchSize, StartingBatchSize)
+.
+
+%% @doc run BatchFunc for a dynamically sized sublist/batch of ListToProcess until all of ListToProcess are processed by BatchFunc
+%% the batch size is determined by the max desired ms and its buffer
+%% if the time to process a given batch is less than the max desired time minus the buffer, then increase the batch size for the next run
+%% if the time to process a given batch is greater than the max desired time plus the buffer, then decrease the batch size for the next run
+%% if the time to process a given batch is within the max desired time - buffer and max desired time + buffer, then keep that size for the next run
+%% the optimal batch size is found via binary search
+%% to test: :skillz_util.dynamic_batch(fn(batch) -> :io.put_chars(inspect(batch, charlists: :as_lists)); sleep_time = :rand.uniform(2000); :io.put_chars(inspect(sleep_time)); :timer.sleep(sleep_time) end, [1,2,3,4,5,6,7,8,9,10], 1000, 10, 0, 1, 1)
+dynamic_batch(BatchFunc, ListToProcess, MaxDesiredMS, DesiredMSBuffer, SleepMSBetweenBatches, Lo, Hi) ->
+  MaxTime = MaxDesiredMS * 1000,
+  BufferTime = DesiredMSBuffer * 1000,
+  Mid = lists:max([1, trunc((Lo + Hi) / 2)]),
+  case ListToProcess of
+    [] -> ok;
+    List ->
+      {BatchList, Rest} = case Mid < length(List) of
+                            true -> lists:split(Mid, List);
+                            _ -> {List, []}
+                          end,
+      {Time, _} = timer:tc(
+        fun() ->
+          BatchFunc(BatchList)
+        end
+      ),
+      case Rest of
+        [] -> ok;
+        _ ->
+          timer:sleep(SleepMSBetweenBatches),
+          case Time < MaxTime - BufferTime of
+            %% we are under time by a significant amount (buffer amount) -- increase batch size
+            true ->
+              dynamic_batch(BatchFunc, Rest, MaxDesiredMS, DesiredMSBuffer, SleepMSBetweenBatches, Mid, Hi * 2);
+            _ ->
+              case Time > MaxTime + BufferTime of
+                %% we are over time by a significant amount (buffer amount) -- decrease batch size
+                true ->
+                  LoAdj = case Lo == Hi of
+                            %% high and low are the same, but we are still over time. Descr batch size bc server might be overloaded
+                            true -> lists:max([1, trunc(Lo / 2)]);
+                            _ -> Lo
+                          end,
+                  dynamic_batch(BatchFunc, Rest, MaxDesiredMS, DesiredMSBuffer, SleepMSBetweenBatches, LoAdj, Mid);
+                _ ->
+                  %% we are within the time and buffer limits (between max time - buffer and max time + buffer) so continue with this batch size
+                  dynamic_batch(BatchFunc, Rest, MaxDesiredMS, DesiredMSBuffer, SleepMSBetweenBatches, Lo, Hi)
+              end
+          end
+      end
+  end
 .

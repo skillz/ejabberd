@@ -42,6 +42,7 @@
 	 store_room/5,
 	 restore_room/3,
 	 forget_room/3,
+	 forget_rooms/3,
 	 create_room/5,
 	 shutdown_rooms/1,
 	 process_disco_info/1,
@@ -175,6 +176,11 @@ restore_room(ServerHost, Host, Name) ->
     LServer = jid:nameprep(ServerHost),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:restore_room(LServer, Host, Name).
+
+forget_rooms(ServerHost, Host, Rooms) ->
+	LServer = jid:nameprep(ServerHost),
+	Mod = gen_mod:db_mod(LServer, ?MODULE),
+	Mod:forget_rooms(LServer, Host, Rooms).
 
 forget_room(ServerHost, Host, Name) ->
     LServer = jid:nameprep(ServerHost),
