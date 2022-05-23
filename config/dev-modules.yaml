@@ -11,9 +11,12 @@ modules:
   mod_pres_counter:
     count: 100
     interval: 60
-  mod_privacy: {}
+  mod_privacy: {
+    cache_size: 50000
+  }
   mod_vcard:
     search: true
+    cache_size: 50000
   mod_admin_extra: {}
   mod_fail2ban:
     c2s_auth_ban_lifetime: 10
@@ -64,4 +67,6 @@ modules:
   mod_register:
     ip_access: trusted_network
     access: register
-  mod_roster: {}
+  mod_roster: {
+    cache_size: 50000
+  }
