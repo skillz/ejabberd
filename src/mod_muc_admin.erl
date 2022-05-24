@@ -37,8 +37,8 @@
 	 rooms_empty_list/1, rooms_empty_destroy/1,
 	 get_user_rooms/2, get_room_occupants/2,
 	 get_room_occupants_number/2, send_direct_invitation/5,
-	 change_room_option/4, get_room_options/2,
-	 set_room_affiliation/4, get_room_affiliations/2, get_room_affiliation/3,
+	 change_room_option/4, get_room_options/2, get_room_summary/4,
+	 set_user_affiliation/3, set_room_affiliation/4, get_room_affiliations/2, get_room_affiliation/3,
 	 web_menu_main/2, web_page_main/2, web_menu_host/3,
 	 subscribe_room/4, unsubscribe_room/2, get_subscribers/2,
 	 web_page_host/3, mod_options/1, get_commands_spec/0]).
@@ -284,6 +284,18 @@ get_commands_spec() ->
 								 {value, string}
 								]}}
 						}}},
+			#ejabberd_commands{name = get_room_summary, tags = [muc_room],
+				desc = "Get room summary: last x messages after a message id",
+				module = ?MODULE, function = get_room_summary,
+				args_desc = ["Service", "Room", "Limit", "Last Message Id"],
+				args_example = ["conference.chat.skillz.com", "81", "10", "abcd-1234-4567890-defg"],
+				args = [{service, binary}, {room, binary}, {limit, binary}, {last_message_id, binary}],
+				result = {messages, {list, {message, {tuple, [{id, string},
+					{from, string},
+					{body, string},
+					{userRole, integer}
+				]}}}}
+			},
      #ejabberd_commands{name = subscribe_room, tags = [muc_room],
 			desc = "Subscribe to a MUC conference",
 			module = ?MODULE, function = subscribe_room,
@@ -313,6 +325,13 @@ get_commands_spec() ->
 		        result_example = ["user2@example.com", "user3@example.com"],
 			args = [{name, binary}, {service, binary}],
 			result = {subscribers, {list, {jid, string}}}},
+			#ejabberd_commands{name = set_user_affiliation, tags = [muc_room],
+				desc = "Change user affiliation for all rooms",
+				module = ?MODULE, function = set_user_affiliation,
+				args_desc = ["Server Host", "Username", "Affiliation to set"],
+				args_example = ["chat.skillz.com", "user1234", "muted"],
+				args = [{host, binary}, {user, binary}, {affiliation, binary}],
+				result = {res, rescode}},
      #ejabberd_commands{name = set_room_affiliation, tags = [muc_room],
 		       desc = "Change an affiliation in a MUC room",
 		       module = ?MODULE, function = set_room_affiliation,
@@ -794,6 +813,24 @@ get_room_state(Room_pid) ->
     {ok, R} = p1_fsm:sync_send_all_state_event(Room_pid, get_state),
     R.
 
+%% @doc Returns the last N messages after the last message id. If the last message is the message id, it returns that message.
+%% Note: Service includes the host prefix, eg: conference.chat.skillz.com
+%% @spec get_room_summary(Service :: binary, RoomName :: binary, LimitIn :: integer, LastMessageId :: binary) -> [{id :: binary, from :: binary, body :: binary, userRole :: integer}, ...]
+get_room_summary(Service, RoomName, LimitIn, LastMessageId) ->
+	Limit = case LimitIn of
+		<<>> -> 999;
+		_ -> try list_to_integer(binary_to_list(LimitIn)) catch _:_ -> 999 end
+	end,
+	case get_room_pid(RoomName, Service) of
+		room_not_found ->
+			{error, room_not_found};
+		Pid ->
+			{ok, RoomSummary} = p1_fsm:sync_send_all_state_event(Pid, {get_room_summary, Limit, LastMessageId}),
+			RoomSummary
+	end
+.
+
+
 %%---------------
 %% Decide
 
@@ -1169,6 +1206,20 @@ set_room_affiliation(Name, Service, JID, AffiliationString) ->
 	error ->
 	    error
     end.
+
+
+%%----------------------------
+%% Change User Affiliation
+%%----------------------------
+
+set_user_affiliation(ServerHost, LUser, NewAffiliation) ->
+	try
+		mod_muc_room:set_user_affiliation(ServerHost, LUser, binary_to_atom(NewAffiliation, latin1)),
+		ok
+	catch _:_ -> ok
+	end
+.
+
 
 %%%
 %%% MUC Subscription
