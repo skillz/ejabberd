@@ -10,7 +10,7 @@
 %% Exports
 -export([send_cas_message/3, send_cas_message/4, send_message/6, get_message_xml_bin/4, get_env/0,
   get_admin_logo/0, get_flag_url/0, get_cas_jid/0, get_host/0, get_host/1,
-  get_uuid/0, dynamic_batch/7, dynamic_batch/6]).
+  get_uuid/0, dynamic_batch/7, dynamic_batch/6, get_value_by_tag/2, get_by_tag/2]).
 
 -include("logger.hrl").
 
@@ -207,4 +207,60 @@ dynamic_batch(BatchFunc, ListToProcess, MaxDesiredMS, DesiredMSBuffer, SleepMSBe
           end
       end
   end
+.
+
+get_by_tag([{xmlel, _, _, _} = El | Rest], TagName) ->
+  case get_by_tag(El, TagName) of
+    none -> get_by_tag(Rest, TagName);
+    Value -> Value
+  end
+;
+
+get_by_tag([{xmlel, _, _, _} = El], TagName) ->
+  get_by_tag(El, TagName)
+;
+
+get_by_tag([], _) ->
+  none
+;
+
+get_by_tag({xmlel, _, _, _} = XmlEl, TagName) ->
+  find_tag_bfs(queue:in(XmlEl, queue:new()), TagName)
+;
+
+get_by_tag(_, _) ->
+  none
+.
+
+find_tag_bfs(Queue, TagName) ->
+  case queue:out(Queue) of
+    {{value, Item}, Queue2} ->
+      case Item of
+        {xmlel, Name, _, Children} = XmlEl ->
+          case Name == TagName of
+            true -> XmlEl;
+            _ ->
+              case Children of
+                [] -> find_tag_bfs(Queue2, TagName);
+                _ ->
+                  NewQueue = lists:foldl(fun(El, Q) ->
+                    queue:in(El, Q)
+                  end, Queue2, Children),
+                  find_tag_bfs(NewQueue, TagName)
+              end
+          end;
+        _ ->
+          find_tag_bfs(Queue2, TagName)
+      end;
+    {empty, _} ->
+      none
+  end
+.
+
+get_value_by_tag(XmlEl, TagName) ->
+   case get_by_tag(XmlEl, TagName) of
+     none -> none;
+     {xmlel, _, _, [{xmlcdata, Value}]} -> Value;
+     XmlEl -> XmlEl
+   end
 .
