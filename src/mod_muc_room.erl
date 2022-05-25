@@ -36,6 +36,7 @@
 	 start/8,
 	 get_role/2,
 	 get_affiliation/2,
+	 set_user_affiliation/3,
 	 is_occupant_or_admin/2,
 	 route/2,
 	 expand_opts/1,
@@ -532,6 +533,47 @@ handle_sync_event(get_config, _From, StateName,
 handle_sync_event(get_state, _From, StateName,
 		  StateData) ->
     {reply, {ok, StateData}, StateName, StateData};
+handle_sync_event({get_room_summary, Limit, LastMessageId}, _From, StateName, StateData) ->
+	History = StateData#state.history,
+	Queue = History#lqueue.queue,
+	{Messages, _, _} = lists:foldr(fun({_, Message, _, _, _}, {AccMessages, Count, LastMessageFound} = Acc) ->
+		case LastMessageFound of
+			true ->
+				Acc;
+			_ ->
+				case Count < Limit of
+					true ->
+						MessageId = xmpp:get_id(Message),
+						case LastMessageId == MessageId of
+							true ->
+								case Count == 0 of
+									true -> %% if the last seen message is the last message, only send the last message
+										{[Message], 1, true};
+									_ -> %% stop acc and return all messages after the last seen message
+										{AccMessages, Count, true}
+								end;
+							_ -> %% keep acc messages bc last message not found yet and limit has not been hit
+								{[Message | AccMessages], Count + 1, LastMessageFound }
+						end;
+					_ -> %% do not acc past limit
+						Acc
+				end
+		end
+	end, {[], 0, false}, p1_queue:to_list(Queue)),
+	Summary = case Messages of
+		[] -> [];
+		List ->
+			lists:map(fun({message, Id, _, _, {jid, FromUser, _, _, _, _, _}, _, _, Texts, _, SubEls, _}) ->
+				Body = xmpp:get_text(Texts),
+				UserRole = case skillz_util:get_value_by_tag(SubEls, "user_role") of
+					none -> 0;
+					Value -> try list_to_integer(binary_to_list(Value)) catch _:_ -> 0 end
+				end,
+				{Id, FromUser, Body, UserRole}
+			end, List)
+	end,
+	{reply, {ok, Summary}, StateName, StateData}
+;
 handle_sync_event({change_config, Config}, _From,
 		  StateName, StateData) ->
     {result, undefined, NSD} = change_config(Config, StateData),
@@ -1312,6 +1354,7 @@ set_affiliation(JID, Affiliation,
 		#state{config = #config{persistent = false}} = StateData,
 		Reason) ->
     set_affiliation_fallback(JID, Affiliation, StateData, Reason);
+
 set_affiliation(JID, Affiliation, StateData, Reason) ->
     ServerHost = StateData#state.server_host,
     Room = StateData#state.room,
@@ -1337,6 +1380,22 @@ set_affiliation(JID, Affiliation, StateData, Reason) ->
         end
     end,
     StateData.
+
+%% @doc set user affiliation for all rooms globally
+%% ServerHost is the host, eg, chat.skillz.com
+%% LUser is the username, eg, 1234
+%% NewAffiliation can be: outcast, muted, none
+%% @spec set_user_affiliation(ServerHost :: binary(), LUser :: binary(), NewAffiliation :: atom()) -> ok
+set_user_affiliation(ServerHost, LUser, NewAffiliation) ->
+	Mod = gen_mod:db_mod(ServerHost, mod_muc),
+	case NewAffiliation of
+		none ->
+			Mod:disable_affiliation(ServerHost, LUser);
+		_ ->
+			Mod:disable_affiliation(ServerHost, LUser),
+			Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
+	end
+.
 
 -spec set_affiliation_fallback(jid(), affiliation(), state(), binary()) -> state().
 set_affiliation_fallback(JID, Affiliation, StateData, Reason) ->

@@ -27,6 +27,7 @@ api_permissions:
       - "kick_session"
       - "set_room_affiliation"
       - "get_online_rooms"
+      - "muc_online_rooms"
       - "get_room_occupants"
       - "destroy_room"
       - "get_room_options"
@@ -38,6 +39,8 @@ api_permissions:
       - "get_blocking_users"
       - "reset_blocking_users"
       - "clear_blocking_users"
+      - "set_user_affiliation"
+      - "get_room_summary"
 
 shaper:
   ##

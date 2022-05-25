@@ -30,7 +30,7 @@
 -behaviour(mod_muc_room).
 
 %% API
--export([init/2, store_room/5, restore_room/3, forget_room/3,
+-export([init/2, store_room/5, restore_room/3, forget_room/3, forget_rooms/3, forget_rooms_batch/3,
    can_use_nick/4, get_rooms/2, get_nick/3, set_nick/4,
    import/3, export/1]).
 -export([register_online_room/4, unregister_online_room/4, find_online_room/3,
@@ -135,6 +135,33 @@ restore_room(LServer, Host, Name) ->
   _ ->
       error
     end.
+
+forget_rooms(LServer, Host, Rooms) ->
+  skillz_util:dynamic_batch(fun(BatchOfRooms) ->
+    forget_rooms_batch(LServer, Host, BatchOfRooms)
+  end, Rooms, 5000, 800, 500, 128)
+.
+
+forget_rooms_batch(LServer, Host, Rooms) ->
+  case Rooms of
+    [] -> ok;
+    _ ->
+      RoomInStr = str:join([[<<"'">>, ejabberd_sql:escape(Room), <<"'">>] || Room <- Rooms], <<",">>),
+      RoomQuery = <<(<<"delete from muc_room where host = '">>)/binary,
+        (ejabberd_sql:escape(Host))/binary, (<<"' and name in (">>)/binary,
+        RoomInStr/binary,
+        (<<")">>)/binary>>,
+      RoomSubscrQuery = <<(<<"delete from muc_room_subscribers where host = '">>)/binary,
+        (ejabberd_sql:escape(Host))/binary, (<<"' and room in (">>)/binary,
+        RoomInStr/binary,
+        (<<")">>)/binary>>,
+      F = fun () ->
+        ejabberd_sql:sql_query_t(RoomQuery),
+        ejabberd_sql:sql_query_t(RoomSubscrQuery)
+      end,
+      ejabberd_sql:sql_transaction(LServer, F)
+  end
+.
 
 forget_room(LServer, Host, Name) ->
     F = fun () ->
