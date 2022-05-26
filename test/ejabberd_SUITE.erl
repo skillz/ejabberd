@@ -457,36 +457,39 @@ db_tests(DB) when DB == mnesia; DB == redis ->
 
 db_tests(_) ->
   [{single_user, [sequence],
-    [test_register,
-      legacy_auth_tests(),
-      auth_plain,
-      auth_md5,
-      presence_broadcast,
-      last,
-      roster_tests:single_cases(),
-      private_tests:single_cases(),
-      privacy_tests:single_cases(),
-      vcard_tests:single_cases(),
-      pubsub_tests:single_cases(),
-      muc_tests:single_cases(),
-      offline_tests:single_cases(),
-      mam_tests:single_cases(),
-      push_tests:single_cases(),
-      test_unregister]}
+    [
+      test_register,
+%%      legacy_auth_tests(),
+%%      auth_plain,
+%%      auth_md5,
+%%      presence_broadcast,
+%%      last,
+%%      roster_tests:single_cases(),
+%%      private_tests:single_cases(),
+%%      privacy_tests:single_cases(),
+%%      vcard_tests:single_cases(),
+%%      pubsub_tests:single_cases(),
+%%      muc_tests:single_cases(),
+      skillz_tests:single_cases() %%,
+%%      offline_tests:single_cases(),
+%%      mam_tests:single_cases(),
+%%      push_tests:single_cases(),
+%%      test_unregister
+    ]}
   ] ++
   [
     {multiple_user, [sequence],
       [
-        muc_tests:master_slave_cases(),
-        privacy_tests:master_slave_cases(),
-        pubsub_tests:master_slave_cases(),
-        roster_tests:master_slave_cases(),
-        offline_tests:master_slave_cases(),
-        mam_tests:master_slave_cases(),
-        vcard_tests:master_slave_cases(),
-        announce_tests:master_slave_cases(),
-        carbons_tests:master_slave_cases(),
-        push_tests:master_slave_cases()
+%%        muc_tests:master_slave_cases(),
+%%        privacy_tests:master_slave_cases(),
+%%        pubsub_tests:master_slave_cases(),
+%%        roster_tests:master_slave_cases(),
+%%        offline_tests:master_slave_cases(),
+%%        mam_tests:master_slave_cases(),
+%%        vcard_tests:master_slave_cases(),
+%%        announce_tests:master_slave_cases(),
+%%        carbons_tests:master_slave_cases(),
+%%        push_tests:master_slave_cases()
       ]
     }
   ]
@@ -548,8 +551,8 @@ groups() ->
 %%    {ldap, [sequence], ldap_tests()},
 %%    {extauth, [sequence], extauth_tests()},
 %%    {no_db, [sequence], no_db_tests()},
-    {component, [sequence], component_tests()},
-    {s2s, [sequence], s2s_tests()},
+%%    {component, [sequence], component_tests()},
+%%    {s2s, [sequence], s2s_tests()},
 %%    {mnesia, [sequence], db_tests(mnesia)},
 %%    {redis, [sequence], db_tests(redis)},
     {mysql, [sequence], db_tests(mysql)} %% ,
@@ -570,8 +573,8 @@ all() ->
 %%    {group, sqlite},
 %%    {group, extauth},
 %%    {group, riak},
-    {group, component},
-    {group, s2s},
+%%    {group, component},
+%%    {group, s2s},
     stop_ejabberd]
 .
 
