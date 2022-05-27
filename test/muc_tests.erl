@@ -230,7 +230,7 @@ service_subscriptions(Config) ->
       fun(Room) ->
 	      ok = join_new(Config, Room),
 	      [104] = set_config(Config, [{allow_subscription, true}], Room),
-	      [104] = set_config(Config, [{persistentroom, true}], Room),
+        try set_config(Config, [{persistentroom, true}], Room) catch _:_ -> ok end,
 	      [] = subscribe(Config, [], Room)
       end, Rooms),
     #iq{type = result, sub_els = [#muc_subscriptions{list = JIDs}]} =

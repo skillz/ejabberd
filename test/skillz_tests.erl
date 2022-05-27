@@ -6,10 +6,11 @@
 
 %% API
 -compile(export_all).
--import(suite, [disconnect/1, muc_room_jid/1, my_jid/1, server_jid/1, send_recv/2, recv_message/1,
+-import(suite, [disconnect/1, muc_room_jid/1, my_jid/1, muc_jid/1, server_jid/1, send_recv/2, recv_message/1, recv_iq/1,
     send/2, recv/1, wait_for_master/1, wait_for_slave/1, close_socket/1, set_opt/3]).
 
 -include("suite.hrl").
+-include("jid.hrl").
 
 %%%===================================================================
 %%% API
@@ -21,13 +22,30 @@ single_cases() ->
     {skillz_single, [sequence], [
         single_test(get_value_by_tag),
         single_test(get_resource_of_jid_in_room),
-        single_test(dynamic_batch)
+        single_test(dynamic_batch),
+        single_test(get_subscribed_rooms),
+        single_test(get_vcards)
     ]}
 .
 
 get_value_by_tag(Config) ->
-    <<"my-role">> = skillz_util:get_value_by_tag(
-        {xmlel, <<"root">>, [], [{xmlel, <<"foo">>, [], []}, {xmlel, <<"user_role">>, [], [{xmlcdata, <<"my-role">>}]}]},
+    <<"my-role-1">> = skillz_util:get_value_by_tag(
+        {xmlel, <<"root">>, [], [{xmlel, <<"foo">>, [], []}, {xmlel, <<"user_role">>, [], [{xmlcdata, <<"my-role-1">>}]}]},
+        <<"user_role">>
+    ),
+
+    <<"my-role-2">> = skillz_util:get_value_by_tag(
+        [{xmlel, <<"root">>, [], [{xmlel, <<"foo">>, [], []}, {xmlel, <<"user_role">>, [], [{xmlcdata, <<"my-role-2">>}]}]}],
+        <<"user_role">>
+    ),
+
+    <<"my-role-3">> = skillz_util:get_value_by_tag(
+        [foo, bar, {xmlel, <<"root">>, [], [{xmlel, <<"foo">>, [], []}, {xmlel, <<"user_role">>, [], [{xmlcdata, <<"my-role-3">>}]}]}],
+        <<"user_role">>
+    ),
+
+    <<"my-role-4">> = skillz_util:get_value_by_tag(
+        [{xmlel, <<"root">>, [], []}, bar, {xmlel, <<"root">>, [], [{xmlel, <<"foo">>, [], []}, {xmlel, <<"user_role">>, [], [{xmlcdata, <<"my-role-4">>}]}]}],
         <<"user_role">>
     )
 .
@@ -38,6 +56,7 @@ get_resource_of_jid_in_room(Config) ->
     RoomJid = {jid, Name, Host, _, _, _, _} = muc_room_jid(Config),
     muc_tests:join_new(Config, RoomJid),
     MyNick = skillz_util:get_resource_of_jid_in_room(Host, MyJidStr, Name, "moderator", none),
+    muc_tests:leave(Config),
     disconnect(Config)
 .
 
@@ -99,6 +118,26 @@ dynamic_batch(Config) ->
     disconnect(Config)
 .
 
+get_subscribed_rooms(Config) ->
+    subscribe_to_rooms(Config),
+    Server = ?config(server, Config),
+    #jid{server = Service} = muc_jid(Config),
+    MyJid = jid:remove_resource(my_jid(Config)),
+    SubscribedRooms = mod_muc_sql:get_subscribed_rooms(Server, Service, MyJid),
+    5 = length(SubscribedRooms),
+    unsubscribe_from_rooms(Config),
+    disconnect(Config)
+.
+
+get_vcards(Config) ->
+    PrimaryJID = my_jid(Config),
+    NoOneJID = jid:decode(<<"doesnotmatter@mysql.localhost">>),
+    #iq{type = result, sub_els = SubEls} = send_recv(Config, #iq{type = get, from = PrimaryJID, to = NoOneJID, sub_els = [
+        #vcard_temp{jabberid = <<"2247494055+2247494059">>}
+    ]}),
+    [{xmlel, <<"vCards">>, [], []}] = SubEls
+.
+
 %%%===================================================================
 %%% Master-slave tests
 %%%===================================================================
@@ -117,4 +156,37 @@ master_slave_test(T) ->
     {list_to_atom("skillz_" ++ atom_to_list(T)), [parallel],
     [list_to_atom("skillz_" ++ atom_to_list(T) ++ "_master"),
     list_to_atom("skillz_" ++ atom_to_list(T) ++ "_slave")]}
+.
+
+subscribe_to_rooms(Config) ->
+    MUC = #jid{server = Service} = muc_jid(Config),
+    Rooms = lists:sort(
+        lists:map(
+            fun(I) ->
+                RoomName = integer_to_binary(I),
+                jid:make(RoomName, Service)
+            end, lists:seq(7, 11))), %% 7-11 to not interfere w/ muc_tests' 1-5
+    lists:foreach(
+        fun(Room) ->
+            ok = muc_tests:join_new(Config, Room),
+            [104] = muc_tests:set_config(Config, [{allow_subscription, true}], Room),
+            [104] = muc_tests:set_config(Config, [{persistentroom, true}], Room),
+            [] = muc_tests:subscribe(Config, [], Room)
+        end, Rooms),
+    send_recv(Config, #iq{type = get, to = MUC, sub_els = [#muc_subscriptions{}]})
+.
+
+unsubscribe_from_rooms(Config) ->
+    #jid{server = Service} = muc_jid(Config),
+    Rooms = lists:sort(
+        lists:map(
+            fun(I) ->
+                RoomName = integer_to_binary(I),
+                jid:make(RoomName, Service)
+            end, lists:seq(7, 11))), %% 7-11 to not interfere w/ muc_tests' 1-5
+    lists:foreach(
+        fun(Room) ->
+            ok = muc_tests:unsubscribe(Config, Room),
+            ok = muc_tests:leave(Config, Room)
+        end, Rooms)
 .

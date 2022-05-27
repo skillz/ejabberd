@@ -77,7 +77,7 @@ end_per_suite(_Config) ->
     application:stop(ejabberd).
 
 -define(BACKENDS, [
-%%  mnesia,
+  mnesia,
 %%  redis,
   mysql %% ,
 %%  pgsql,
@@ -392,8 +392,9 @@ no_db_tests() ->
      auth_external_invalid_cert,
      sm_tests:single_cases(),
      sm_tests:master_slave_cases(),
-     muc_tests:single_cases(),
-     muc_tests:master_slave_cases(),
+     %% Skillz NOTE: mucs will always be persistent in some DB, not mnesia
+     %% muc_tests:single_cases(),
+     %% muc_tests:master_slave_cases(),
      proxy65_tests:single_cases(),
      proxy65_tests:master_slave_cases(),
      replaced_tests:master_slave_cases()].
@@ -436,14 +437,16 @@ db_tests(DB) when DB == mnesia; DB == redis ->
       privacy_tests:single_cases(),
       vcard_tests:single_cases(),
       pubsub_tests:single_cases(),
-      muc_tests:single_cases(),
+      %% Skillz NOTE: mucs will always be persistent in some DB, not mnesia
+      %% muc_tests:single_cases(),
       offline_tests:single_cases(),
       mam_tests:single_cases(),
       carbons_tests:single_cases(),
       csi_tests:single_cases(),
       push_tests:single_cases(),
       test_unregister]},
-    muc_tests:master_slave_cases(),
+    %% Skillz NOTE: mucs will always be persistent in some DB, not mnesia
+    %% muc_tests:master_slave_cases(),
     privacy_tests:master_slave_cases(),
     pubsub_tests:master_slave_cases(),
     roster_tests:master_slave_cases(),
@@ -459,37 +462,37 @@ db_tests(_) ->
   [{single_user, [sequence],
     [
       test_register,
-%%      legacy_auth_tests(),
-%%      auth_plain,
-%%      auth_md5,
-%%      presence_broadcast,
-%%      last,
-%%      roster_tests:single_cases(),
-%%      private_tests:single_cases(),
-%%      privacy_tests:single_cases(),
-%%      vcard_tests:single_cases(),
-%%      pubsub_tests:single_cases(),
-%%      muc_tests:single_cases(),
-      skillz_tests:single_cases() %%,
-%%      offline_tests:single_cases(),
-%%      mam_tests:single_cases(),
-%%      push_tests:single_cases(),
-%%      test_unregister
+      legacy_auth_tests(),
+      auth_plain,
+      auth_md5,
+      presence_broadcast,
+      last,
+      roster_tests:single_cases(),
+      private_tests:single_cases(),
+      privacy_tests:single_cases(),
+      vcard_tests:single_cases(),
+      pubsub_tests:single_cases(),
+      muc_tests:single_cases(),
+      skillz_tests:single_cases(),
+      offline_tests:single_cases(),
+      mam_tests:single_cases(),
+      push_tests:single_cases(),
+      test_unregister
     ]}
   ] ++
   [
     {multiple_user, [sequence],
       [
-%%        muc_tests:master_slave_cases(),
-%%        privacy_tests:master_slave_cases(),
-%%        pubsub_tests:master_slave_cases(),
-%%        roster_tests:master_slave_cases(),
-%%        offline_tests:master_slave_cases(),
-%%        mam_tests:master_slave_cases(),
-%%        vcard_tests:master_slave_cases(),
-%%        announce_tests:master_slave_cases(),
-%%        carbons_tests:master_slave_cases(),
-%%        push_tests:master_slave_cases()
+        muc_tests:master_slave_cases(),
+        privacy_tests:master_slave_cases(),
+        pubsub_tests:master_slave_cases(),
+        roster_tests:master_slave_cases(),
+        offline_tests:master_slave_cases(),
+        mam_tests:master_slave_cases(),
+        vcard_tests:master_slave_cases(),
+        announce_tests:master_slave_cases(),
+        carbons_tests:master_slave_cases(),
+        push_tests:master_slave_cases()
       ]
     }
   ]
@@ -548,14 +551,15 @@ s2s_tests() ->
 
 groups() ->
   [
+    {component, [sequence], component_tests()},
+    {s2s, [sequence], s2s_tests()},
+    {mysql, [sequence], db_tests(mysql)},
+    {no_db, [sequence], no_db_tests()},
+    {mnesia, [sequence], db_tests(mnesia)}
+
 %%    {ldap, [sequence], ldap_tests()},
 %%    {extauth, [sequence], extauth_tests()},
-%%    {no_db, [sequence], no_db_tests()},
-%%    {component, [sequence], component_tests()},
-%%    {s2s, [sequence], s2s_tests()},
-%%    {mnesia, [sequence], db_tests(mnesia)},
 %%    {redis, [sequence], db_tests(redis)},
-    {mysql, [sequence], db_tests(mysql)} %% ,
 %%    {pgsql, [sequence], db_tests(pgsql)},
 %%    {sqlite, [sequence], db_tests(sqlite)},
 %%    {riak, [sequence], db_tests(riak)}
@@ -564,17 +568,18 @@ groups() ->
 
 all() ->
   [
-%%    {group, ldap},
-%%    {group, no_db},
-%%    {group, mnesia},
-%%    {group, redis},
     {group, mysql},
+    {group, component},
+    {group, s2s},
+    {group, no_db},
+    {group, mnesia},
+
+%%    {group, ldap},
+%%    {group, redis},
 %%    {group, pgsql},
 %%    {group, sqlite},
 %%    {group, extauth},
 %%    {group, riak},
-%%    {group, component},
-%%    {group, s2s},
     stop_ejabberd]
 .
 

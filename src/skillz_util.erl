@@ -224,6 +224,10 @@ get_by_tag([], _) ->
   none
 ;
 
+get_by_tag([_ | Rest], TagName) ->
+  get_by_tag(Rest, TagName)
+;
+
 get_by_tag({xmlel, _, _, _} = XmlEl, TagName) ->
   find_tag_bfs(queue:in(XmlEl, queue:new()), TagName)
 ;
