@@ -822,8 +822,7 @@ get_room_summary(Service, RoomName, LimitIn, LastMessageId) ->
 		_ -> try list_to_integer(binary_to_list(LimitIn)) catch _:_ -> 999 end
 	end,
 	case get_room_pid(RoomName, Service) of
-		room_not_found ->
-			{error, room_not_found};
+		room_not_found -> [];
 		Pid ->
 			{ok, RoomSummary} = p1_fsm:sync_send_all_state_event(Pid, {get_room_summary, Limit, LastMessageId}),
 			RoomSummary
