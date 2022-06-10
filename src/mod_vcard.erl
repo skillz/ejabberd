@@ -325,8 +325,19 @@ get_vcard(LUser, LServer) ->
 
 -spec get_vcards(binary(), binary()) -> [{list(), xmlel()}] | error.
 get_vcards(LUsers, LServer) ->
-	Mod = gen_mod:db_mod(LServer, ?MODULE),
-	Mod:get_vcards(LUsers, LServer)
+	VCards = lists:map(fun(LUser) ->
+		{ LUser, get_vcard(LUser, LServer) }
+	end, LUsers),
+	#xmlel{name = <<"vCards">>, attrs = [{<<"xmlns">>, <<"jabber:client">>}], children = [
+		case VCard of
+			error -> #xmlel{
+				name = <<"vCard">>,
+				attrs = [{<<"xmlns">>, <<"jabber:client">>}, {<<"username">>, Username}],
+				children = [ {xmlcdata, <<"error">>} ]
+			};
+			_ -> VCard#xmlel{attrs = VCard#xmlel.attrs ++ [{<<"username">>, Username}]}
+		end || {Username, [VCard]} <- VCards
+	]}
 .
 
 get_vcard_field(LUser, LServer, FieldName) ->
