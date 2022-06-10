@@ -533,9 +533,13 @@ handle_sync_event(get_config, _From, StateName,
 handle_sync_event(get_state, _From, StateName,
 		  StateData) ->
     {reply, {ok, StateData}, StateName, StateData};
-handle_sync_event({get_room_summary, Limit, LastMessageId}, _From, StateName, StateData) ->
+handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, StateData) ->
 	History = StateData#state.history,
 	Queue = History#lqueue.queue,
+	Limit = case LimitIn of
+		_ when LimitIn < 0 ->  5;
+		_ when LimitIn > 50 -> 50
+	end,
 	{Messages, _, _} = lists:foldr(fun({_, Message, _, _, _}, {AccMessages, Count, LastMessageFound} = Acc) ->
 		case LastMessageFound of
 			true ->

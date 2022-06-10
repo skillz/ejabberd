@@ -818,8 +818,8 @@ get_room_state(Room_pid) ->
 %% @spec get_room_summary(Service :: binary, RoomName :: binary, LimitIn :: integer, LastMessageId :: binary) -> [{id :: binary, from :: binary, body :: binary, userRole :: integer}, ...]
 get_room_summary(Service, RoomName, LimitIn, LastMessageId) ->
 	Limit = case LimitIn of
-		<<>> -> 999;
-		_ -> try list_to_integer(binary_to_list(LimitIn)) catch _:_ -> 999 end
+		<<>> -> 5;
+		_ -> try list_to_integer(binary_to_list(LimitIn)) catch _:_ -> 5 end
 	end,
 	case get_room_pid(RoomName, Service) of
 		room_not_found -> [];
