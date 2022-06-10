@@ -819,6 +819,7 @@ get_room_state(Room_pid) ->
 get_room_summary(Service, RoomName, LimitIn, LastMessageId) ->
 	Limit = case LimitIn of
 		<<>> -> 5;
+		_ when is_integer(LimitIn) -> LimitIn;
 		_ -> try list_to_integer(binary_to_list(LimitIn)) catch _:_ -> 5 end
 	end,
 	case get_room_pid(RoomName, Service) of
