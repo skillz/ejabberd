@@ -840,43 +840,44 @@ decide_rooms(Method, Rooms, ServerHost, Last_allowed) ->
 
 decide_room(unused, {_Room_name, _Host, Room_pid}, ServerHost, Last_allowed) ->
 	try
-		case is_process_alive(Room_pid) of
-			true ->
-				C = get_room_config(Room_pid),
-				Persistent = C#config.persistent,
+			C = get_room_config(Room_pid),
+			Persistent = C#config.persistent,
 
-				S = get_room_state(Room_pid),
-				Just_created = S#state.just_created,
+			S = get_room_state(Room_pid),
+			Just_created = S#state.just_created,
 
-				Room_users = S#state.users,
-				Num_users = maps:size(Room_users),
+			Room_users = S#state.users,
+			Num_users = maps:size(Room_users),
 
-				History = (S#state.history)#lqueue.queue,
-				Ts_now = calendar:universal_time(),
-				HistorySize = gen_mod:get_module_opt(ServerHost, mod_muc, history_size),
-				JustCreated = S#state.just_created,
-				{Has_hist, Last} = case p1_queue:is_empty(History) of
-						 true when (HistorySize == 0) or (JustCreated == true) ->
-								 {false, 0};
-						 true ->
-								 Ts_diff = (misc:now_to_usec(now())
-								- S#state.just_created) div 1000000,
-								 {false, Ts_diff};
-						 false ->
-								 Last_message = get_queue_last(History),
-								 Ts_last = calendar:now_to_universal_time(
-								 element(4, Last_message)),
-								 Ts_diff = calendar:datetime_to_gregorian_seconds(Ts_now) - calendar:datetime_to_gregorian_seconds(Ts_last),
-								 {true, Ts_diff}
-							 end,
-				case {Persistent, Just_created, Num_users, Has_hist, seconds_to_days(Last)} of
-					{_true, JC, 0, _, Last_days} when (Last_days >= Last_allowed) and (JC /= true) -> true;
-					_ -> false
-				end;
-			_ -> true %% process is not alive, so it is no longer used and may be removed
+			History = (S#state.history)#lqueue.queue,
+			Ts_now = calendar:universal_time(),
+			HistorySize = gen_mod:get_module_opt(ServerHost, mod_muc, history_size),
+			JustCreated = S#state.just_created,
+			{Has_hist, Last} = case p1_queue:is_empty(History) of
+					 true when (HistorySize == 0) or (JustCreated == true) ->
+							 {false, 0};
+					 true ->
+							 Ts_diff = (misc:now_to_usec(now())
+							- S#state.just_created) div 1000000,
+							 {false, Ts_diff};
+					 false ->
+							 Last_message = get_queue_last(History),
+							 Ts_last = calendar:now_to_universal_time(
+							 element(4, Last_message)),
+							 Ts_diff = calendar:datetime_to_gregorian_seconds(Ts_now) - calendar:datetime_to_gregorian_seconds(Ts_last),
+							 {true, Ts_diff}
+						 end,
+			case {Persistent, Just_created, Num_users, Has_hist, seconds_to_days(Last)} of
+				{_true, JC, 0, _, Last_days} when (Last_days >= Last_allowed) and (JC /= true) -> true;
+				_ -> false
+			end
+	catch _Type:Error ->
+		case Error of
+			%% room appears to not exist anymore bc get_config is a func on every room, so it is safe to remove
+			{noproc, {p1_fsm, sync_send_all_state_event, [_Pid, get_config]}} -> true;
+			%% some other error occurred; so to be safe, do not remove room
+			_ -> false
 		end
-	catch _:_ ->
-		false %% an error occurred so to be safe, do not remove room
 	end
 ;
 decide_room(empty, {Room_name, Host, _Room_pid}, ServerHost, _Last_allowed) ->
