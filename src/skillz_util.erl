@@ -32,7 +32,7 @@ send_message(FromJidBin, RoomNameBin, SenderDisplayNameBin, BodyBin, FromUserTyp
 
 get_message_xml_bin(FromJidBin, ToJidBin, SenderDisplayNameBin, BodyBin) ->
   UserId = "-1", %% unused but required as part of schema in SDK
-  UserRole = "3", %% Admin role in SDK
+  UserRole = "2", %% Mod role in SDK
   UserMentions = "@none", %% unused but required as part of schema in SDK
   MessageType = "0", %% always zero
   binary:list_to_bin(lists:flatten(io_lib:format(
