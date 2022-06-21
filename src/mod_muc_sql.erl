@@ -139,7 +139,7 @@ restore_room(LServer, Host, Name) ->
 forget_rooms(LServer, Host, Rooms) ->
   skillz_util:dynamic_batch(fun(BatchOfRooms) ->
     forget_rooms_batch(LServer, Host, BatchOfRooms)
-  end, Rooms, 5000, 800, 500, 128)
+  end, Rooms, 1300, 200, 3000, 8)
 .
 
 forget_rooms_batch(LServer, Host, Rooms) ->

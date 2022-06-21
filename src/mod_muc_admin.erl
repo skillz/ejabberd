@@ -920,7 +920,8 @@ act_on_rooms(Method, destroy, Rooms, ServerHost) ->
 				global -> find_serverhost(Host, ServerHosts);
 				O -> O
 		 	end,
-			mod_muc:forget_rooms(SH, Host, [Name || {Name, _, _} <- Rooms])
+			RoomNames = [Name || {Name, _, _} <- Rooms],
+			rpc:async_call(node(), mod_muc_sql, forget_rooms, [SH, Host, RoomNames])
 	end
 ;
 
