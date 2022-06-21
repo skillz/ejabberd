@@ -92,9 +92,9 @@ add_uuid_as_resource(HostBin, JidBin, RoomNameBin, UserType, DefaultResource) ->
 
 get_admin_logo() ->
   case get_env() of
-    "production" -> "https://s3.amazonaws.com/skillz-content-prod/default-profile-pics/Skillz-Profile-Picture.png";
-    "staging" ->    "https://s3.amazonaws.com/skillz-content-stage/default-profile-pics/Skillz-Profile-Picture.png";
-    _ ->            "https://s3.amazonaws.com/skillz-content-islay/default-profile-pics/Skillz-Profile-Picture.png"
+    "production" -> "https://s3.amazonaws.com/skillz-content-prod/default-profile-pics/Skillz-Profile-Picture-20220512.png";
+    "staging" ->    "https://s3.amazonaws.com/skillz-content-stage/default-profile-pics/Skillz-Profile-Picture-20220512.png";
+    _ ->            "https://s3.amazonaws.com/skillz-content-dev/default-profile-pics/Skillz-Profile-Picture-20220512.png"
   end
 .
 
