@@ -137,9 +137,21 @@ restore_room(LServer, Host, Name) ->
     end.
 
 forget_rooms(LServer, Host, Rooms) ->
-  skillz_util:dynamic_batch(fun(BatchOfRooms) ->
-    forget_rooms_batch(LServer, Host, BatchOfRooms)
-  end, Rooms, 1300, 200, 3000, 8)
+  forget_rooms(LServer, Host, Rooms, length(Rooms), 32)
+.
+
+forget_rooms(LServer, Host, Rooms, RoomsLen, BatchSize) ->
+  {BatchRooms, Rest} = case RoomsLen > BatchSize of
+    true -> lists:split(BatchSize, Rooms);
+    _ -> {Rooms, []}
+  end,
+  forget_rooms_batch(LServer, Host, BatchRooms),
+  case Rest of
+    [] -> ok;
+    _ ->
+      timer:sleep(30000),
+      forget_rooms(LServer, Host, Rest, RoomsLen - BatchSize, BatchSize)
+  end
 .
 
 forget_rooms_batch(LServer, Host, Rooms) ->
