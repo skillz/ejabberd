@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!DOCTYPE tsung SYSTEM "/home/jenkins/tsung/tsung-1.0.dtd">
 <tsung version="1.0" loglevel="notice">
-    <!-- TO RUN:   tsung -f realistic-load-chat.xml -l . start -->
+    <!-- TO RUN:   tsung -f write-heavy-load-chat.xml -l . start -->
     <!-- ANALYSIS: cd LOG_DIR && perl /usr/bin/tsung_stats.pl -->
     <!-- VIEW:     firefox report.html -->
     <!-- CPU/MEMORY STATS DURING RUN: 
@@ -20,7 +20,7 @@
 
     <load duration="10" unit="minute">
         <arrivalphase phase="1" duration="10" unit="minute">
-            <users arrivalrate="30" unit="second"></users>
+            <users arrivalrate="60" unit="second"></users>
         </arrivalphase>
     </load>
     
@@ -36,14 +36,59 @@
         <!-- delimiter in csv -->
         <option type="ts_jabber" name="fileid_delimiter" value=";" />
         <!-- disables the default setting of appending an incr number to each user so we can just use the csv for users -->
-        <option type="ts_jabber" name="userid_max" value="0"></option>
+        <option type="ts_jabber" name="userid_max" value="0" />
         <!-- always get users from the csv --> 
         <option type="ts_jabber" name="random_from_fileid" value='userdb' />
         <option type="ts_jabber" name="offline_from_fileid" value='userdb' />
     </options>
 
     <sessions>
-        <session probability="100" name="sasl" type="ts_jabber">
+        <session probability="70" name="reads" type="ts_jabber">
+            <!-- read username and password into variables -->
+            <setdynvars sourcetype="file" fileid="userdb" delimiter=";" order="iter">
+                <var name="username" />
+                <var name="password" />
+            </setdynvars>
+
+            <!-- connect to server using username and password -->
+            <transaction name="connect">
+                <request subst="true">
+                    <jabber type="connect" ack="local" resource="conference">
+                        <xmpp_authenticate username="%%_username%%" passwd="%%_password%%" />
+                    </jabber>
+                </request>
+            </transaction>
+
+            <thinktime value="2" />
+
+            <!-- plain auth into server (will use the username and password above with a base64 encoding) -->
+            <transaction name="authenticate">
+                <request> <jabber type="auth_sasl" ack="local" resource="conference"></jabber></request>
+                <request> <jabber type="connect" ack="local" resource="conference"></jabber> </request>
+                <request> <jabber type="auth_sasl_bind" ack="local" resource="conference" ></jabber></request>
+                <request> <jabber type="auth_sasl_session" ack="local" resource="conference" ></jabber></request>
+            </transaction>
+
+            <thinktime value="2" />
+
+            <!-- run get_subscribed_rooms-->
+            <transaction name="get_subscribed_rooms">
+                <request subst="true">
+                    <jabber type="raw" ack="local" data="&lt;iq from=&apos;%%_username%%@chat-admin.staging.skillz.com&apos; to=&apos;conference.chat.staging.skillz.com&apos; type=&apos;get&apos; id=&apos;%%ts_user_server:get_unique_id%%&apos;&gt;   &lt;subscriptions xmlns=&apos;urn:xmpp:mucsub:0&apos;&gt;&lt;/subscriptions&gt; &lt;/iq&gt;" />
+                </request>
+            </transaction>
+
+            <!-- Get offline messages. -->
+            <transaction name="get_offline_messages">
+                <request subst="true">
+                    <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
+                </request>
+                <request subst="true">
+                    <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#items&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
+                </request>
+            </transaction>
+        </session>
+        <session probability="30" name="writes" type="ts_jabber">
             <!-- read username and password into variables -->
             <setdynvars sourcetype="file" fileid="userdb" delimiter=";" order="iter">
                 <var name="username" />
@@ -59,7 +104,7 @@
                 </request>
             </transaction>
             
-            <thinktime value="5" />
+            <thinktime value="2" />
 
             <!-- plain auth into server (will use the username and password above with a base64 encoding) -->
             <transaction name="authenticate">
@@ -71,62 +116,30 @@
 
             <thinktime value="2" />
 
-            <transaction name="roster_get">
-                <request>  
-                    <jabber type="iq:roster:get" ack="local"/> 
-                </request>
-            </transaction>
-
-            <request>
-                <jabber type="presence:initial" ack="no_ack" />
-            </request>
-
-            <!-- run get multiple vcards-->
-            <for from="1" to="10" incr="1" var="i">
-                <setdynvars sourcetype="random_number" start="0" end="2048">
-                    <var name="rndint" />
-                </setdynvars>
-                <transaction name="get_vcard">
-                    <request subst="true">
-                        <jabber type="raw" ack="local" data="&lt;iq from=&apos;%%_username%%@chat-admin.staging.skillz.com&apos; to=&apos;load-test-%%_rndint%%@chat-admin.staging.skillz.com&apos; type=&apos;get&apos; id=&apos;%%ts_user_server:get_unique_id%%&apos;&gt;   &lt;vCard xmlns=&apos;vcard-temp&apos;&gt; &lt;/vCard&gt; &lt;/iq&gt;" />
-                    </request>
-                </transaction>
-            </for>
-
-            <thinktime value="2" />
-
-            <!-- Get offline messages. -->
-            <transaction name="get_offline_messages">
-               <request subst="true">
-                  <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
-               </request>
-               <request subst="true">
-                  <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#items&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
-               </request>
-            </transaction>
-
-            <setdynvars sourcetype="random_string" length="10">
-                <var name="nick1" />
-            </setdynvars>
-
             <!-- Disco info on room. No ack. -->
             <!-- Raw, join room get 50 messages. Ack. -->
             <setdynvars sourcetype="random_number" start="1" end="20">
                 <var name="room_number" />
             </setdynvars>
+            <setdynvars sourcetype="random_string" length="10">
+                <var name="nick1" />
+            </setdynvars>
             <transaction name="join_room">
                 <request subst="true">
                     <jabber type="raw" ack="local" data="&lt;iq  xmlns=&quot;jabber:client&quot; type=&quot;get&quot; to=&quot;test-room-%%_room_number%%@conference.chat.staging.skillz.com&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;  &lt;query   xmlns=&quot;http://jabberd.org/protocol/disco#info&quot; /&gt;  &lt;/iq&gt;" />
                 </request>
+                <thinktime value="2" />
                 <request subst="true">
                     <jabber type="raw" ack="local" data="&lt;presence   xmlns=&quot;jabber:client&quot; to=&quot;test-room-%%_room_number%%@conference.chat.staging.skillz.com/%%_nick1%%&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt; &lt;x xmlns=&quot;http://jabber.org/protocol/muc&quot;&gt; &lt;history maxstanzas=&quot;50&quot; /&gt;   &lt;/x&gt;   &lt;c   xmlns=&quot;http://jabber.org/protocol/caps&quot; node=&quot;https://stanza.io&quot; hash=&quot;sha-1&quot; ver=&quot;4ArXvj+KpyleAhwHHCoKUPRQRto=Rto=&quot; /&gt;   &lt;/presence&gt;" />
                 </request>
+                <thinktime value="2" />
+                <request subst="true">
+                    <jabber type="raw" ack="local" data="&lt;iq xmlns=&quot;jabber:client&quot; type=&quot;set&quot; from=&quot;%%_username%%@chat-admin.staging.skillz.com&quot; to=&quot;test-room-%%_room_number%%@conference.chat.staging.skillz.com&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt; &lt;subscribe xmlns=&quot;urn:xmpp:mucsub:0&quot; nick=&quot;%%_nick1%%&quot; jid=&quot;%%_username%%@chat-admin.staging.skillz.com&quot;&gt; &lt;event node=&quot;urn:xmpp:mucsub:nodes:messages&quot; /&gt;&lt;event node=&quot;urn:xmpp:mucsub:nodes:affiliations&quot; /&gt;&lt;event node=&quot;urn:xmpp:mucsub:nodes:subject&quot; /&gt;&lt;event node=&quot;urn:xmpp:mucsub:nodes:config&quot; /&gt; &lt;/subscribe&gt; &lt;/iq&gt;" />
+                </request>
             </transaction>
 
-            <thinktime value="15" />
-
             <!-- Send messages. -->
-            <for from="1" to="50" incr="1" var="i">
+            <for from="1" to="100" incr="1" var="i">
                 <transaction name="online_chat">
                    <setdynvars sourcetype="random_string" length="40">
                       <var name="message_xml_id" />
@@ -139,21 +152,7 @@
                        <jabber type="raw" ack="no_ack" data="&lt;message xmlns=&quot;jabber:client&quot; to=&quot;test-room-%%_room_number%%@conference.chat.staging.skillz.com&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot; type=&quot;groupchat&quot;&gt; &lt;body&gt;%%_random_message%%&lt;/body&gt; &lt;skillz_sdk xmlns=&quot;xmpp:skillz&quot;&gt; &lt;avatar_url&gt;https://cdn.staging.skillz.com/profile-pics/thumbnail/c11828ac-38b9-4b60-a701-8cd4d6d57c49&lt;/avatar_url&gt; &lt;flag_url&gt;https://cdn.staging.skillz.com/flags/US.png&lt;/flag_url&gt; &lt;user_id&gt;%%_username%%&lt;/user_id&gt; &lt;username&gt;%%_username%%&lt;/username&gt; &lt;user_role&gt;0&lt;/user_role&gt; &lt;user_mentions&gt;[]&lt;/user_mentions&gt; &lt;message_type&gt;0&lt;/message_type&gt; &lt;/skillz_sdk&gt; &lt;/message&gt;" />
                    </request>
                 </transaction>
-                <thinktime value="10" random="true" />
-            </for>
-
-            <thinktime value="2" random="false" />
-
-            <for from="0" to="2" incr="1" var="i">
-                <transaction name="keep_alive_while_disco">
-                  <request subst="true">
-                     <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#info&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
-                  </request>
-                  <request subst="true">
-                     <jabber type="raw" ack="no_ack" data="&lt;iq   xmlns=&quot;jabber:client&quot; type=&quot;get&quot; id=&quot;%%ts_user_server:get_unique_id%%&quot;&gt;   &lt;query     xmlns=&quot;http://jabber.org/protocol/disco#items&quot; node=&quot;http://jabber.org/protocol/offline&quot;/&gt;   &lt;/iq&gt;" />
-                  </request>
-                  <thinktime value="2" />
-               </transaction>
+                <thinktime value="5" random="true" />
             </for>
         </session>
     </sessions>
