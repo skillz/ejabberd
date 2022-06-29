@@ -8,35 +8,41 @@
 ```shell
 xcode-select --install ## for mac
 
-brew install libyaml
-brew install automake
-brew install expat
-brew install pidgin
+brew install libyaml # ejabberd config dependency
+brew install automake # compiling dependency 
+brew install expat # ejabberd xml parsing dependency
+brew install pidgin # XMPP chat client used for testing
 
+# pin version 2.69 bc it seems to be the highest compatible version for :fast_tls, used by ejabberd
 brew install openssl@1.1
 # only need this if you had openssl installed previously, but it doesn't hurt to run it
 brew link --overwrite openssl@1.1
 
-export PATH="/opt/homebrew/opt/openssl@1.1/bin:$PATH"
-export LDFLAGS="-L/opt/homebrew/opt/openssl@1.1/lib"
-export CPPFLAGS="-I/opt/homebrew/opt/openssl@1.1/include"
+# for mac: 
+# create symlink from openssl 1.1 to include folder, which will help the compiler find the files it wants for :fast_tls
+ln -s /usr/local/Cellar/openssl@1.1/1.1.1l/include/openssl /usr/local/include/openssl
 
-brew install autoconf@2.69
+# pin version 2.69 bc it seems to be the highest compatible version for erlang 22
+brew install autoconf@2.69 # compiling dependency
 # only need this if you had autoconf installed previously, but it doesn't hurt to run it
 brew link --overwrite autoconf@2.69
 
+# install and start mysql, the backend used by our ejabberd nodes
 brew install mysql
 brew install --cask mysqlworkbench
 brew services start mysql
 
+# asdf will let us install erlang versions and pre-compiled elixir versions with compatible OTP
 brew install asdf
 
 asdf plugin add erlang
 asdf plugin add elixir
 
+# install erlang and compatible elixir
 asdf install erlang 22.1.7
 asdf install elixir 1.12.3-otp-22
 
+# mark both of those versions as globally available
 asdf global elixir 1.12.3-otp-22
 asdf global erlang 22.1.7
 
@@ -66,10 +72,10 @@ mysql -u root -p # might need sudo here
 # install libraries from above
 git clone git@github.com:skillz/ejabberd.git
 cd ejabberd
-mix deps.clean --all
-mix deps.get
-mix deps.compile
-iex -S mix
+mix deps.clean --all # clean any previous dependency compilations for a fresh start
+mix deps.get # get dependencies
+mix deps.compile # copile dependencies
+iex -S mix # compile and start ejabberd; inject terminal into a live elixir ejabberd session
 # you now have a local ejabberd server running!
 # and your terminal is now inside a live elixir session with ejabberd loaded
 # you can issue elixir commands against ejabberd code, view responses, etc
