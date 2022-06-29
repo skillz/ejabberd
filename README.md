@@ -7,32 +7,44 @@
 ## Libraries and Setup
 ```shell
 xcode-select --install ## for mac
-brew install openssl
+
 brew install libyaml
-brew install autoconf
 brew install automake
 brew install expat
-brew install asdf
 brew install pidgin
+
+brew install openssl@1.1
+# only need this if you had openssl installed previously, but it doesn't hurt to run it
+brew link --overwrite openssl@1.1
+
+export PATH="/opt/homebrew/opt/openssl@1.1/bin:$PATH"
+export LDFLAGS="-L/opt/homebrew/opt/openssl@1.1/lib"
+export CPPFLAGS="-I/opt/homebrew/opt/openssl@1.1/include"
+
+brew install autoconf@2.69
+# only need this if you had autoconf installed previously, but it doesn't hurt to run it
+brew link --overwrite autoconf@2.69
+
 brew install mysql
 brew install --cask mysqlworkbench
 brew services start mysql
 
+brew install asdf
+
 asdf plugin add erlang
 asdf plugin add elixir
+
 asdf install erlang 22.1.7
 asdf install elixir 1.12.3-otp-22
+
 asdf global elixir 1.12.3-otp-22
 asdf global erlang 22.1.7
-
-# NOTE: if asdf is NOT found in your PATH, then add it as below
-echo $PATH | grep asdf
 
 # add asdf to PATH
 # NOTE: you only need to run this if asdf is not already on your PATH
 # eventually, you will want to also permanently add the below to your path
 # the steps to do this can be different on mac vs linux
-export PATH=$PATH:~/.asdf/shims:~/.asdf/bin
+export PATH="$PATH:~/.asdf/shims:~/.asdf/bin"
 
 # create mysql ejabberd database and user
 mysqladmin -u root password 'some secretpassword'
@@ -54,6 +66,7 @@ mysql -u root -p # might need sudo here
 # install libraries from above
 git clone git@github.com:skillz/ejabberd.git
 cd ejabberd
+mix deps.clean --all
 mix deps.get
 mix deps.compile
 iex -S mix
