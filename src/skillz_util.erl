@@ -10,7 +10,7 @@
 %% Exports
 -export([send_cas_message/3, send_cas_message/4, send_message/5, get_message_xml_bin/4, get_env/0,
   get_admin_logo/0, get_flag_url/0, get_cas_jid/0, get_host/0, get_host/1,
-  get_uuid/0, dynamic_batch/7, dynamic_batch/6, get_value_by_tag/2, get_by_tag/2, get_resource_of_jid_in_room/4]).
+  get_uuid/0, dynamic_batch/7, dynamic_batch/6, get_value_by_tag/2, get_value_by_tag/3, get_by_tag/2, get_resource_of_jid_in_room/4]).
 
 -include("logger.hrl").
 
