@@ -11,16 +11,6 @@ acl:
     ip:
       - "127.0.0.0/8"
   admin:
-    user:
-      - skillz-cas: localhost
-      - admin: localhost
-      - admin@localhost
-      - testuser: localhost
-
-host_config:
-  "localhost":
-    acl:
-      admin:
-        user:
-          - "admin": "localhost"
-          - "testuser": "localhost"
+    - user: "skillz-cas@localhost"
+    - user: "admin@localhost"
+    - user: "testuser@localhost"
