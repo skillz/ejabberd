@@ -538,7 +538,8 @@ handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, 
 	Queue = History#lqueue.queue,
 	Limit = case LimitIn of
 		_ when LimitIn < 0 ->  5;
-		_ when LimitIn > 50 -> 50
+		_ when LimitIn > 50 -> 50;
+		_ -> LimitIn
 	end,
 	{Messages, _, _} = lists:foldr(fun({_, Message, _, _, _}, {AccMessages, Count, LastMessageFound} = Acc) ->
 		case LastMessageFound of
