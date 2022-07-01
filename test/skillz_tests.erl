@@ -55,7 +55,7 @@ get_resource_of_jid_in_room(Config) ->
     MyNick = ?config(nick, Config),
     RoomJid = {jid, Name, Host, _, _, _, _} = muc_room_jid(Config),
     muc_tests:join_new(Config, RoomJid),
-    MyNick = skillz_util:get_resource_of_jid_in_room(Host, MyJidStr, Name, "moderator", none),
+    MyNick = skillz_util:get_resource_of_jid_in_room(Host, MyJidStr, Name, none),
     muc_tests:leave(Config),
     disconnect(Config)
 .
