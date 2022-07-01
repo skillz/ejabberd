@@ -538,7 +538,8 @@ handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, 
 	Queue = History#lqueue.queue,
 	Limit = case LimitIn of
 		_ when LimitIn < 0 ->  5;
-		_ when LimitIn > 50 -> 50
+		_ when LimitIn > 50 -> 50;
+		_ -> LimitIn
 	end,
 	{Messages, _, _} = lists:foldr(fun({_, Message, _, _, _}, {AccMessages, Count, LastMessageFound} = Acc) ->
 		case LastMessageFound of
@@ -573,7 +574,8 @@ handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, 
 					none -> 0;
 					Value -> try list_to_integer(binary_to_list(Value)) catch _:_ -> 0 end
 				end,
-				{Id, FromUser, Body, UserRole}
+				AvatarUrl = skillz_util:get_value_by_tag(SubEls, "avatar_url", ""),
+				{Id, FromUser, Body, UserRole, AvatarUrl}
 			end, List)
 	end,
 	{reply, {ok, Summary}, StateName, StateData}

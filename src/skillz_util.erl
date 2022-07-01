@@ -8,9 +8,9 @@
 -module(skillz_util).
 
 %% Exports
--export([send_cas_message/3, send_cas_message/4, send_message/6, get_message_xml_bin/4, get_env/0,
+-export([send_cas_message/3, send_cas_message/4, send_message/5, get_message_xml_bin/4, get_env/0,
   get_admin_logo/0, get_flag_url/0, get_cas_jid/0, get_host/0, get_host/1,
-  get_uuid/0, dynamic_batch/7, dynamic_batch/6, get_value_by_tag/2, get_by_tag/2, get_resource_of_jid_in_room/5]).
+  get_uuid/0, dynamic_batch/7, dynamic_batch/6, get_value_by_tag/2, get_by_tag/2, get_resource_of_jid_in_room/4]).
 
 -include("logger.hrl").
 
@@ -19,13 +19,13 @@ send_cas_message(RoomNameBin, SenderDisplayNameBin, BodyBin) ->
 .
 
 send_cas_message(RoomNameBin, SenderDisplayNameBin, BodyBin, DefaultFromResource) ->
-  send_message(get_cas_jid(), RoomNameBin, SenderDisplayNameBin, BodyBin, "moderator", DefaultFromResource)
+  send_message(get_cas_jid(), RoomNameBin, SenderDisplayNameBin, BodyBin, DefaultFromResource)
 .
 
-send_message(FromJidBin, RoomNameBin, SenderDisplayNameBin, BodyBin, FromUserType, DefaultFromResource) ->
+send_message(FromJidBin, RoomNameBin, SenderDisplayNameBin, BodyBin, DefaultFromResource) ->
   Host = get_host("conference."),
   ToJidBin = <<RoomNameBin/binary, (<<"@">>)/binary, Host/binary>>,
-  FromJidWithResourceBin = add_uuid_as_resource(Host, FromJidBin, RoomNameBin, FromUserType, DefaultFromResource),
+  FromJidWithResourceBin = add_uuid_as_resource(Host, FromJidBin, RoomNameBin, DefaultFromResource),
   Msg = get_message_xml_bin(FromJidWithResourceBin, ToJidBin, SenderDisplayNameBin, BodyBin),
   mod_admin_extra:send_stanza(FromJidWithResourceBin, ToJidBin, Msg)
 .
@@ -56,14 +56,18 @@ get_message_xml_bin(FromJidBin, ToJidBin, SenderDisplayNameBin, BodyBin) ->
   )))
 .
 
-get_resource_of_jid_in_room(HostBin, JidBin, RoomNameBin, UserType, DefaultResource) ->
+get_resource_of_jid_in_room(HostBin, JidBin, RoomNameBin, DefaultResource) ->
   try
     case mod_muc_admin:get_room_occupants(RoomNameBin, HostBin) of
       ListOfUsers when is_list(ListOfUsers) ->
         case lists:filtermap(
-          fun({User, Resource, Type}) ->
-            case Type == UserType andalso binary:match(User, JidBin) /= nomatch of
-              true -> {true, Resource};
+          fun({User, _Nick, _Type}) ->
+            case binary:match(User, JidBin) /= nomatch of
+              true ->
+                case jid:decode(User) of
+                  {jid, _JUser, _JServer, _JResource, _JLUser, _JLServer, Resource} when Resource /= <<"">> -> {true, Resource};
+                  _ -> false
+                end;
               _ -> false
             end
           end, ListOfUsers
@@ -83,8 +87,8 @@ add_resource(JidBin, ResourceBin) ->
   <<JidBin/binary, (<<"/">>)/binary, ResourceBin/binary>>
 .
 
-add_uuid_as_resource(HostBin, JidBin, RoomNameBin, UserType, DefaultResource) ->
-  case get_resource_of_jid_in_room(HostBin, JidBin, RoomNameBin, UserType, DefaultResource) of
+add_uuid_as_resource(HostBin, JidBin, RoomNameBin, DefaultResource) ->
+  case get_resource_of_jid_in_room(HostBin, JidBin, RoomNameBin, DefaultResource) of
     none -> JidBin;
     Resource -> add_resource(JidBin, Resource)
   end
@@ -262,8 +266,12 @@ find_tag_bfs(Queue, TagName) ->
 .
 
 get_value_by_tag(XmlEl, TagName) ->
+  get_value_by_tag(XmlEl, TagName, none)
+.
+
+get_value_by_tag(XmlEl, TagName, Default) ->
    case get_by_tag(XmlEl, TagName) of
-     none -> none;
+     none -> Default;
      {xmlel, _, _, [{xmlcdata, Value}]} -> Value;
      XmlEl -> XmlEl
    end
