@@ -574,7 +574,8 @@ handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, 
 					none -> 0;
 					Value -> try list_to_integer(binary_to_list(Value)) catch _:_ -> 0 end
 				end,
-				{Id, FromUser, Body, UserRole}
+				AvatarUrl = skillz_util:get_value_by_tag(SubEls, "avatar_url", ""),
+				{Id, FromUser, Body, UserRole, AvatarUrl}
 			end, List)
 	end,
 	{reply, {ok, Summary}, StateName, StateData}

@@ -266,8 +266,12 @@ find_tag_bfs(Queue, TagName) ->
 .
 
 get_value_by_tag(XmlEl, TagName) ->
+  get_value_by_tag(XmlEl, TagName, none)
+.
+
+get_value_by_tag(XmlEl, TagName, Default) ->
    case get_by_tag(XmlEl, TagName) of
-     none -> none;
+     none -> Default;
      {xmlel, _, _, [{xmlcdata, Value}]} -> Value;
      XmlEl -> XmlEl
    end
