@@ -293,7 +293,8 @@ get_commands_spec() ->
 				result = {messages, {list, {message, {tuple, [{id, string},
 					{from, string},
 					{body, string},
-					{userRole, integer}
+					{userRole, integer},
+					{avatarUrl, string}
 				]}}}}
 			},
      #ejabberd_commands{name = subscribe_room, tags = [muc_room],
