@@ -570,11 +570,11 @@ handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, 
 		List ->
 			lists:map(fun({message, Id, _, _, {jid, FromUser, _, _, _, _, _}, _, _, Texts, _, SubEls, _}) ->
 				Body = xmpp:get_text(Texts),
-				UserRole = case skillz_util:get_value_by_tag(SubEls, "user_role") of
+				UserRole = case skillz_util:get_value_by_tag(SubEls, <<"user_role">>) of
 					none -> 0;
 					Value -> try list_to_integer(binary_to_list(Value)) catch _:_ -> 0 end
 				end,
-				AvatarUrl = skillz_util:get_value_by_tag(SubEls, "avatar_url", ""),
+				AvatarUrl = skillz_util:get_value_by_tag(SubEls, <<"avatar_url">>, <<"">>),
 				{Id, FromUser, Body, UserRole, AvatarUrl}
 			end, List)
 	end,
