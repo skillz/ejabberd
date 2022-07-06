@@ -37,7 +37,7 @@
 	 rooms_empty_list/1, rooms_empty_destroy/1,
 	 get_user_rooms/2, get_room_occupants/2,
 	 get_room_occupants_number/2, send_direct_invitation/5,
-	 change_room_option/4, get_room_options/2, get_room_summary/4,
+	 change_room_option/4, get_room_options/2, get_room_summary/4, get_room_summary/3,
 	 set_user_affiliation/3, set_room_affiliation/4, get_room_affiliations/2, get_room_affiliation/3,
 	 web_menu_main/2, web_page_main/2, web_menu_host/3,
 	 subscribe_room/4, unsubscribe_room/2, get_subscribers/2,
@@ -284,19 +284,19 @@ get_commands_spec() ->
 								 {value, string}
 								]}}
 						}}},
-			#ejabberd_commands{name = get_room_summary, tags = [muc_room],
+     #ejabberd_commands{name = get_room_summary, tags = [muc_room],
 				desc = "Get room summary: last x messages after a message id",
 				module = ?MODULE, function = get_room_summary,
-				args_desc = ["Service", "Room", "Limit", "Last Message Id"],
-				args_example = ["conference.chat.skillz.com", "81", "10", "abcd-1234-4567890-defg"],
-				args = [{service, binary}, {room, binary}, {limit, binary}, {last_message_id, binary}],
+				args_desc = ["Room", "Limit", "Last Message Id"],
+				args_example = ["81", "10", "abcd-1234-4567890-defg"],
+				args = [{room, binary}, {limit, binary}, {last_message_id, binary}],
 				result = {messages, {list, {message, {tuple, [{id, string},
 					{from, string},
 					{body, string},
 					{userRole, integer},
 					{avatarUrl, string}
 				]}}}}
-			},
+		 },
      #ejabberd_commands{name = subscribe_room, tags = [muc_room],
 			desc = "Subscribe to a MUC conference",
 			module = ?MODULE, function = subscribe_room,
@@ -831,6 +831,9 @@ get_room_summary(Service, RoomName, LimitIn, LastMessageId) ->
 	end
 .
 
+get_room_summary(RoomName, LimitIn, LastMessageId) ->
+	get_room_summary(skillz_util:get_host("conference."), RoomName, LimitIn, LastMessageId)
+.
 
 %%---------------
 %% Decide
