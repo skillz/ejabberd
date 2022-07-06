@@ -1178,7 +1178,7 @@ maybe_strip_status_from_presence(From, Packet, StateData) ->
 close_room_without_occupants(StateData1) ->
 	case maps:size(StateData1#state.users) == 0 of
 	  true ->
-		?INFO_MSG("Destoryed MUC room ~s becuase it lacks occupants",
+		?INFO_MSG("Destroyed MUC room ~s becuase it lacks occupants",
 		  [jid:encode(StateData1#state.jid)]),
 		add_to_log(room_existence, destroyed, StateData1),
 		{stop, normal, StateData1};

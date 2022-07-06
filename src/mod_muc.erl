@@ -467,8 +467,10 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 					  QueueType),
 			    RMod:register_online_room(ServerHost, Room, Host, Pid),
 			    mod_muc_room:route(Pid, Packet),
-			    ok;
+				  ?INFO_MSG("MUC: Created room [~p] with pid [~p] on node [~p]", [Room, Pid, node()]),
+				  ok;
 			false ->
+				  ?INFO_MSG("MUC: Room creation denied for [~p]", [Room]),
 			    Lang = xmpp:get_lang(Packet),
 			    ErrText = <<"Room creation is denied by service policy">>,
 			    Err = xmpp:err_forbidden(ErrText, Lang),
