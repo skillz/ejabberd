@@ -9,7 +9,7 @@
 
 %% Exports
 -export([send_cas_message/3, send_cas_message/4, send_message/5, get_message_xml_bin/4, get_env/0,
-  get_admin_logo/0, get_flag_url/0, get_cas_jid/0, get_host/0, get_host/1,
+  get_admin_logo/0, get_flag_url/0, get_cas_jid/0, get_host/0, get_host/1, get_service/0,
   get_uuid/0, dynamic_batch/7, dynamic_batch/6, get_value_by_tag/2, get_value_by_tag/3, get_by_tag/2, get_resource_of_jid_in_room/4]).
 
 -include("logger.hrl").
@@ -23,7 +23,7 @@ send_cas_message(RoomNameBin, SenderDisplayNameBin, BodyBin, DefaultFromResource
 .
 
 send_message(FromJidBin, RoomNameBin, SenderDisplayNameBin, BodyBin, DefaultFromResource) ->
-  Host = get_host("conference."),
+  Host = get_service(),
   ToJidBin = <<RoomNameBin/binary, (<<"@">>)/binary, Host/binary>>,
   FromJidWithResourceBin = add_uuid_as_resource(Host, FromJidBin, RoomNameBin, DefaultFromResource),
   Msg = get_message_xml_bin(FromJidWithResourceBin, ToJidBin, SenderDisplayNameBin, BodyBin),
@@ -96,9 +96,9 @@ add_uuid_as_resource(HostBin, JidBin, RoomNameBin, DefaultResource) ->
 
 get_admin_logo() ->
   case get_env() of
-    "production" -> "https://s3.amazonaws.com/skillz-content-prod/default-profile-pics/Skillz-Profile-Picture-20220512.png";
-    "staging" ->    "https://s3.amazonaws.com/skillz-content-stage/default-profile-pics/Skillz-Profile-Picture-20220512.png";
-    _ ->            "https://s3.amazonaws.com/skillz-content-dev/default-profile-pics/Skillz-Profile-Picture-20220512.png"
+    "production" -> "https://s3.amazonaws.com/skillz-content-prod/default-profile-pics/Skillz-Profile-Picture-20220706.png";
+    "staging" ->    "https://s3.amazonaws.com/skillz-content-stage/default-profile-pics/Skillz-Profile-Picture-20220706.png";
+    _ ->            "https://s3.amazonaws.com/skillz-content-dev/default-profile-pics/Skillz-Profile-Picture-20220706.png"
   end
 .
 
@@ -117,6 +117,10 @@ get_cas_jid() ->
     "qa" ->         <<"skillz-cas@chat-admin.qa.skillz.com">>;
     "dev" ->        <<"skillz-cas@localhost">>
   end
+.
+
+get_service() ->
+  get_host("conference.")
 .
 
 get_host(Prefix) ->

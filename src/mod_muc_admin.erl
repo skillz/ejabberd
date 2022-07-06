@@ -832,7 +832,7 @@ get_room_summary(Service, RoomName, LimitIn, LastMessageId) ->
 .
 
 get_room_summary(RoomName, LimitIn, LastMessageId) ->
-	get_room_summary(skillz_util:get_host("conference."), RoomName, LimitIn, LastMessageId)
+	get_room_summary(skillz_util:get_service(), RoomName, LimitIn, LastMessageId)
 .
 
 %%---------------
