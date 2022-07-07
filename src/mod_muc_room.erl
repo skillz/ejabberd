@@ -568,14 +568,21 @@ handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, 
 	Summary = case Messages of
 		[] -> [];
 		List ->
-			lists:map(fun({message, Id, _, _, {jid, FromUser, _, _, _, _, _}, _, _, Texts, _, SubEls, _}) ->
+			lists:map(fun({message, Id, _, _, {jid, FromUser, Server, _, _, _, _}, _, _, Texts, _, SubEls, _}) ->
 				Body = xmpp:get_text(Texts),
 				UserRole = case skillz_util:get_value_by_tag(SubEls, <<"user_role">>) of
 					none -> 0;
 					Value -> try list_to_integer(binary_to_list(Value)) catch _:_ -> 0 end
 				end,
 				AvatarUrl = skillz_util:get_value_by_tag(SubEls, <<"avatar_url">>, <<"">>),
-				{Id, FromUser, Body, UserRole, AvatarUrl}
+				Username = case skillz_util:get_value_by_tag(SubEls, <<"username">>) of
+					none -> case mod_vcard:get_nickname(FromUser, Server) of
+						none -> FromUser;
+						Nickname -> Nickname
+					end;
+					UsernameValue -> UsernameValue
+			  end,
+				{Id, Username, Body, UserRole, AvatarUrl}
 			end, List)
 	end,
 	{reply, {ok, Summary}, StateName, StateData}
