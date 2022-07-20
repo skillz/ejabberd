@@ -1184,13 +1184,24 @@ maybe_strip_status_from_presence(From, Packet, StateData) ->
 -spec close_room_without_occupants(state()) -> fsm_transition().
 close_room_without_occupants(StateData1) ->
 	case maps:size(StateData1#state.users) == 0 of
+		%% room is empty
 	  true ->
-		?INFO_MSG("Destroyed MUC room ~s becuase it lacks occupants",
-		  [jid:encode(StateData1#state.jid)]),
-		add_to_log(room_existence, destroyed, StateData1),
-		{stop, normal, StateData1};
+			{LUser, _LServer, _LResource} = jid:tolower(StateData1#state.jid),
+			case binary:matches(LUser, [<<"-">>]) of
+				%% room is a game wide room so continue keeping it around
+				[] ->
+					{next_state, normal_state, StateData1};
+				%% room is a DM and empty so destroy it
+				_ ->
+					?INFO_MSG("Destroyed MUC room ~s becuase it lacks occupants",
+					[jid:encode(StateData1#state.jid)]),
+					add_to_log(room_existence, destroyed, StateData1),
+					{stop, normal, StateData1}
+			end;
+		%% room is not empty so keep it around
 	  _ -> {next_state, normal_state, StateData1}
-	end.
+	end
+.
 
 -spec close_room_if_temporary_and_empty(state()) -> fsm_transition().
 close_room_if_temporary_and_empty(StateData1) ->

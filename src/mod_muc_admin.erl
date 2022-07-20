@@ -31,7 +31,7 @@
 -export([start/2, stop/1, reload/3, depends/2,
 	 muc_online_rooms/1, muc_online_rooms_by_regex/2,
 	 muc_register_nick/3, muc_unregister_nick/2,
-	 create_room_with_opts/4, create_room/3, destroy_room/2,
+	 create_room_with_opts/4, start_room/2, create_room/3, destroy_room/2,
 	 create_rooms_file/1, destroy_rooms_file/1,
 	 rooms_unused_list/2, rooms_unused_destroy/2,
 	 rooms_empty_list/1, rooms_empty_destroy/1,
@@ -126,7 +126,13 @@ get_commands_spec() ->
 		       args_example = [<<"tim@example.org">>, <<"example.org">>],
 		       args = [{jid, binary}, {host, binary}],
 		       result = {res, rescode}},
-
+		 #ejabberd_commands{name = start_room, tags = [muc_room],
+		       desc = "Start a MUC room with name and title. If it does not already exist, create it.",
+		       module = ?MODULE, function = start_room,
+		       args_desc = ["Room name", "Room title"],
+		       args_example = ["8626", "Skillz Chat Room"],
+		       args = [{name, binary}, {title, binary}],
+		       result = {res, rescode}},
      #ejabberd_commands{name = create_room, tags = [muc_room],
 		       desc = "Create a MUC room name@service in host",
 		       module = ?MODULE, function = create_room,
@@ -293,8 +299,8 @@ get_commands_spec() ->
 				result = {messages, {list, {message, {tuple, [{id, string},
 					{from, string},
 					{body, string},
-					{userRole, integer},
-					{avatarUrl, string}
+					{user_role, integer},
+					{avatar_url, string}
 				]}}}}
 		 },
      #ejabberd_commands{name = subscribe_room, tags = [muc_room],
@@ -671,6 +677,18 @@ create_room_with_opts(Name1, Host1, ServerHost, CustomRoomOpts) ->
 	{ok, _} ->
 	    error
     end.
+
+start_room(RoomBin, RoomTitleBin) ->
+	Service = skillz_util:get_service(),
+	case get_room_pid(RoomBin, Service) of
+		error ->
+			HostBin = skillz_util:get_host(),
+			FromJid = jid:decode(skillz_util:get_cas_jid()),
+			mod_muc:start_new_room(RoomBin, RoomTitleBin, HostBin, FromJid),
+			ok;
+		_ -> ok
+	end
+.
 
 %% Create the room only in the database.
 %% It is required to restart the MUC service for the room to appear.

@@ -43,6 +43,7 @@
 	 restore_room/3,
 	 forget_room/3,
 	 forget_rooms/3,
+	 start_new_room/4,
 	 create_room/5,
 	 shutdown_rooms/1,
 	 process_disco_info/1,
@@ -155,6 +156,12 @@ room_destroyed(Host, Room, Pid, ServerHost) ->
     catch gen_mod:get_module_proc(ServerHost, ?MODULE) !
 	    {room_destroyed, {Room, Host}, Pid},
     ok.
+
+start_new_room(RoomBin, RoomTitleBin, HostBin, FromJid) ->
+	ServerHost = ejabberd_router:host_of_route(HostBin),
+	Proc = gen_mod:get_module_proc(ServerHost, ?MODULE),
+	gen_server:call(Proc, {start_new_room, RoomBin, RoomTitleBin, HostBin, FromJid})
+.
 
 %% @doc Create a room.
 %% If Opts = default, the default room options are used.
@@ -280,7 +287,26 @@ handle_call({create, Room, Host, From, Nick, Opts}, _From,
     RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
     RMod:register_online_room(ServerHost, Room, Host, Pid),
     ejabberd_hooks:run(create_room, ServerHost, [ServerHost, Room, Host]),
-    {reply, ok, State}.
+    {reply, ok, State};
+handle_call({start_new_room, RoomBin, RoomTitleBin, HostBin, FromJid}, _From, #state{
+			server_host = ServerHost,
+			access = Access,
+			default_room_opts = DefOpts,
+			history_size = HistorySize,
+			queue_type = QueueType,
+			room_shaper = RoomShaper
+		} = State
+) ->
+	RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
+	case RMod:find_online_room(ServerHost, RoomBin, HostBin) of
+		error ->
+			Opts = DefOpts ++ [{persistent, true}, {title, RoomTitleBin}],
+			{ok, Pid} = start_new_room(HostBin, ServerHost, Access, RoomBin, HistorySize, RoomShaper, FromJid, RoomTitleBin, Opts, QueueType),
+			RMod:register_online_room(ServerHost, RoomBin, HostBin, Pid);
+		_ -> ok
+	end,
+	{reply, ok, State}
+.
 
 handle_cast({reload, ServerHost, NewOpts, OldOpts}, #state{hosts = OldHosts}) ->
     NewMod = gen_mod:db_mod(ServerHost, NewOpts, ?MODULE),
