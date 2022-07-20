@@ -41,6 +41,7 @@ api_permissions:
       - "clear_blocking_users"
       - "set_user_affiliation"
       - "get_room_summary"
+      - "start_room"
 
 shaper:
   ##
