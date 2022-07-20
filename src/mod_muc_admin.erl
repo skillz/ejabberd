@@ -684,10 +684,14 @@ start_room(RoomBin, RoomTitleBin) ->
 		error ->
 			HostBin = skillz_util:get_host(),
 			FromJid = jid:decode(skillz_util:get_cas_jid()),
-			mod_muc:start_new_room(RoomBin, RoomTitleBin, HostBin, FromJid),
-			ok;
-		_ -> ok
-	end
+			mod_muc:start_new_room(RoomBin, RoomTitleBin, HostBin, FromJid);
+		Pid ->
+			case get_room_title(Pid) of
+				<<"">> -> change_room_option(RoomBin, Service, <<"title">>, RoomTitleBin);
+				_ -> ok
+			end
+	end,
+	ok
 .
 
 %% Create the room only in the database.
@@ -1173,6 +1177,11 @@ get_options(Config) ->
                           (V) when is_tuple(V); is_list(V) -> list_to_binary(hd(io_lib:format("~w", [V])));
                           (V) -> V end, ValuesRaw),
     lists:zip(Fields, Values).
+
+get_room_title(Pid) ->
+	Config = get_room_config(Pid),
+	Config#config.title
+.
 
 %%----------------------------
 %% Get Room Affiliations
