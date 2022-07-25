@@ -681,7 +681,7 @@ create_room_with_opts(Name1, Host1, ServerHost, CustomRoomOpts) ->
 start_room(RoomBin, RoomTitleBin) ->
 	Service = skillz_util:get_service(),
 	case get_room_pid(RoomBin, Service) of
-		error ->
+		room_not_found ->
 			HostBin = skillz_util:get_host(),
 			FromJid = jid:decode(skillz_util:get_cas_jid()),
 			mod_muc:start_new_room(RoomBin, RoomTitleBin, HostBin, FromJid);
