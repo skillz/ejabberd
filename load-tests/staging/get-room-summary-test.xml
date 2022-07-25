@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<!DOCTYPE tsung SYSTEM "/home/jenkins/tsung/tsung-1.0.dtd">
+<tsung loglevel="warning">
+    <!-- TO RUN:   tsung -f get-room-summary-test.xml -l . start -->
+    <!-- ANALYSIS: cd LOG_DIR && perl /usr/bin/tsung_stats.pl -->
+    <!-- VIEW:     firefox report.html -->
+    <!-- CPU/MEMORY STATS DURING RUN:
+        while true; do kubectl get pods | grep ejabberd | awk '{print $1}' | xargs -I$ kubectl top pod $ | grep ejabberd; echo "******"; sleep 30; done
+    -->
+
+    <!-- generate load from localhost -->
+    <clients>
+        <client host="localhost" use_controller_vm="true" maxusers="10240"></client>
+    </clients>
+
+    <!-- ejabberd server host: chat-admin is where all users are stored -->
+    <servers>
+        <server host="ejabberd.internal.staging.cloud.skillz.com" port="80" type="tcp"></server>
+    </servers>
+
+    <load>
+        <arrivalphase phase="1" duration="10" unit="minute">
+            <users arrivalrate="70" unit="second"/>
+        </arrivalphase>
+    </load>
+
+    <sessions>
+        <session name="get-room-summary" weight="1" type="ts_http">
+            <request>
+                <http url="/api/get_room_summary" method="POST"
+                      version="1.1" content_type="application/json" contents="{&quot;room&quot;: &quot;81&quot;, &quot;limit&quot;: &quot;5&quot;, &quot;last_message_id&quot;: &quot;&quot;}">
+                    <http_header name="Content-Type" value="application/json"/>
+                </http>
+            </request>
+
+            <request>
+                <http url="/api/get_room_summary" method="POST"
+                      version="1.1" content_type="application/json" contents="{&quot;room&quot;: &quot;3159&quot;, &quot;limit&quot;: &quot;5&quot;, &quot;last_message_id&quot;: &quot;&quot;}">
+                    <http_header name="Content-Type" value="application/json"/>
+                </http>
+            </request>
+
+            <request>
+                <http url="/api/get_room_summary" method="POST"
+                      version="1.1" content_type="application/json" contents="{&quot;room&quot;: &quot;5328&quot;, &quot;limit&quot;: &quot;5&quot;, &quot;last_message_id&quot;: &quot;&quot;}">
+                    <http_header name="Content-Type" value="application/json"/>
+                </http>
+            </request>
+        </session>
+    </sessions>
+</tsung>
