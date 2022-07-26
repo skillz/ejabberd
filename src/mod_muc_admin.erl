@@ -682,9 +682,8 @@ start_room(RoomBin, RoomTitleBin) ->
 	Service = skillz_util:get_service(),
 	case get_room_pid(RoomBin, Service) of
 		room_not_found ->
-			HostBin = skillz_util:get_host(),
 			FromJid = jid:decode(skillz_util:get_cas_jid()),
-			mod_muc:start_new_room(RoomBin, RoomTitleBin, HostBin, FromJid);
+			mod_muc:start_new_room(RoomBin, RoomTitleBin, Service, FromJid);
 		Pid ->
 			case get_room_title(Pid) of
 				<<"">> -> change_room_option(RoomBin, Service, <<"title">>, RoomTitleBin);
