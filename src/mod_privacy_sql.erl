@@ -351,7 +351,7 @@ get_privacy_list_data(LUser, LServer, Name) ->
            "where id ="
            " (select id from privacy_list"
            " where username=%(LUser)s and %(LServer)H and name=%(Name)s) "
-           "order by ord"), secondary).
+           "order by ord")).
 
 set_default_privacy_list(LUser, LServer, Name) ->
     ?SQL_UPSERT_T(
