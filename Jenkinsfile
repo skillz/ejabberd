@@ -3,6 +3,7 @@
 switch(env.BRANCH_NAME) {
   case ~/PR-[0-9]+/:
     testPipeline()
+    buildPipeline()
     deploymentPipeline(['gitops-qa'], true)
     break
   case 'development':
