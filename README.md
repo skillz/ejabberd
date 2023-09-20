@@ -65,7 +65,6 @@ mysql -u root -p # might need sudo here
 ```
 
 ## Quick Start
-
 - This is a quick start to get a local ejabberd server running using whatever local code you have checked out / are iterating on.
 - You can start this local server to test out code changes quickly and can even connect open-source chat clients to it for local testing.
 
