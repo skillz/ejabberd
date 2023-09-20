@@ -5,7 +5,6 @@
 - [On Call Documentation](https://docs.google.com/document/d/1kFnZfS4uzFCheDs49AhOgYdvkQxUPT1M-oUlZsJFxLw)
 
 ## Libraries and Setup
-
 ```shell
 xcode-select --install ## for mac
 
