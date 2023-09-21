@@ -69,7 +69,6 @@ mysql -u root -p # might need sudo here
 - You can start this local server to test out code changes quickly and can even connect open-source chat clients to it for local testing.
 
 - Starting local server:
-
 ```shell
 # install libraries from above
 git clone git@github.com:skillz/ejabberd.git
