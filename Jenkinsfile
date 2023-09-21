@@ -3,6 +3,8 @@
 switch(env.BRANCH_NAME) {
   case ~/PR-[0-9]+/:
     testPipeline()
+    buildPipeline()
+    deploymentPipeline(['gitops-qa'], true)
     break
   case 'development':
     testPipeline()
@@ -20,7 +22,6 @@ switch(env.BRANCH_NAME) {
 def pullModules() {
   def moduleRepositories = [
     'mod_push_skillz',
-    'mod_pottymouth',
     'mod_beam_stats'
   ]
 
@@ -31,6 +32,13 @@ def pullModules() {
       repo: repo
     )
   }
+
+  git.cloneRepo(
+    destination: ".ejabberd_modules/sources/mod_pottymouth",
+    org: 'skillz',
+    repo: 'mod_pottymouth',
+    branch: 'feature-filter-ticketz-tier-id'
+  )
 }
 
 def testPipeline() {
