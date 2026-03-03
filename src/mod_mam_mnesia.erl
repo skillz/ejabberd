@@ -31,7 +31,8 @@
 -export([init/2, remove_user/2, remove_room/3, delete_old_messages/3,
 	 extended_fields/1, store/10, write_prefs/4, get_prefs/2, select/6,
          remove_from_archive/3,
-	 is_empty_for_user/2, is_empty_for_room/3, delete_old_messages_batch/5,
+	 is_empty_for_user/2, is_empty_for_room/3, get_room_history/4,
+	 delete_old_messages_batch/5,
          transform/1]).
 -export([serialize/3, deserialize_start/1, deserialize/2]).
 
@@ -473,3 +474,6 @@ deserialize(LServer, Batch) ->
 	{aborted, Reason} ->
 	    {error, iolist_to_binary(io_lib:format("Error when writing archive data: ~p", [Reason]))}
     end.
+
+get_room_history(_LServer, _Room, _Host, _HistorySize) ->
+    [].

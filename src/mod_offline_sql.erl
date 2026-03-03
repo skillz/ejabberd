@@ -87,19 +87,25 @@ store_message(#offline_msg{us = {LUser, LServer}} = M) ->
     end.
 
 pop_messages(LUser, LServer) ->
-    case get_and_del_spool_msg_t(LServer, LUser) of
-	{atomic, {selected, Rs}} ->
-	    {ok, lists:flatmap(
-		   fun({_, XML}) ->
-			   case xml_to_offline_msg(XML) of
-			       {ok, Msg} ->
-				   [Msg];
-			       _Err ->
-				   []
-			   end
-		   end, Rs)};
-	Err ->
-	    {error, Err}
+    case get_spool_msg(LServer, LUser) of
+	{selected, Rs} when is_list(Rs) ->
+	    {ok, lists:flatmap(row_to_offline_msg_fun(), Rs)};
+	{selected, _Cols, Rows} when is_list(Rows) ->
+	    {ok, lists:flatmap(row_to_offline_msg_fun(), Rows)};
+	_ ->
+	    {ok, []}
+    end.
+
+row_to_offline_msg_fun() ->
+    fun(Row) ->
+	    XML = case Row of
+		      {_, X} -> X;
+		      [_, X] -> X
+		  end,
+	    case xml_to_offline_msg(XML) of
+		{ok, Msg} -> [Msg];
+		_ -> []
+	    end
     end.
 
 remove_expired_messages(_LServer) ->
@@ -230,7 +236,7 @@ remove_all_messages(LUser, LServer) ->
     {atomic, ok}.
 
 count_messages(LUser, LServer) ->
-    case catch ejabberd_sql:sql_query(
+    case catch ejabberd_sql:sql_query_replica(
                  LServer,
                  ?SQL("select @(count(*))d from spool "
                       "where username=%(LUser)s and %(LServer)H")) of
@@ -241,6 +247,11 @@ count_messages(LUser, LServer) ->
         _ ->
 	    {nocache, 0}
     end.
+
+get_spool_msg(LServer, LUser) ->
+    ejabberd_sql:sql_query_replica(LServer,
+	?SQL("select @(username)s, @(xml)s from spool where "
+	     "username=%(LUser)s and %(LServer)H order by seq")).
 
 export(_Server) ->
     [{offline_msg,

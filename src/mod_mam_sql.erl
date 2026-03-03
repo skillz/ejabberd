@@ -31,7 +31,7 @@
 %% API
 -export([init/2, remove_user/2, remove_room/3, delete_old_messages/3,
 	 extended_fields/1, store/10, write_prefs/4, get_prefs/2, select/7, export/1, remove_from_archive/3,
-	 is_empty_for_user/2, is_empty_for_room/3, select_with_mucsub/6,
+	 is_empty_for_user/2, is_empty_for_room/3, get_room_history/4, select_with_mucsub/6,
 	 delete_old_messages_batch/4, count_messages_to_delete/3]).
 -export([sql_schemas/0]).
 -export([serialize/3, deserialize_start/1, deserialize/2]).
@@ -407,6 +407,53 @@ get_prefs(LUser, LServer) ->
 		    never = Never}};
 	_ ->
 	    error
+    end.
+
+get_room_history(LServer, Room, Host, HistorySize) ->
+    case ejabberd_sql:sql_query_replica(LServer,
+        ?SQL("select @(bare_peer)s, @(nick)s, @(xml)s, @(timestamp)d from archive "
+             "where username=%(Room)s and %(Host)H order by timestamp desc limit %(HistorySize)d")) of
+	{selected, Rows} ->
+	    row_to_room_history(Room, Host, Rows);
+	{selected, _Cols, Rows} ->
+	    row_to_room_history(Room, Host, Rows);
+	_ ->
+	    ?INFO_MSG("Could not retrieve room history from archive", []),
+	    []
+    end.
+
+row_to_room_history(Room, Host, Rows) ->
+    lists:reverse(
+      lists:foldl(
+        fun(Row, Acc) ->
+                try
+                    {BarePeer, Nick, XML, TS} = case Row of
+                        {B, N, X, T} -> {B, N, X, T};
+                        [B, N, X, T] -> {B, N, X, T}
+                    end,
+                    FromJid = jid:decode(BarePeer),
+                    case xml_to_message(XML, Room, BarePeer) of
+                        {ok, #message{} = Msg} ->
+                            [{FromJid, Nick, Msg, TS} | Acc];
+                        _ ->
+                            Acc
+                    end
+                catch _:_ ->
+                        Acc
+                end
+        end, [], Rows)).
+
+xml_to_message(XML, User, Peer) ->
+    case xml_compress:decode(XML, User, Peer) of
+	#xmlel{} = El ->
+	    try xmpp:decode(El, ?NS_CLIENT, [ignore_els]) of
+		#message{} = Msg -> {ok, Msg};
+		_ -> {error, not_message}
+	    catch _:_ ->
+		    {error, decode_failed}
+	    end;
+	_ ->
+	    {error, invalid_xml}
     end.
 
 select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,

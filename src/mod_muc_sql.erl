@@ -31,7 +31,7 @@
 
 %% API
 -export([init/2, store_room/5, store_changes/4,
-         restore_room/3, forget_room/3,
+         restore_room/3, forget_room/3, forget_rooms/3,
 	 can_use_nick/4, get_rooms/2, get_nick/3, get_nicks/2, set_nick/4,
 	 import/3, export/1]).
 -export([register_online_room/4, unregister_online_room/4, find_online_room/3,
@@ -42,7 +42,8 @@
 	 get_hibernated_rooms_older_than/3,
 	 find_online_room_by_pid/2, remove_user/2]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
-	 get_affiliations/3, search_affiliation/4]).
+	 get_affiliations/3, get_affiliation/2, search_affiliation/4,
+	 disable_affiliation/2, insert_affiliation/3]).
 -export([sql_schemas/0]).
 -export([serialize/3, deserialize_start/1, deserialize/2]).
 
@@ -242,6 +243,9 @@ forget_room(LServer, Host, Name) ->
 	end,
     ejabberd_sql:sql_transaction(LServer, F).
 
+forget_rooms(LServer, Host, Rooms) ->
+    lists:foreach(fun(Name) -> forget_room(LServer, Host, Name) end, Rooms).
+
 can_use_nick(LServer, ServiceOrRoom, JID, Nick) ->
     SJID = jid:encode(jid:tolower(jid:remove_resource(JID))),
     SqlQuery = case (jid:decode(ServiceOrRoom))#jid.lserver of
@@ -439,6 +443,15 @@ get_affiliations(_ServerHost, _Room, _Host) ->
 
 search_affiliation(_ServerHost, _Room, _Host, _Affiliation) ->
     {error, not_implemented}.
+
+get_affiliation(_ServerHost, _LUser) ->
+    none.
+
+disable_affiliation(_ServerHost, _LUser) ->
+    ok.
+
+insert_affiliation(_ServerHost, _LUser, _Affiliation) ->
+    ok.
 
 register_online_room(ServerHost, Room, Host, Pid) ->
     PidS = misc:encode_pid(Pid),

@@ -98,6 +98,7 @@
 -include("mod_roster.hrl").
 -include("mod_privacy.hrl").
 -include("ejabberd_sm.hrl").
+-include("mod_muc_room.hrl").
 -include_lib("xmpp/include/scram.hrl").
 -include_lib("xmpp/include/xmpp.hrl").
 
@@ -2083,18 +2084,64 @@ send_message(Type, From, To, Subject, Body) ->
             {error, xmpp:format_error(Why)}
     end.
 
+%% Taken from mod_muc_room: wrap message as MUC pubsub event
+-spec wrap(jid(), jid(), stanza(), binary()) -> message().
+wrap(From, To, Packet, Node) ->
+    El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
+    #message{
+       sub_els = [#ps_event{
+		     items = #ps_items{
+				node = Node,
+				items = [#ps_item{
+					    id = p1_rand:get_string(),
+					    sub_els = [El]}]}}]}.
+
+%% Spoof MUC state for muc_filter_message when room is offline
+spoof_muc_state(LServer, RoomJID) ->
+    #state{
+	   server_host = LServer,
+	   jid = RoomJID,
+	   config = #config{
+			mam = true}}.
+
+get_offline_user(To, From) ->
+    FromUser = From#jid.user,
+    Room = To#jid.user,
+    Users = string:lexemes(Room, "-" ++ [$\r,$\n]),
+    [User1|User2] = Users,
+    NewUser = case User1 of
+	FromUser -> hd(User2);
+	_ -> User1
+    end,
+    From#jid{user = NewUser, luser = NewUser}.
+
 send_stanza(FromString, ToString, Stanza) ->
     try
 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
-	From = jid:decode(FromString),
 	To = jid:decode(ToString),
-	CodecOpts = ejabberd_config:codec_options(),
-	Pkt = xmpp:decode(El, ?NS_CLIENT, CodecOpts),
-        Pkt2 = xmpp:set_from_to(Pkt, From, To),
-        State = #{jid => From},
-        ejabberd_hooks:run_fold(user_send_packet, From#jid.lserver,
-                                {Pkt2, State}, []),
-        ejabberd_router:route(Pkt2)
+	case mod_muc:find_online_room(To#jid.user, To#jid.server) of
+	    {ok, _} ->
+		From = jid:decode(FromString),
+		CodecOpts = ejabberd_config:codec_options(),
+		Packet = xmpp:decode(El, ?NS_CLIENT, CodecOpts),
+		Pkt2 = xmpp:set_from_to(Packet, From, To),
+		State = #{jid => From},
+		ejabberd_hooks:run_fold(user_send_packet, From#jid.lserver,
+					{Pkt2, State}, []),
+		ejabberd_router:route(Pkt2);
+	    error ->
+		From = get_offline_user(To, jid:decode(FromString)),
+		CodecOpts = ejabberd_config:codec_options(),
+		Packet = xmpp:decode(El, ?NS_CLIENT, CodecOpts),
+		LServer = From#jid.lserver,
+		ArchivePacket = ejabberd_hooks:run_fold(muc_filter_message, LServer, Packet,
+			                                    [spoof_muc_state(LServer, To), From#jid.user]),
+		Wrapped = wrap(To, From, ArchivePacket, ?NS_MUCSUB_NODES_MESSAGES),
+		PacketToSend = xmpp:set_from_to(Wrapped, To, From),
+		?DEBUG("Running offline_message_hook via send_stanza to an offline room", []),
+		ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, []),
+		ok
+	end
     catch _:{xmpp_codec, Why} ->
 	    io:format("incorrect stanza: ~ts~n", [xmpp:format_error(Why)]),
 	    {error, Why};
