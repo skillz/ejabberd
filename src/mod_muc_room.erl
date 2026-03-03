@@ -76,6 +76,7 @@
 -include_lib("xmpp/include/xmpp.hrl").
 -include("translate.hrl").
 -include("mod_muc_room.hrl").
+-include("message_type.hrl").
 
 
 -define(MAX_USERS_DEFAULT_LIST,
@@ -5097,7 +5098,11 @@ process_iq_mucsub(From, #iq{type = get, lang = Lang,
 				 [#muc_subscription{nick = N, events = Nodes}|Acc]
 			 end
 		     end, [], StateData#state.muc_subscribers),
-	    {result, #muc_subscriptions{list = Subs}, StateData};
+	    NewStateData = case close_room_without_occupants(StateData) of
+			      {stop, normal, _} -> stop;
+			      {next_state, normal_state, SD} -> SD
+			  end,
+	    {result, #muc_subscriptions{list = Subs}, NewStateData};
 	_ ->
 	    Txt = ?T("Moderator privileges required"),
 	    {error, xmpp:err_forbidden(Txt, Lang)}
@@ -5907,16 +5912,82 @@ send_subscriptions_change_notifications(Packet, PacketWithoutJid, State) ->
 	true -> ok
     end.
 
+-spec is_privacy_allow(stanza()) -> boolean().
+is_privacy_allow(Packet) ->
+    To = xmpp:get_to(Packet),
+    LServer = To#jid.lserver,
+    allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
+
+-spec is_offline_privacy_allow(stanza()) -> boolean().
+is_offline_privacy_allow(Packet) ->
+    To = xmpp:get_to(Packet),
+    LServer = To#jid.lserver,
+    ?DEBUG("mod_muc_room checking is_offline_privacy_allow", []),
+    allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, respect_mute, [To, Packet, in]).
+
+-spec inspect_sdk_xmlels(binary(), xmlel(), list()) -> list().
+inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
+    case ChildrenList of
+	[{_, CData} | _] when is_binary(CData) ->
+	    case Name of
+		<<"user_id">> -> [User == CData | Acc];
+		<<"message_type">> -> [true | Acc];
+		_ -> Acc
+	    end;
+	_ -> Acc
+    end;
+inspect_sdk_xmlels(_, _, Acc) -> Acc.
+
+-spec should_send_message(stanza(), jid()) -> boolean().
+should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
+    case length(SubEls) >= ?SdkElementsPosition of
+	true ->
+	    SdkEl = lists:nth(?SdkElementsPosition, SubEls),
+	    case SdkEl of
+		#xmlel{children = SdkChildren} ->
+		    ShouldIgnore = lists:foldl(
+			fun(Child, Acc) -> inspect_sdk_xmlels(User, Child, Acc) end,
+			[], SdkChildren),
+		    ?DEBUG("ShouldIgnore [user_id, message_type]: ~p", [ShouldIgnore]),
+		    ShouldIgnore /= [true, true];
+		_ -> true
+	    end;
+	false -> true
+    end;
+should_send_message(_, _) -> true.
+
+-spec send_to_room_or_offline(boolean(), boolean(), stanza(), stanza(), binary()) -> any().
+send_to_room_or_offline(false, true, Packet, PrivacyCheckPacket, LServer) ->
+    case is_offline_privacy_allow(PrivacyCheckPacket) of
+	true ->
+	    ?DEBUG("offline_privacy_allowed, sending offline_message", []),
+	    ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet}, []);
+	_ ->
+	    ?DEBUG("Failed to allow offline_privacy_allowed, doing nothing", []),
+	    ok
+    end;
+send_to_room_or_offline(_, _, Packet, _, _) -> ejabberd_router:route(Packet).
+
 -spec send_wrapped(jid(), jid(), stanza(), binary(), state()) -> ok.
 send_wrapped(From, To, Packet, Node, State) ->
     LTo = jid:tolower(To),
     LBareTo = jid:tolower(jid:remove_resource(To)),
+    IsSubscriber = case muc_subscribers_find(LBareTo, State#state.muc_subscribers) of
+		       {ok, #subscriber{nodes = NodeCheck}} ->
+			   lists:member(Node, NodeCheck);
+		       _ -> false
+		   end,
+    IsInRoom = case maps:get(LTo, State#state.users, error) of
+		   {ok, _} -> true;
+		   _ -> false
+	       end,
     IsOffline = case maps:get(LTo, State#state.users, error) of
 		    #user{last_presence = undefined} -> true;
 		    error -> true;
 		    _ -> false
 		end,
-    if IsOffline ->
+    ?DEBUG("User is offline: ~p and is in room: ~p ", [IsOffline, IsInRoom]),
+    if IsSubscriber; IsOffline ->
 	    try muc_subscribers_get(LBareTo, State#state.muc_subscribers) of
 		#subscriber{nodes = Nodes, jid = JID} ->
 		    case lists:member(Node, Nodes) of
@@ -5930,8 +6001,17 @@ send_wrapped(From, To, Packet, Node, State) ->
 				 end,
 			    NewPacket = wrap(From, JID, Packet, Node, Id),
 			    NewPacket2 = xmpp:put_meta(NewPacket, in_muc_mam, MamEnabled),
-			    ejabberd_router:route(
-			      xmpp:set_from_to(NewPacket2, State#state.jid, JID));
+			    PrivacyCheckPacket = xmpp:set_from_to(NewPacket2, From, JID),
+			    PacketToSend = xmpp:set_from_to(NewPacket2, State#state.jid, JID),
+			    LServer = To#jid.lserver,
+			    ?DEBUG("This packet will be used:~n~s", [xmpp:pp(PacketToSend)]),
+			    case is_privacy_allow(PrivacyCheckPacket) of
+				true ->
+				    send_to_room_or_offline(IsInRoom, should_send_message(Packet, To),
+							   PacketToSend, PrivacyCheckPacket, LServer);
+				false ->
+				    ?DEBUG("Packet wasnt allowed due to privacy list: ~p", [Packet])
+			    end;
 			false ->
 			    ok
 		    end
