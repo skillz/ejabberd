@@ -30,7 +30,7 @@
 -protocol({xep, 191, '1.3', '2.1.7', "complete", ""}).
 
 -export([start/2, stop/1, reload/3, process_iq/1, depends/2,
-	 disco_features/5, mod_options/1, mod_doc/0]).
+	 disco_features/5, is_blocking/3, mod_options/1, mod_doc/0]).
 
 -include("logger.hrl").
 -include_lib("xmpp/include/xmpp.hrl").
@@ -254,6 +254,20 @@ process_get(#iq{from = #jid{luser = LUser, lserver = LServer}} = IQ) ->
 	    xmpp:make_iq_result(IQ, #block_list{});
 	{error, _} ->
 	    err_db_failure(IQ)
+    end.
+
+-spec is_blocking(binary(), binary(), binary()) -> boolean().
+is_blocking(SourceLUser, TargetLUser, LServer) ->
+    case mod_privacy:get_user_list(TargetLUser, LServer, default) of
+	{ok, {_Name, List}} ->
+	    lists:any(
+	      fun(#listitem{type = jid, action = deny, value = {U, S, _}}) ->
+		      U == SourceLUser andalso S == LServer;
+		 (_) ->
+		      false
+	      end, List);
+	_ ->
+	    false
     end.
 
 -spec err_db_failure(iq()) -> iq().

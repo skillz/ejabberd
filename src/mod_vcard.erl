@@ -38,6 +38,7 @@
 	 process_local_iq/1, process_sm_iq/1, string2lower/1,
 	 remove_user/2, export/1, import_info/0, import/5, import_start/2,
 	 depends/2, process_search/1, process_vcard/1, get_vcard/2,
+	 get_vcards/2, get_vcard_field/3, get_nickname/2,
 	 disco_items/5, disco_features/5, disco_identity/5,
 	 vcard_iq_set/1, mod_opt_type/1, set_vcard/3, make_vcard_search/4]).
 -export([init/1, handle_call/3, handle_cast/2,
@@ -568,6 +569,36 @@ import(LServer, {sql, _}, DBType, Tab, L) ->
 export(LServer) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:export(LServer).
+
+-spec get_vcards([binary()], binary()) -> [{binary(), xmlel()}].
+get_vcards(LUsers, LServer) ->
+    Mod = gen_mod:db_mod(LServer, ?MODULE),
+    case erlang:function_exported(Mod, get_vcards, 2) of
+	true -> Mod:get_vcards(LUsers, LServer);
+	false ->
+	    lists:filtermap(
+	      fun(LUser) ->
+		      case Mod:get_vcard(LUser, LServer) of
+			  {ok, [VCARD]} -> {true, {LUser, VCARD}};
+			  _ -> false
+		      end
+	      end, LUsers)
+    end.
+
+-spec get_vcard_field(binary(), binary(), binary()) -> binary().
+get_vcard_field(LUser, LServer, Field) ->
+    case get_vcard(LUser, LServer) of
+	{ok, [VCARD]} ->
+	    case fxml:get_subtag(VCARD, Field) of
+		false -> <<>>;
+		El -> fxml:get_tag_cdata(El)
+	    end;
+	_ -> <<>>
+    end.
+
+-spec get_nickname(binary(), binary()) -> binary().
+get_nickname(LUser, LServer) ->
+    get_vcard_field(LUser, LServer, <<"NICKNAME">>).
 
 %%%
 %%% WebAdmin

@@ -122,7 +122,7 @@ is_search_supported(_LServer) ->
     true.
 
 get_vcard(LUser, LServer) ->
-    case ejabberd_sql:sql_query(
+    case ejabberd_sql:sql_query_replica(
 	   LServer,
 	   ?SQL("select @(vcard)s from vcard"
                 " where username=%(LUser)s and %(LServer)H")) of
@@ -133,6 +133,24 @@ get_vcard(LUser, LServer) ->
 	    end;
 	{selected, []} -> {ok, []};
 	_ -> error
+    end.
+
+get_vcards(LUsers, LServer) ->
+    UserList = str:join(
+      [<<"'", (ejabberd_sql:escape(U))/binary, "'">> || U <- LUsers], <<",">>),
+    Query = [<<"select username, vcard from vcard where username IN (">>,
+	     UserList,
+	     <<") and server_host='">>, ejabberd_sql:escape(LServer), <<"'">>],
+    case ejabberd_sql:sql_query_replica(LServer, Query) of
+	{selected, _Cols, Rows} ->
+	    lists:filtermap(
+	      fun([User, SVCARD]) ->
+		      case fxml_stream:parse_element(SVCARD) of
+			  {error, _} -> false;
+			  VCARD -> {true, {User, VCARD}}
+		      end
+	      end, Rows);
+	_ -> []
     end.
 
 set_vcard(LUser, LServer, VCARD,

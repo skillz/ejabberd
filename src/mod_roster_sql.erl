@@ -116,7 +116,7 @@ write_roster_version(LUser, LServer, InTransaction, Ver) ->
     end.
 
 get_roster(LUser, LServer) ->
-    case ejabberd_sql:sql_query(
+    case ejabberd_sql:sql_query_replica(
 	   LServer,
 	   ?SQL("select @(username)s, @(jid)s, @(nick)s, @(subscription)s, "
 		"@(ask)s, @(askmessage)s, @(server)s, @(subscribe)s, "
@@ -271,7 +271,7 @@ set_roster_version(LUser, LServer, Version) ->
         "version=%(Version)s"]).
 
 get_roster_jid_groups(LServer, LUser) ->
-    ejabberd_sql:sql_query(
+    ejabberd_sql:sql_query_replica(
       LServer,
       ?SQL("select @(jid)s, @(grp)s from rostergroups where "
            "username=%(LUser)s and %(LServer)H")).
