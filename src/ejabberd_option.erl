@@ -163,6 +163,7 @@
 -export([sql_query_timeout/0, sql_query_timeout/1]).
 -export([sql_queue_type/0, sql_queue_type/1]).
 -export([sql_schema_multihost/0]).
+-export([sql_secondary_servers/0, sql_secondary_servers/1]).
 -export([sql_server/0, sql_server/1]).
 -export([sql_ssl/0, sql_ssl/1]).
 -export([sql_ssl_cafile/0, sql_ssl_cafile/1]).
@@ -1118,6 +1119,13 @@ sql_server() ->
 -spec sql_server(global | binary()) -> binary().
 sql_server(Host) ->
     ejabberd_config:get_option({sql_server, Host}).
+
+-spec sql_secondary_servers() -> [binary()].
+sql_secondary_servers() ->
+    sql_secondary_servers(global).
+-spec sql_secondary_servers(global | binary()) -> [binary()].
+sql_secondary_servers(Host) ->
+    ejabberd_config:get_option({sql_secondary_servers, Host}).
 
 -spec sql_ssl() -> boolean().
 sql_ssl() ->

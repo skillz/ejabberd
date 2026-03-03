@@ -624,17 +624,14 @@ check_packet_aux([Item | List], PType, JID, RosterInfo, Mode) ->
 			    boolean().
 is_ptype_match(Item, PType, respect_mute) ->
     %% In respect_mute mode, only match "mute" blocks: message-only deny
-    %% items that do NOT also block presence (i.e., not full blocks).
+    %% items that do NOT also block presence. Full blocks are not enforced.
     case Item#listitem.action of
 	deny ->
-	    IgnoreMessageFlag = Item#listitem.match_message
+	    MuteOnly = Item#listitem.match_message
 		andalso not Item#listitem.match_presence_in
 		andalso not Item#listitem.match_presence_out,
-	    BlockedMessageFlag = Item#listitem.match_message
-		andalso Item#listitem.match_presence_in
-		andalso Item#listitem.match_presence_out,
 	    case PType of
-		message -> IgnoreMessageFlag orelse BlockedMessageFlag;
+		message -> MuteOnly;
 		_ -> false
 	    end;
 	_ ->

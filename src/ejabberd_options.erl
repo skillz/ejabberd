@@ -430,6 +430,8 @@ opt_type(sql_query_timeout) ->
     econf:timeout(second);
 opt_type(sql_queue_type) ->
     econf:enum([ram, file]);
+opt_type(sql_secondary_servers) ->
+    econf:list(econf:binary(), [unique]);
 opt_type(sql_server) ->
     econf:binary();
 opt_type(sql_ssl) ->
@@ -738,6 +740,7 @@ options() ->
 	      end
       end},
      {sql_query_timeout, timer:seconds(60)},
+     {sql_secondary_servers, []},
      {sql_queue_type,
       fun(Host) -> ejabberd_config:get_option({queue_type, Host}) end},
      {sql_server, <<"localhost">>},

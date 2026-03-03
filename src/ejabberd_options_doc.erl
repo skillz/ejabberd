@@ -1531,6 +1531,13 @@ doc() ->
                "See description of _`queue_type`_ option for the explanation. "
                "The default value is the value defined in _`queue_type`_ "
                "or 'ram' if the latter is not set.")}},
+     {sql_secondary_servers,
+      #{value => ?T("List of virtual host names"),
+        desc =>
+            ?T("List of virtual host names that run SQL read replicas using the "
+               "same configuration as this host. Read-only queries may be routed "
+               "to these hosts via sql_query_replica/2. Each name must be in "
+               "_`hosts`_ and have SQL options configured. The default is empty.")}},
      {sql_server,
       #{value => "Host | IP Address | ODBC Connection String | Unix Socket Path",
         note => "improved in 24.06",

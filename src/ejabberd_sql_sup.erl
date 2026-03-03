@@ -169,7 +169,7 @@ child_specs(Host, PoolSize) ->
 
 -spec get_secondary_host(binary()) -> {ok, binary()} | error.
 get_secondary_host(Host) ->
-    case ejabberd_config:get_option({sql_secondary_servers, Host}, []) of
+    case ejabberd_option:sql_secondary_servers(Host) of
 	[] -> error;
 	Servers ->
 	    Index = rand:uniform(length(Servers)),
@@ -182,7 +182,7 @@ get_secondary_host(Host) ->
 
 -spec start_secondary_pools(binary()) -> ok.
 start_secondary_pools(Host) ->
-    SecondaryServers = ejabberd_config:get_option({sql_secondary_servers, Host}, []),
+    SecondaryServers = ejabberd_option:sql_secondary_servers(Host),
     lists:foreach(
       fun(SecHost) ->
 	      case start(SecHost) of
