@@ -3,7 +3,7 @@
 %%% Created : 16 Nov 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -48,8 +48,9 @@ feature_enabled(Config) ->
 
 service_vcard(Config) ->
     JID = proxy_jid(Config),
-    ct:comment("Retreiving vCard from ~s", [jid:encode(JID)]),
-    #iq{type = result, sub_els = [#vcard_temp{}]} =
+    ct:comment("Retrieving vCard from ~s", [jid:encode(JID)]),
+    VCard = mod_proxy65_opt:vcard(?config(server, Config)),
+    #iq{type = result, sub_els = [VCard]} =
 	send_recv(Config, #iq{type = get, to = JID, sub_els = [#vcard_temp{}]}),
     disconnect(Config).
 

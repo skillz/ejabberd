@@ -131,16 +131,27 @@ ul li #navhead a, ul li #navheadsub a, ul li #navheadsubsub a {
   background: #424a55;
   color: #fff;
 }
+
+#navitemlogin-start {
+  border-top: 0.2em solid #cae7e4;
+}
+#navitemlogin {
+  padding: 0.5em;
+  border-bottom: 0.2em solid #cae7e4;
+  padding-left: 0.5em;
+}
+#welcome {
+  padding: 2em;
+  border-top: 0.2em solid #cae7e4;
+  border-bottom: 0.2em solid #cae7e4;
+  background-color: #f4f9f9;
+}
 #lastactivity li {
   padding: 2px;
   margin-bottom: -1px;
 }
 thead tr td {
-  background: #3eaffa;
-  color: #fff;
-}
-thead tr td a {
-  color: #fff;
+  background: #cae7e4;
 }
 td.copy {
   text-align: center;
@@ -227,25 +238,32 @@ h3 {
   padding-top: 25px;
   width: 70%;
 }
+div.anchorlink {
+  display: inline-block;
+  float: right;
+  margin-top: 1em;
+  margin-right: 1em;
+}
+div.anchorlink a {
+  padding: 3px;
+  background: #cae7e4;
+  font-size: 0.75em;
+  color: black;
+}
 div.guidelink,
 p[dir=ltr] {
   display: inline-block;
   float: right;
-
-  margin: 0;
+  margin-top: 1em;
   margin-right: 1em;
 }
 div.guidelink a,
 p[dir=ltr] a {
-  display: inline-block;
-  border-radius: 3px;
   padding: 3px;
-
   background: #3eaffa;
-
-  text-transform: uppercase;
   font-size: 0.75em;
   color: #fff;
+  border-radius: 2px;
 }
 table {
   margin-top: 1em;
@@ -266,7 +284,7 @@ input,
 select {
   font-size: 1em;
 }
-p.result {
+.result {
   border: 1px;
   border-style: dashed;
   border-color: #FE8A02;
@@ -276,4 +294,29 @@ p.result {
 }
 *.alignright {
   text-align: right;
+}
+.btn-danger:hover {
+	color: #fff;
+	background-color: #cb2431;
+}
+.btn-danger {
+	color: #cb2431;
+	transition: none;
+}
+h3.api {
+  border-bottom: 1px solid #b6b6b6;
+}
+details > summary {
+  background-color: #dbeceb;
+  border: none;
+  cursor: pointer;
+  list-style: none;
+  padding: 8px;
+  border-radius: 4px;
+}
+details > pre, details > p {
+  background-color: #f2f8f7;
+  border-bottom: 0.2em solid #dbeceb;
+  margin: 0;
+  padding: 10px;
 }

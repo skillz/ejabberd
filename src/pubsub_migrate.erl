@@ -5,7 +5,7 @@
 %%% Created : 26 Jul 2014 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,7 +24,7 @@
 %%%----------------------------------------------------------------------
 
 -module(pubsub_migrate).
-
+-dialyzer({no_return, report_and_stop/2}).
 -include("pubsub.hrl").
 -include("logger.hrl").
 
@@ -59,7 +59,7 @@ update_node_database(Host, ServerHost) ->
 											{unknown,
 											 Publisher},
 										    M =
-											{p1_time_compat:timestamp(),
+											{erlang:timestamp(),
 											 Publisher},
 										    mnesia:write(#pubsub_item{itemid
 														  =
@@ -450,7 +450,7 @@ bin(L) -> iolist_to_binary(L).
 convert_table_to_binary(Tab, Fields, Type, DetectFun, ConvertFun) ->
     case is_table_still_list(Tab, DetectFun) of
         true ->
-            ?INFO_MSG("Converting '~s' table from strings to binaries.", [Tab]),
+            ?INFO_MSG("Converting '~ts' table from strings to binaries.", [Tab]),
             TmpTab = list_to_atom(atom_to_list(Tab) ++ "_tmp_table"),
             catch mnesia:delete_table(TmpTab),
             case ejabberd_mnesia:create(?MODULE, TmpTab,
@@ -526,7 +526,7 @@ is_table_still_list(Tab, DetectFun, Key) ->
 report_and_stop(Tab, Err) ->
     ErrTxt = lists:flatten(
                io_lib:format(
-                 "Failed to convert '~s' table to binary: ~p",
+                 "Failed to convert '~ts' table to binary: ~p",
                  [Tab, Err])),
     ?CRITICAL_MSG(ErrTxt, []),
     ejabberd:halt().

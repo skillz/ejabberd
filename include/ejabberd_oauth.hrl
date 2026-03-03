@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -23,4 +23,11 @@
           us = {<<"">>, <<"">>}    :: {binary(), binary()} | '_',
           scope = []               :: [binary()] | '_',
           expire                   :: integer() | '$1' | '_'
+         }).
+
+-record(oauth_client, {
+          client_id = <<"">>       :: binary() | '_',
+          client_name = <<"">>     :: binary() | '_',
+          grant_type               :: password | implicit | '_',
+          options                  :: [any()] | '_'
          }).

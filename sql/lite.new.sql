@@ -1,5 +1,5 @@
 --
--- ejabberd, Copyright (C) 2002-2019   ProcessOne
+-- ejabberd, Copyright (C) 2002-2026   ProcessOne
 --
 -- This program is free software; you can redistribute it and/or
 -- modify it under the terms of the GNU General Public License as
@@ -18,13 +18,14 @@
 
 CREATE TABLE users (
     username text NOT NULL,
+    type smallint,
     server_host text NOT NULL,
     password text NOT NULL,
     serverkey text NOT NULL DEFAULT '',
     salt text NOT NULL DEFAULT '',
     iterationcount integer NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (server_host, username)
+    PRIMARY KEY (server_host, username, type)
 );
 
 
@@ -52,7 +53,6 @@ CREATE TABLE rosterusers (
 );
 
 CREATE UNIQUE INDEX i_rosteru_sh_user_jid ON rosterusers (server_host, username, jid);
-CREATE INDEX i_rosteru_sh_username ON rosterusers (server_host, username);
 CREATE INDEX i_rosteru_sh_jid ON rosterusers (server_host, jid);
 
 
@@ -73,6 +73,8 @@ CREATE TABLE sr_group (
     PRIMARY KEY (server_host, name)
 );
 
+CREATE UNIQUE INDEX i_sr_group_sh_name ON sr_group (server_host, name);
+
 CREATE TABLE sr_user (
     jid text NOT NULL,
     server_host text NOT NULL,
@@ -81,7 +83,7 @@ CREATE TABLE sr_user (
     PRIMARY KEY (server_host, jid, grp)
 );
 
-CREATE INDEX i_sr_user_sh_jid ON sr_user (server_host, jid);
+CREATE UNIQUE INDEX i_sr_user_sh_jid_grp ON sr_user (server_host, jid, grp);
 CREATE INDEX i_sr_user_sh_grp ON sr_user (server_host, grp);
 
 CREATE TABLE spool (
@@ -105,6 +107,7 @@ CREATE TABLE archive (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind text,
     nick text,
+    origin_id text,
     created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -112,6 +115,11 @@ CREATE INDEX i_archive_sh_username_timestamp ON archive (server_host, username, 
 CREATE INDEX i_archive_sh_username_peer ON archive (server_host, username, peer);
 CREATE INDEX i_archive_sh_username_bare_peer ON archive (server_host, username, bare_peer);
 CREATE INDEX i_archive_sh_timestamp ON archive (server_host, timestamp);
+CREATE INDEX i_archive_sh_username_origin_id ON archive (server_host, username, origin_id);
+
+-- To update 'archive' from ejabberd <= 23.10:
+-- ALTER TABLE archive ADD COLUMN origin_id text NOT NULL DEFAULT '';
+-- CREATE INDEX i_archive_sh_username_origin_id ON archive (server_host, username, origin_id);
 
 CREATE TABLE archive_prefs (
     username text NOT NULL,
@@ -187,7 +195,6 @@ CREATE TABLE privacy_list (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX i_privacy_list_sh_username ON privacy_list (server_host, username);
 CREATE UNIQUE INDEX i_privacy_list_sh_username_name ON privacy_list (server_host, username, name);
 
 CREATE TABLE privacy_list_data (
@@ -211,9 +218,6 @@ CREATE TABLE private_storage (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (server_host, username, namespace)
 );
-
-CREATE INDEX i_private_storage_sh_username ON private_storage (server_host, username);
-
 
 CREATE TABLE roster_version (
     username text NOT NULL,
@@ -282,6 +286,7 @@ CREATE TABLE muc_room (
 );
 
 CREATE UNIQUE INDEX i_muc_room_name_host ON muc_room (name, host);
+CREATE INDEX i_muc_room_host_created_at ON muc_room (host, created_at);
 
 CREATE TABLE muc_registered (
     jid text NOT NULL,
@@ -315,7 +320,6 @@ CREATE TABLE muc_online_users (
 );
 
 CREATE UNIQUE INDEX i_muc_online_users ON muc_online_users (username, server, resource, name, host);
-CREATE INDEX i_muc_online_users_us ON muc_online_users (username, server);
 
 CREATE TABLE muc_room_subscribers (
    room text NOT NULL,
@@ -327,6 +331,7 @@ CREATE TABLE muc_room_subscribers (
 );
 
 CREATE INDEX i_muc_room_subscribers_host_jid ON muc_room_subscribers(host, jid);
+CREATE INDEX i_muc_room_subscribers_jid ON muc_room_subscribers(jid);
 CREATE UNIQUE INDEX i_muc_room_subscribers_host_room_jid ON muc_room_subscribers(host, room, jid);
 
 CREATE TABLE motd (
@@ -368,6 +373,13 @@ CREATE TABLE oauth_token (
     expire bigint NOT NULL
 );
 
+CREATE TABLE oauth_client (
+    client_id text PRIMARY KEY,
+    client_name text NOT NULL,
+    grant_type text NOT NULL,
+    options text NOT NULL
+);
+
 CREATE TABLE route (
     domain text NOT NULL,
     server_host text NOT NULL,
@@ -377,7 +389,6 @@ CREATE TABLE route (
 );
 
 CREATE UNIQUE INDEX i_route ON route(domain, server_host, node, pid);
-CREATE INDEX i_route_domain ON route(domain);
 
 CREATE TABLE bosh (
     sid text NOT NULL,
@@ -410,6 +421,7 @@ CREATE TABLE push_session (
 );
 
 CREATE UNIQUE INDEX i_push_session_susn ON push_session (server_host, username, service, node);
+CREATE INDEX i_push_session_sh_username_timestamp ON push_session (server_host, username, timestamp);
 
 CREATE TABLE mix_channel (
     channel text NOT NULL,
@@ -437,7 +449,6 @@ CREATE TABLE mix_participant (
 );
 
 CREATE UNIQUE INDEX i_mix_participant ON mix_participant (channel, service, username, domain);
-CREATE INDEX i_mix_participant_chan_serv ON mix_participant (channel, service);
 
 CREATE TABLE mix_subscription (
     channel text NOT NULL,
@@ -449,9 +460,7 @@ CREATE TABLE mix_subscription (
 );
 
 CREATE UNIQUE INDEX i_mix_subscription ON mix_subscription (channel, service, username, domain, node);
-CREATE INDEX i_mix_subscription_chan_serv_ud ON mix_subscription (channel, service, username, domain);
 CREATE INDEX i_mix_subscription_chan_serv_node ON mix_subscription (channel, service, node);
-CREATE INDEX i_mix_subscription_chan_serv ON mix_subscription (channel, service);
 
 CREATE TABLE mix_pam (
     username text NOT NULL,
@@ -463,4 +472,33 @@ CREATE TABLE mix_pam (
 );
 
 CREATE UNIQUE INDEX i_mix_pam ON mix_pam (username, server_host, channel, service);
-CREATE INDEX i_mix_pam_us ON mix_pam (username, server_host);
+
+CREATE TABLE mqtt_pub (
+    username text NOT NULL,
+    server_host text NOT NULL,
+    resource text NOT NULL,
+    topic text NOT NULL,
+    qos smallint NOT NULL,
+    payload blob NOT NULL,
+    payload_format smallint NOT NULL,
+    content_type text NOT NULL,
+    response_topic text NOT NULL,
+    correlation_data blob NOT NULL,
+    user_properties blob NOT NULL,
+    expiry bigint NOT NULL
+);
+
+CREATE UNIQUE INDEX i_mqtt_topic_server ON mqtt_pub (topic, server_host);
+
+CREATE TABLE invite_token (
+    token text NOT NULL,
+    username text NOT NULL,
+    server_host text NOT NULL,
+    invitee text NOT NULL DEFAULT '',
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    type character(1) NOT NULL,
+    account_name text NOT NULL,
+    PRIMARY KEY (token)
+);
+CREATE INDEX i_invite_token_username_server_host ON invite_token(username, server_host);

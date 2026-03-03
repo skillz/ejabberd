@@ -5,7 +5,7 @@
 %%% Created : 21 Aug 2007 by Badlop <badlop@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -23,9 +23,6 @@
 %%%
 %%%----------------------------------------------------------------------
 
-%%% TODO: Implement a command in ejabberdctl 'help COMMAND LANGUAGE' that shows
-%%% a coding example to call that command in a specific language (python, php).
-
 %%% TODO: Remove support for plaintext password
 
 %%% TODO: commands strings should be strings without ~n
@@ -35,164 +32,31 @@
 
 -author('badlop@process-one.net').
 
--export([start/2, start_link/2, handler/2, process/2, accept/1,
-	 transform_listen_option/2, listen_opt_type/1, listen_options/0]).
+-export([start/3, start_link/3, handler/2, process/2, accept/1,
+	 listen_options/0]).
 
 -include("logger.hrl").
 -include("ejabberd_http.hrl").
 -include("mod_roster.hrl").
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 -record(state,
-	{access_commands = [] :: list(),
-         auth = noauth        :: noauth | map(),
+	{auth = noauth        :: noauth | map(),
          get_auth = true      :: boolean(),
 	 ip                   :: inet:ip_address()}).
-
-%% Test:
-
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, take_integer, [{struct, [{thisinteger, 5}]}]}).
-%% {ok,{response,[{struct,[{zero,0}]}]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echo_string, [{struct, [{thisstring, "abcd"}]}]}).
-%% {ok,{response,[{struct,[{thatstring,"abcd"}]}]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, tell_tuple_3integer, [{struct, [{thisstring, "abcd"}]}]}).
-%% {ok,{response,
-%%         [{struct,
-%%              [{thattuple,
-%%                   {array,
-%%                       [{struct,[{first,123}]},
-%%                        {struct,[{second,456}]},
-%%                        {struct,[{third,789}]}]}}]}]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, pow, [{struct, [{base, 5}, {exponent, 7}]}]}).
-%% {ok,{response,[{struct,[{pow,78125}]}]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, seq, [{struct, [{from, 3}, {to, 7}]}]}).
-%% {ok,{response,[{array,[{struct,[{intermediate,3}]},
-%%                        {struct,[{intermediate,4}]},
-%%                        {struct,[{intermediate,5}]},
-%%                        {struct,[{intermediate,6}]},
-%%                        {struct,[{intermediate,7}]}]}]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, substrs, [{struct, [{word, "abcd"}]}]}).
-%% NO:
-%% {ok,{response,[{array,[{struct,[{miniword,"a"}]},
-%%                        {struct,[{miniword,"ab"}]},
-%%                        {struct,[{miniword,"abc"}]},
-%%                        {struct,[{miniword,"abcd"}]}]}]}}
-%% {ok,{response,
-%%         [{struct,
-%%              [{substrings,
-%%                   {array,
-%%                       [{struct,[{miniword,"a"}]},
-%%                        {struct,[{miniword,"ab"}]},
-%%                        {struct,[{miniword,"abc"}]},
-%%                        {struct,[{miniword,"abcd"}]}]}}]}]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, splitjid, [{struct, [{jid, "abcd@localhost/work"}]}]}).
-%% {ok,{response,
-%%         [{struct,
-%%              [{jidparts,
-%%                   {array,
-%%                       [{struct,[{user,"abcd"}]},
-%%                        {struct,[{server,"localhost"}]},
-%%                        {struct,[{resource,"work"}]}]}}]}]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echo_integer_string, [{struct, [{thisstring, "abc"}, {thisinteger, 55}]}]}).
-%% {ok,{response,
-%%         [{struct,
-%%              [{thistuple,
-%%                   {array,
-%%                       [{struct,[{thisinteger,55}]},
-%%                        {struct,[{thisstring,"abc"}]}]}}]}]}}
-%%
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echo_list_integer, [{struct, [{thislist, {array, [{struct, [{thisinteger, 55}, {thisinteger, 4567}]}]}}]}]}).
-%% {ok,{response,
-%%         [{struct,
-%%              [{thatlist,
-%%                   {array,
-%%                       [{struct,[{thatinteger,55}]},
-%%                        {struct,[{thatinteger,4567}]}]}}]}]}}
-%%
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echo_integer_list_string, [{struct, [{thisinteger, 123456}, {thislist, {array, [{struct, [{thisstring, "abc"}, {thisstring, "bobo baba"}]}]}}]}]}).
-%% {ok,
-%%  {response,
-%%   [{struct,
-%%     [{thistuple,
-%%       {array,
-%%        [{struct,[{thatinteger,123456}]},
-%%         {struct,
-%%          [{thatlist,
-%%            {array,
-%%             [{struct,[{thatstring,"abc"}]},
-%%              {struct,[{thatstring,"bobo baba"}]}]}}]}]}}]}]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, take_tuple_2integer, [{struct, [{thistuple, {array, [{struct, [{thisinteger1, 55}, {thisinteger2, 4567}]}]}}]}]}).
-%% {ok,{response,[{struct,[{zero,0}]}]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echo_isatils, [{struct,
-%% 	                                      [{thisinteger, 123456990},
-%% 			                               {thisstring, "This is ISATILS"},
-%% 			                               {thisatom, "test_isatils"},
-%% 			                               {thistuple, {array, [{struct, [
-%%                                            {listlen, 2},
-%% 			                                  {thislist, {array, [{struct, [
-%%                                               {contentstring, "word1"},
-%%                                               {contentstring, "word 2"}
-%%                                            ]}]}}
-%% 										   ]}]}}
-%% 										  ]}]}).
-%% {ok,{response,
-%%         [{struct,
-%%              [{results,
-%%                   {array,
-%%                       [{struct,[{thatinteger,123456990}]},
-%%                        {struct,[{thatstring,"This is ISATILS"}]},
-%%                        {struct,[{thatatom,"test_isatils"}]},
-%%                        {struct,
-%%                            [{thattuple,
-%%                                 {array,
-%%                                     [{struct,[{listlen,123456990}]},
-%%                                      {struct,[{thatlist,...}]}]}}]}]}}]}]}}
-
-%% ecommand doesn't exist:
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echo_integer_string2, [{struct, [{thisstring, "abc"}]}]}).
-%% {ok,{response,{fault,-1, "Unknown call: {call,echo_integer_string2,[{struct,[{thisstring,\"abc\"}]}]}"}}}
-%%
-%% Duplicated argument:
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echo_integer_string, [{struct, [{thisstring, "abc"}, {thisinteger, 44}, {thisinteger, 55}]}]}).
-%% {ok,{response,{fault,-104, "Error -104\nAttribute 'thisinteger' duplicated:\n[{thisstring,\"abc\"},{thisinteger,44},{thisinteger,55}]"}}}
-%%
-%% Missing argument:
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echo_integer_string, [{struct, [{thisstring, "abc"}]}]}).
-%% {ok,{response,{fault,-106, "Error -106\nRequired attribute 'thisinteger' not found:\n[{thisstring,\"abc\"}]"}}}
-%%
-%% Duplicated tuple element:
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, take_tuple_2integer, [{struct, [{thistuple, {array, [{struct, [{thisinteger1, 55}, {thisinteger1, 66}, {thisinteger2, 4567}]}]}}]}]}).
-%% {ok,{response,{fault,-104, "Error -104\nAttribute 'thisinteger1' defined multiple times:\n[{thisinteger1,55},{thisinteger1,66},{thisinteger2,4567}]"}}}
-%%
-%% Missing element in tuple:
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, take_tuple_2integer, [{struct, [{thistuple, {array, [{struct, [{thisinteger1, 55}, {thisintegerc, 66}, {thisinteger, 4567}]}]}}]}]}).
-%% {ok,{response,{fault,-106, "Error -106\nRequired attribute 'thisinteger2' not found:\n[{thisintegerc,66},{thisinteger,4567}]"}}}
-%%
-%% The ecommand crashed:
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, this_crashes, [{struct, []}]}).
-%% {ok,{response,{fault,-100, "Error -100\nA problem 'error' occurred executing the command this_crashes with arguments []: badarith"}}}
 
 %% -----------------------------
 %% Listener interface
 %% -----------------------------
 
-start({gen_tcp = _SockMod, Socket}, Opts) ->
-    ejabberd_http:start({gen_tcp, Socket}, [{xmlrpc, true}|Opts]).
+start(SockMod, Socket, Opts) ->
+    Opts1 = [{request_handlers, [{[], ?MODULE}]}|Opts],
+    ejabberd_http:start(SockMod, Socket, Opts1).
 
-start_link({gen_tcp = _SockMod, Socket}, Opts) ->
-    ejabberd_http:start_link({gen_tcp, Socket}, [{xmlrpc, true}|Opts]).
+start_link(SockMod, Socket, Opts) ->
+    Opts1 = [{request_handlers, [{[], ?MODULE}]}|Opts],
+    ejabberd_http:start_link(SockMod, Socket, Opts1).
 
 accept(Pid) ->
     ejabberd_http:accept(Pid).
@@ -200,10 +64,10 @@ accept(Pid) ->
 %% -----------------------------
 %% HTTP interface
 %% -----------------------------
-process(_, #request{method = 'POST', data = Data, opts = Opts, ip = {IP, _}}) ->
-    AccessCommands = proplists:get_value(access_commands, Opts),
+
+process(_, #request{method = 'POST', data = Data, ip = {IP, _}}) ->
     GetAuth = true,
-    State = #state{access_commands = AccessCommands, get_auth = GetAuth, ip = IP},
+    State = #state{get_auth = GetAuth, ip = IP},
     case fxml_stream:parse_element(Data) of
 	{error, _} ->
 	    {400, [],
@@ -212,13 +76,13 @@ process(_, #request{method = 'POST', data = Data, opts = Opts, ip = {IP, _}}) ->
 	El ->
 	    case fxmlrpc:decode(El) of
 		{error, _} = Err ->
-		    ?ERROR_MSG("XML-RPC request ~s failed with reason: ~p",
+		    ?ERROR_MSG("XML-RPC request ~ts failed with reason: ~p",
 			       [Data, Err]),
 		    {400, [],
 		     #xmlel{name = <<"h1">>, attrs = [],
 			    children = [{xmlcdata, <<"Malformed Request">>}]}};
 		{ok, RPC} ->
-		    ?DEBUG("got XML-RPC request: ~p", [RPC]),
+		    ?DEBUG("Got XML-RPC request: ~p", [RPC]),
 		    {false, Result} = handler(State, RPC),
 		    XML = fxml:element_to_binary(fxmlrpc:encode(Result)),
 		    {200, [{<<"Content-Type">>, <<"text/xml">>}],
@@ -234,6 +98,8 @@ process(_, _) ->
 %% Access verification
 %% -----------------------------
 
+-spec extract_auth([{user | server | token | password, binary()}]) ->
+			  map() | {error, not_found | expired | invalid_auth}.
 extract_auth(AuthList) ->
     ?DEBUG("AUTHLIST ~p", [AuthList]),
     try get_attrs([user, server, token], AuthList) of
@@ -270,26 +136,6 @@ extract_auth(AuthList) ->
 %% Handlers
 %% -----------------------------
 
-%% Call:           Arguments:                                      Returns:
-
-%% .............................
-%%  Access verification
-
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echothis, [152]}).
-%% {ok,{response,{fault,-103, "Error -103\nRequired authentication: {call,echothis,[152]}"}}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echothis, [{struct, [{user, "badlop"}, {server, "localhost"}, {password, "ada"}]}, 152]}).
-%% {ok,{response,{fault,-103,
-%%      "Error -103\nAuthentication non valid: [{user,\"badlop\"},\n
-%% 	 {server,\"localhost\"},\n
-%% 	 {password,\"ada\"}]"}}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echothis, [{struct, [{user, "badlop"}, {server, "localhost"}, {password, "ada90ada"}]}, 152]}).
-%% {ok,{response,[152]}}
-%%
-%% xmlrpc:call({127, 0, 0, 1}, 4560, "/", {call, echothis, [{struct, [{user, "badlop"}, {server, "localhost"}, {password, "79C1574A43BC995F2B145A299EF97277"}]}, 152]}).
-%% {ok,{response,[152]}}
-
 handler(#state{get_auth = true, auth = noauth, ip = IP} = State,
 	{call, Method,
 	 [{struct, AuthList} | Arguments] = AllArgs}) ->
@@ -306,10 +152,6 @@ handler(#state{get_auth = true, auth = noauth, ip = IP} = State,
 	    build_fault_response(-118,
 				 "Invalid oauth token",
 				 []);
-	{error, Value} ->
-	    build_fault_response(-118,
-				 "Invalid authentication data: ~p",
-				 [Value]);
         Auth ->
             handler(State#state{get_auth = false, auth = Auth#{ip => IP, caller_module => ?MODULE}},
                     {call, Method, Arguments})
@@ -319,38 +161,34 @@ handler(#state{get_auth = true, auth = noauth, ip = IP} = State,
 			      auth = #{ip => IP, caller_module => ?MODULE}},
 		  {call, Method, AllArgs})
     end;
+
 %% .............................
 %%  Debug
-%% echothis       String                                          String
+
 handler(_State, {call, echothis, [A]}) ->
     {false, {response, [A]}};
-%% echothisnew    struct[{sentence, String}]   struct[{repeated, String}]
+
 handler(_State,
 	{call, echothisnew, [{struct, [{sentence, A}]}]}) ->
     {false, {response, [{struct, [{repeated, A}]}]}};
-%% multhis        struct[{a, Integer}, {b, Integer}]              Integer
+
 handler(_State,
 	{call, multhis, [{struct, [{a, A}, {b, B}]}]}) ->
     {false, {response, [A * B]}};
-%% multhisnew     struct[{a, Integer}, {b, Integer}]    struct[{mu, Integer}]
+
 handler(_State,
 	{call, multhisnew, [{struct, [{a, A}, {b, B}]}]}) ->
     {false, {response, [{struct, [{mu, A * B}]}]}};
+
 %% .............................
 %% ejabberd commands
+
 handler(State, {call, Command, []}) ->
     handler(State, {call, Command, [{struct, []}]});
 handler(State,
-	{call, Command, [{struct, AttrL}]} = Payload) ->
-    case ejabberd_commands:get_command_format(Command, State#state.auth) of
-      {error, command_unknown} ->
-	  build_fault_response(-112, "Unknown call: ~p",
-			       [Payload]);
-      {ArgsF, ResultF} ->
-	  try_do_command(State#state.access_commands,
-			 State#state.auth, Command, AttrL, ArgsF, ResultF)
-    end;
-%% If no other guard matches
+	{call, Command, [{struct, AttrL}]}) ->
+    {ArgsF, ArgsR, ResultF} = ejabberd_commands:get_command_format(Command, State#state.auth),
+    try_do_command(State#state.auth, Command, AttrL, ArgsF, ArgsR, ResultF);
 handler(_State, Payload) ->
     build_fault_response(-112, "Unknown call: ~p",
 			 [Payload]).
@@ -359,10 +197,8 @@ handler(_State, Payload) ->
 %% Command
 %% -----------------------------
 
-try_do_command(AccessCommands, Auth, Command, AttrL,
-	       ArgsF, ResultF) ->
-    try do_command(AccessCommands, Auth, Command, AttrL,
-		   ArgsF, ResultF)
+try_do_command(Auth, Command, AttrL, ArgsF, ArgsR, ResultF) ->
+    try do_command(Auth, Command, AttrL, ArgsF, ArgsR, ResultF)
     of
       {command_result, ResultFormatted} ->
 	  {false, {response, [ResultFormatted]}}
@@ -397,19 +233,23 @@ build_fault_response(Code, ParseString, ParseArgs) ->
     ?WARNING_MSG(FaultString, []),
     {false, {response, {fault, Code, list_to_binary(FaultString)}}}.
 
-do_command(AccessCommands, Auth, Command, AttrL, ArgsF,
+do_command(Auth, Command, AttrL, ArgsF, ArgsR,
 	   ResultF) ->
-    ArgsFormatted = format_args(AttrL, ArgsF),
-    Auth2 = case AccessCommands of
-		V when is_list(V) ->
-		    Auth#{extra_permissions => AccessCommands};
-		_ ->
-		    Auth
-	    end,
-    Result =
-	ejabberd_commands:execute_command2(Command, ArgsFormatted, Auth2),
+    ArgsFormatted = format_args(rename_old_args(AttrL, ArgsR), ArgsF),
+    Result = ejabberd_commands:execute_command2(Command, ArgsFormatted, Auth),
     ResultFormatted = format_result(Result, ResultF),
-    {command_result, ResultFormatted}.
+    {command_result, {struct, [ResultFormatted]}}.
+
+rename_old_args(Args, []) ->
+    Args;
+rename_old_args(Args, [{OldName, NewName} | ArgsR]) ->
+    Args2 = case lists:keytake(OldName, 1, Args) of
+	{value, {OldName, Value}, ArgsTail} ->
+	    [{NewName, Value} | ArgsTail];
+	false ->
+	    Args
+    end,
+    rename_old_args(Args2, ArgsR).
 
 %%-----------------------------
 %% Format arguments
@@ -422,7 +262,6 @@ get_attr(A, L) ->
     case lists:keysearch(A, 1, L) of
       {value, {A, Value}} -> Value;
       false ->
-	  %% Report the error and then force a crash
 	  exit({attribute_not_found, A, L})
     end.
 
@@ -430,10 +269,8 @@ get_elem_delete(A, L) ->
     case proplists:get_all_values(A, L) of
       [Value] -> {Value, proplists:delete(A, L)};
       [_, _ | _] ->
-	  %% Crash reporting the error
 	  exit({duplicated_attribute, A, L});
       [] ->
-	  %% Report the error and then force a crash
 	  exit({attribute_not_found, A, L})
     end.
 
@@ -455,6 +292,14 @@ format_args(Args, ArgsFormat) ->
     end.
 
 format_arg({array, Elements},
+	   {list, {_ElementDefName, ElementDefFormat}})
+    when is_list(Elements) ->
+    lists:map(fun (ElementValue) ->
+		      format_arg(ElementValue, ElementDefFormat)
+	      end,
+	      Elements);
+
+format_arg({array, Elements},
 	   {list, {ElementDefName, ElementDefFormat}})
     when is_list(Elements) ->
     lists:map(fun ({struct, [{ElementName, ElementValue}]}) when
@@ -470,7 +315,14 @@ format_arg({array, [{struct, Elements}]},
 		      format_arg(ElementValue, ElementDefFormat)
 	      end,
 	      Elements);
+%% Old ejabberd 23.10
 format_arg({array, [{struct, Elements}]},
+	   {tuple, ElementsDef})
+    when is_list(Elements) ->
+    FormattedList = format_args(Elements, ElementsDef),
+    list_to_tuple(FormattedList);
+%% New ejabberd 24.02
+format_arg({struct, Elements},
 	   {tuple, ElementsDef})
     when is_list(Elements) ->
     FormattedList = format_args(Elements, ElementsDef),
@@ -487,7 +339,7 @@ format_arg(Arg, string) when is_binary(Arg) -> binary_to_list(Arg);
 format_arg(undefined, binary) -> <<>>;
 format_arg(undefined, string) -> "";
 format_arg(Arg, Format) ->
-    ?ERROR_MSG("don't know how to format Arg ~p for format ~p", [Arg, Format]),
+    ?ERROR_MSG("Don't know how to format Arg ~p for format ~p", [Arg, Format]),
     exit({invalid_arg_type, Arg, Format}).
 
 process_unicode_codepoints(Str) ->
@@ -499,53 +351,50 @@ process_unicode_codepoints(Str) ->
 %% Result
 %% -----------------------------
 
+format_result(Code, {Name, rescode}) ->
+    {Name, make_status(Code)};
+format_result({_Code, Text}, {_Name, restuple}) ->
+    {text, io_lib:format("~s", [Text])};
+format_result({error, Error}, _) when is_list(Error) ->
+    throw({error, lists:flatten(Error)});
 format_result({error, Error}, _) ->
     throw({error, Error});
+format_result({error, _Type, _Code, Error}, _) when is_list(Error) ->
+    throw({error, lists:flatten(Error)});
 format_result({error, _Type, _Code, Error}, _) ->
     throw({error, Error});
 format_result(String, string) -> lists:flatten(String);
 format_result(Atom, {Name, atom}) ->
-    {struct,
-     [{Name, iolist_to_binary(atom_to_list(Atom))}]};
+     {Name, iolist_to_binary(atom_to_list(Atom))};
 format_result(Int, {Name, integer}) ->
-    {struct, [{Name, Int}]};
+    {Name, Int};
 format_result([A|_]=String, {Name, string}) when is_list(String) and is_integer(A) ->
-    {struct, [{Name, lists:flatten(String)}]};
+    {Name, lists:flatten(String)};
 format_result(Binary, {Name, string}) when is_binary(Binary) ->
-    {struct, [{Name, binary_to_list(Binary)}]};
+    {Name, binary_to_list(Binary)};
 format_result(Atom, {Name, string}) when is_atom(Atom) ->
-    {struct, [{Name, atom_to_list(Atom)}]};
+    {Name, atom_to_list(Atom)};
 format_result(Integer, {Name, string}) when is_integer(Integer) ->
-    {struct, [{Name, integer_to_list(Integer)}]};
+    {Name, integer_to_list(Integer)};
 format_result(Other, {Name, string}) ->
-    {struct, [{Name, io_lib:format("~p", [Other])}]};
+    {Name, io_lib:format("~p", [Other])};
 format_result(String, {Name, binary}) when is_list(String) ->
-    {struct, [{Name, lists:flatten(String)}]};
+    {Name, lists:flatten(String)};
 format_result(Binary, {Name, binary}) when is_binary(Binary) ->
-    {struct, [{Name, binary_to_list(Binary)}]};
-format_result(Code, {Name, rescode}) ->
-    {struct, [{Name, make_status(Code)}]};
-format_result({Code, Text}, {Name, restuple}) ->
-    {struct,
-     [{Name, make_status(Code)},
-      {text, lists:flatten(Text)}]};
-%% Result is a list of something: [something()]
-format_result(Elements, {Name, {list, ElementsDef}}) ->
-    FormattedList = lists:map(fun (Element) ->
-				      format_result(Element, ElementsDef)
-			      end,
-			      Elements),
-    {struct, [{Name, {array, FormattedList}}]};
-%% Result is a tuple with several elements: {something1(), something2(), ...}
-format_result(ElementsTuple,
-	      {Name, {tuple, ElementsDef}}) ->
-    ElementsList = tuple_to_list(ElementsTuple),
-    ElementsAndDef = lists:zip(ElementsList, ElementsDef),
-    FormattedList = lists:map(fun ({Element, ElementDef}) ->
-				      format_result(Element, ElementDef)
-			      end,
-			      ElementsAndDef),
-    {struct, [{Name, {array, FormattedList}}]};
+    {Name, binary_to_list(Binary)};
+
+
+format_result(Els, {Name, {list, Def}}) ->
+    FormattedList = [element(2, format_result(El, Def)) || El <- Els],
+    {Name, {array, FormattedList}};
+
+
+format_result(Tuple,
+	      {Name, {tuple, Def}}) ->
+    Els = lists:zip(tuple_to_list(Tuple), Def),
+    FormattedList = [format_result(El, ElDef) || {El, ElDef} <- Els],
+    {Name, {struct, FormattedList}};
+
 format_result(404, {Name, _}) ->
     {struct, [{Name, make_status(not_found)}]}.
 
@@ -555,32 +404,11 @@ make_status(false) -> 1;
 make_status(error) -> 1;
 make_status(_) -> 1.
 
-transform_listen_option({access_commands, ACOpts}, Opts) ->
-    NewACOpts = lists:map(
-                  fun({AName, ACmds, AOpts}) ->
-                          {AName, [{commands, ACmds}, {options, AOpts}]};
-                     (Opt) ->
-                          Opt
-                  end, ACOpts),
-    [{access_commands, NewACOpts}|Opts];
-transform_listen_option(Opt, Opts) ->
-    [Opt|Opts].
-
-listen_opt_type(access_commands) ->
-    fun(Opts) ->
-	    lists:map(
-	      fun({Ac, AcOpts}) ->
-		      Commands = case proplists:get_value(
-					commands, lists:flatten(AcOpts), all) of
-				     Cmd when is_atom(Cmd) -> Cmd;
-				     Cmds when is_list(Cmds) ->
-					 true = lists:all(fun is_atom/1, Cmds),
-					 Cmds
-				 end,
-		      {<<"ejabberd_xmlrpc compatibility shim">>,
-		       {[?MODULE], [{access, Ac}], Commands}}
-	      end, lists:flatten(Opts))
-    end.
-
 listen_options() ->
-    [{access_commands, []}].
+    ?WARNING_MSG("It is deprecated defining ejabberd_xmlrpc as a listen module "
+                 "in the ejabberd configuration. Support for that configuration"
+                 " method may be removed in a future ejabberd release. You are "
+                 "encouraged to define ejabberd_xmlrpc inside request_handlers "
+                 "option of ejabberd_http listen module. See the ejabberd "
+                 "documentation for details: _`/admin/configuration/listen/#ejabberd-xmlrpc|ejabberd_xmlrpc listener`_.", []),
+    [].

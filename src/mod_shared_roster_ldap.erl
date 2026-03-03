@@ -7,7 +7,7 @@
 %%% Created :  5 Mar 2005 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,8 +26,6 @@
 %%%-------------------------------------------------------------------
 -module(mod_shared_roster_ldap).
 
--behaviour(ejabberd_config).
-
 -behaviour(gen_server).
 
 -behaviour(gen_mod).
@@ -42,17 +40,18 @@
 -export([get_user_roster/2,
 	 get_jid_info/4, process_item/2, in_subscription/2,
 	 out_subscription/1, mod_opt_type/1, mod_options/1,
-	 opt_type/1, depends/2, transform_module_options/1]).
+	 depends/2, mod_doc/0]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_roster.hrl").
 -include("eldap.hrl").
+-include("translate.hrl").
 
 -define(USER_CACHE, shared_roster_ldap_user_cache).
 -define(GROUP_CACHE, shared_roster_ldap_group_cache).
+-define(DISPLAYED_CACHE, shared_roster_ldap_displayed_cache).
 -define(LDAP_SEARCH_TIMEOUT, 5).    %% Timeout for LDAP search queries in seconds
--define(INVALID_SETTING_MSG, "~s is not properly set! ~s will not function.").
 
 -record(state,
 	{host = <<"">>                                :: binary(),
@@ -72,12 +71,13 @@
          user_desc = <<"">>                           :: binary(),
          user_uid = <<"">>                            :: binary(),
          uid_format = <<"">>                          :: binary(),
-	 uid_format_re = <<"">>                       :: binary(),
+	 uid_format_re                                :: undefined | misc:re_mp(),
          filter = <<"">>                              :: binary(),
          ufilter = <<"">>                             :: binary(),
          rfilter = <<"">>                             :: binary(),
          gfilter = <<"">>                             :: binary(),
-	 auth_check = true                            :: boolean()}).
+         user_jid_attr = <<"">>                       :: binary(),
+         auth_check = true                            :: boolean()}).
 
 -record(group_info, {desc, members}).
 
@@ -94,7 +94,8 @@ reload(Host, NewOpts, _OldOpts) ->
     case init_cache(Host, NewOpts) of
 	true ->
 	    ets_cache:setopts(?USER_CACHE, cache_opts(Host, NewOpts)),
-	    ets_cache:setopts(?GROUP_CACHE, cache_opts(Host, NewOpts));
+	    ets_cache:setopts(?GROUP_CACHE, cache_opts(Host, NewOpts)),
+	    ets_cache:setopts(?DISPLAYED_CACHE, cache_opts(Host, NewOpts));
 	false ->
 	    ok
     end,
@@ -107,36 +108,25 @@ depends(_Host, _Opts) ->
 %%--------------------------------------------------------------------
 %% Hooks
 %%--------------------------------------------------------------------
--spec get_user_roster([#roster{}], {binary(), binary()}) -> [#roster{}].
-get_user_roster(Items, {U, S} = US) ->
+-spec get_user_roster([#roster_item{}], {binary(), binary()}) -> [#roster_item{}].
+get_user_roster(Items, US) ->
     SRUsers = get_user_to_groups_map(US, true),
-    {NewItems1, SRUsersRest} = lists:mapfoldl(fun (Item,
-						   SRUsers1) ->
-						      {_, _, {U1, S1, _}} =
-							  Item#roster.usj,
-						      US1 = {U1, S1},
-						      case dict:find(US1,
-								     SRUsers1)
-							  of
-							{ok, GroupNames} ->
-							    {Item#roster{subscription
-									     =
-									     both,
-									 groups =
-									     Item#roster.groups ++ GroupNames,
-									 ask =
-									     none},
-							     dict:erase(US1,
-									SRUsers1)};
-							error ->
-							    {Item, SRUsers1}
-						      end
-					      end,
-					      SRUsers, Items),
-    SRItems = [#roster{usj = {U, S, {U1, S1, <<"">>}},
-		       us = US, jid = {U1, S1, <<"">>},
-		       name = get_user_name(U1, S1), subscription = both,
-		       ask = none, groups = GroupNames}
+    {NewItems1, SRUsersRest} = lists:mapfoldl(
+	fun(Item = #roster_item{jid = #jid{luser = U1, lserver = S1}}, SRUsers1) ->
+	    US1 = {U1, S1},
+	    case dict:find(US1, SRUsers1) of
+		{ok, GroupNames} ->
+		    {Item#roster_item{subscription = both,
+				      groups = Item#roster_item.groups ++ GroupNames},
+		     dict:erase(US1, SRUsers1)};
+		error ->
+		    {Item, SRUsers1}
+	    end
+	end,
+	SRUsers, Items),
+    SRItems = [#roster_item{jid = jid:make(U1, S1),
+			    name = get_user_name(U1, S1), subscription = both,
+			    ask = undefined, groups = GroupNames}
 	       || {{U1, S1}, GroupNames} <- dict:to_list(SRUsersRest)],
     SRItems ++ NewItems1.
 
@@ -212,8 +202,9 @@ process_subscription(Direction, User, Server, JID,
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
-init([Host, Opts]) ->
+init([Host|_]) ->
     process_flag(trap_exit, true),
+    Opts = gen_mod:get_module_opts(Host, ?MODULE),
     State = parse_options(Host, Opts),
     init_cache(Host, Opts),
     ejabberd_hooks:add(roster_get, Host, ?MODULE,
@@ -234,14 +225,19 @@ init([Host, Opts]) ->
 
 handle_call(get_state, _From, State) ->
     {reply, {ok, State}, State};
-handle_call(_Request, _From, State) ->
-    {reply, {error, badarg}, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
 handle_cast({set_state, NewState}, _State) ->
     {noreply, NewState};
-handle_cast(_Msg, State) -> {noreply, State}.
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
+    {noreply, State}.
 
-handle_info(_Info, State) -> {noreply, State}.
+handle_info(Info, State) ->
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
+    {noreply, State}.
 
 terminate(_Reason, State) ->
     Host = State#state.host,
@@ -301,6 +297,13 @@ eldap_search(State, FilterParseArgs, AttributesList) ->
 
 get_user_displayed_groups({User, Host}) ->
     {ok, State} = eldap_utils:get_state(Host, ?MODULE),
+    ets_cache:lookup(?DISPLAYED_CACHE,
+		     {User, Host},
+		     fun () ->
+			 search_user_displayed_groups(State, User)
+		     end).
+
+search_user_displayed_groups(State, User) ->
     GroupAttr = State#state.group_attr,
     Entries = eldap_search(State,
 			   [eldap_filter:do_sub(State#state.rfilter,
@@ -351,7 +354,7 @@ get_user_name(User, Host) ->
 
 search_group_info(State, Group) ->
     Extractor = case State#state.uid_format_re of
-		  <<"">> ->
+		  undefined ->
 		      fun (UID) ->
 			      catch eldap_utils:get_user_part(UID,
 							      State#state.uid_format)
@@ -382,6 +385,25 @@ search_group_info(State, Group) ->
 	  {ok, #group_info{desc = GroupDesc, members = lists:usort(lists:flatten(MembersLists))}}
     end.
 
+get_member_jid(#state{user_jid_attr = <<>>}, UID, Host) ->
+    {jid:nodeprep(UID), Host};
+get_member_jid(#state{user_jid_attr = UserJIDAttr, user_uid = UIDAttr} = State,
+               UID, Host) ->
+    Entries = eldap_search(State,
+                           [eldap_filter:do_sub(<<"(", UIDAttr/binary, "=%u)">>,
+                                                [{<<"%u">>, UID}])],
+                           [UserJIDAttr]),
+    case Entries of
+        [#eldap_entry{attributes = [{UserJIDAttr, [MemberJID | _]}]} | _] ->
+            try jid:decode(MemberJID) of
+                #jid{luser = U, lserver = S} -> {U, S}
+            catch
+                error:{bad_jid, _} -> {error, Host}
+            end;
+      _ ->
+        {error, error}
+    end.
+
 extract_members(State, Extractor, AuthChecker, #eldap_entry{attributes = Attrs}, {DescAcc, JIDsAcc}) ->
     Host = State#state.host,
     case {eldap_utils:get_ldap_attr(State#state.group_attr, Attrs),
@@ -389,23 +411,22 @@ extract_members(State, Extractor, AuthChecker, #eldap_entry{attributes = Attrs},
           lists:keysearch(State#state.uid, 1, Attrs)} of
         {ID, Desc, {value, {GroupMemberAttr, Members}}} when ID /= <<"">>,
                                                              GroupMemberAttr == State#state.uid ->
-            JIDs = lists:foldl(fun({ok, UID}, L) ->
-                                       PUID = jid:nodeprep(UID),
-                                       case PUID of
-                                           error ->
-                                               L;
-                                           _ ->
-                                               case AuthChecker(PUID, Host) of
-                                                   true ->
-                                                       [{PUID, Host} | L];
-                                                   _ ->
-                                                       L
-                                               end
-                                       end;
-                                  (_, L) -> L
-                               end,
-                               [],
-                               lists:map(Extractor, Members)),
+            JIDs = lists:foldl(
+                fun({ok, UID}, L) ->
+                    {MemberUID, MemberHost} = get_member_jid(State, UID, Host),
+                    case MemberUID of
+                        error ->
+                            L;
+                        _ ->
+                            case AuthChecker(MemberUID, MemberHost) of
+                                true ->
+                                    [{MemberUID, MemberHost} | L];
+                                _ ->
+                                    L
+                            end
+                    end;
+                   (_, L) -> L
+                end, [], lists:map(Extractor, Members)),
             {Desc, [JIDs | JIDsAcc]};
         _ ->
             {DescAcc, JIDsAcc}
@@ -440,22 +461,23 @@ get_user_part_re(String, Pattern) ->
 
 parse_options(Host, Opts) ->
     Eldap_ID = misc:atom_to_binary(gen_mod:get_module_proc(Host, ?MODULE)),
-    Cfg = eldap_utils:get_config(Host, Opts),
-    GroupAttr = gen_mod:get_opt(ldap_groupattr, Opts),
-    GroupDesc = case gen_mod:get_opt(ldap_groupdesc, Opts) of
+    Cfg = ?eldap_config(mod_shared_roster_ldap_opt, Opts),
+    GroupAttr = mod_shared_roster_ldap_opt:ldap_groupattr(Opts),
+    GroupDesc = case mod_shared_roster_ldap_opt:ldap_groupdesc(Opts) of
 		    undefined -> GroupAttr;
 		    GD -> GD
 		end,
-    UserDesc = gen_mod:get_opt(ldap_userdesc, Opts),
-    UserUID = gen_mod:get_opt(ldap_useruid, Opts),
-    UIDAttr = gen_mod:get_opt(ldap_memberattr, Opts),
-    UIDAttrFormat = gen_mod:get_opt(ldap_memberattr_format, Opts),
-    UIDAttrFormatRe = gen_mod:get_opt(ldap_memberattr_format_re, Opts),
-    AuthCheck = gen_mod:get_opt(ldap_auth_check, Opts),
-    ConfigFilter = gen_mod:get_opt(ldap_filter, Opts),
-    ConfigUserFilter = gen_mod:get_opt(ldap_ufilter, Opts),
-    ConfigGroupFilter = gen_mod:get_opt(ldap_gfilter, Opts),
-    RosterFilter = gen_mod:get_opt(ldap_rfilter, Opts),
+    UserDesc = mod_shared_roster_ldap_opt:ldap_userdesc(Opts),
+    UserUID = mod_shared_roster_ldap_opt:ldap_useruid(Opts),
+    UIDAttr = mod_shared_roster_ldap_opt:ldap_memberattr(Opts),
+    UIDAttrFormat = mod_shared_roster_ldap_opt:ldap_memberattr_format(Opts),
+    UIDAttrFormatRe = mod_shared_roster_ldap_opt:ldap_memberattr_format_re(Opts),
+    JIDAttr = mod_shared_roster_ldap_opt:ldap_userjidattr(Opts),
+    AuthCheck = mod_shared_roster_ldap_opt:ldap_auth_check(Opts),
+    ConfigFilter = mod_shared_roster_ldap_opt:ldap_filter(Opts),
+    ConfigUserFilter = mod_shared_roster_ldap_opt:ldap_ufilter(Opts),
+    ConfigGroupFilter = mod_shared_roster_ldap_opt:ldap_gfilter(Opts),
+    RosterFilter = mod_shared_roster_ldap_opt:ldap_rfilter(Opts),
     SubFilter = <<"(&(", UIDAttr/binary, "=",
 		  UIDAttrFormat/binary, ")(", GroupAttr/binary, "=%g))">>,
     UserSubFilter = case ConfigUserFilter of
@@ -495,6 +517,7 @@ parse_options(Host, Opts) ->
            base = Cfg#eldap_config.base,
            deref_aliases = Cfg#eldap_config.deref_aliases,
 	   uid = UIDAttr,
+           user_jid_attr = JIDAttr,
 	   group_attr = GroupAttr, group_desc = GroupDesc,
 	   user_desc = UserDesc, user_uid = UserUID,
 	   uid_format = UIDAttrFormat,
@@ -508,111 +531,262 @@ init_cache(Host, Opts) ->
 	true ->
 	    CacheOpts = cache_opts(Host, Opts),
 	    ets_cache:new(?USER_CACHE, CacheOpts),
-	    ets_cache:new(?GROUP_CACHE, CacheOpts);
+	    ets_cache:new(?GROUP_CACHE, CacheOpts),
+	    ets_cache:new(?DISPLAYED_CACHE, CacheOpts);
 	false ->
 	    ets_cache:delete(?USER_CACHE),
-	    ets_cache:delete(?GROUP_CACHE)
+	    ets_cache:delete(?GROUP_CACHE),
+	    ets_cache:delete(?DISPLAYED_CACHE)
     end,
     UseCache.
 
 use_cache(_Host, Opts) ->
-    gen_mod:get_opt(use_cache, Opts).
+    mod_shared_roster_ldap_opt:use_cache(Opts).
 
 cache_opts(_Host, Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_shared_roster_ldap_opt:cache_size(Opts),
+    CacheMissed = mod_shared_roster_ldap_opt:cache_missed(Opts),
+    LifeTime = mod_shared_roster_ldap_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
-transform_module_options(Opts) ->
-    lists:map(
-      fun({ldap_group_cache_size, I}) ->
-	      ?WARNING_MSG("Option 'ldap_group_cache_size' is deprecated, "
-			   "use 'cache_size' instead", []),
-	      {cache_size, I};
-	 ({ldap_user_cache_size, I}) ->
-	      ?WARNING_MSG("Option 'ldap_user_cache_size' is deprecated, "
-			   "use 'cache_size' instead", []),
-	      {cache_size, I};
-	 ({ldap_group_cache_validity, Secs}) ->
-	      ?WARNING_MSG("Option 'ldap_group_cache_validity' is deprecated, "
-			   "use 'cache_life_time' instead", []),
-	      {cache_life_time, Secs};
-	 ({ldap_user_cache_validity, Secs}) ->
-	      ?WARNING_MSG("Option 'ldap_user_cache_validity' is deprecated, "
-			   "use 'cache_life_time' instead", []),
-	      {cache_life_time, Secs};
-	 (Opt) ->
-	      Opt
-      end, Opts).
-
 mod_opt_type(ldap_auth_check) ->
-    fun (on) -> true;
-	(off) -> false;
-	(false) -> false;
-	(true) -> true
-    end;
+    econf:bool();
 mod_opt_type(ldap_gfilter) ->
-    opt_type(ldap_gfilter);
-mod_opt_type(O) when O == cache_size;
-		     O == cache_life_time ->
-    fun (I) when is_integer(I), I > 0 -> I;
-	(infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end;
-mod_opt_type(ldap_groupattr) -> fun iolist_to_binary/1;
+    econf:ldap_filter();
+mod_opt_type(ldap_groupattr) ->
+    econf:binary();
 mod_opt_type(ldap_groupdesc) ->
-    fun(undefined) -> undefined;
-       (G) -> iolist_to_binary(G)
-    end;
-mod_opt_type(ldap_memberattr) -> fun iolist_to_binary/1;
+    econf:binary();
+mod_opt_type(ldap_memberattr) ->
+    econf:binary();
 mod_opt_type(ldap_memberattr_format) ->
-    fun iolist_to_binary/1;
+    econf:binary();
 mod_opt_type(ldap_memberattr_format_re) ->
-    fun (S) ->
-	    Re = iolist_to_binary(S),
-	    case Re of
-		<<>> -> <<>>;
-		_ -> {ok, MP} = re:compile(Re), MP
-	    end
-    end;
+    econf:re();
 mod_opt_type(ldap_rfilter) ->
-    opt_type(ldap_rfilter);
+    econf:ldap_filter();
 mod_opt_type(ldap_ufilter) ->
-    opt_type(ldap_ufilter);
-mod_opt_type(ldap_userdesc) -> fun iolist_to_binary/1;
-mod_opt_type(ldap_useruid) -> fun iolist_to_binary/1;
-mod_opt_type(Opt) ->
-    eldap_utils:opt_type(Opt).
+    econf:ldap_filter();
+mod_opt_type(ldap_userdesc) ->
+    econf:binary();
+mod_opt_type(ldap_useruid) ->
+    econf:binary();
+mod_opt_type(ldap_userjidattr) ->
+    econf:binary();
+mod_opt_type(ldap_backups) ->
+    econf:list(econf:domain(), [unique]);
+mod_opt_type(ldap_base) ->
+    econf:binary();
+mod_opt_type(ldap_deref_aliases) ->
+    econf:enum([never, searching, finding, always]);
+mod_opt_type(ldap_encrypt) ->
+    econf:enum([tls, starttls, none]);
+mod_opt_type(ldap_filter) ->
+    econf:ldap_filter();
+mod_opt_type(ldap_password) ->
+    econf:binary();
+mod_opt_type(ldap_port) ->
+    econf:port();
+mod_opt_type(ldap_rootdn) ->
+    econf:binary();
+mod_opt_type(ldap_servers) ->
+    econf:list(econf:domain(), [unique]);
+mod_opt_type(ldap_tls_cacertfile) ->
+    econf:pem();
+mod_opt_type(ldap_tls_certfile) ->
+    econf:pem();
+mod_opt_type(ldap_tls_depth) ->
+    econf:non_neg_int();
+mod_opt_type(ldap_tls_verify) ->
+    econf:enum([hard, soft, false]);
+mod_opt_type(ldap_uids) ->
+    econf:either(
+      econf:list(
+        econf:and_then(
+          econf:binary(),
+          fun(U) -> {U, <<"%u">>} end)),
+      econf:map(econf:binary(), econf:binary(), [unique]));
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
+-spec mod_options(binary()) -> [{ldap_uids, [{binary(), binary()}]} |
+				{atom(), any()}].
 mod_options(Host) ->
     [{ldap_auth_check, true},
-     {ldap_gfilter, ejabberd_config:get_option({ldap_gfilter, Host}, <<"">>)},
+     {ldap_gfilter, <<"">>},
      {ldap_groupattr, <<"cn">>},
      {ldap_groupdesc, undefined},
      {ldap_memberattr, <<"memberUid">>},
      {ldap_memberattr_format, <<"%u">>},
-     {ldap_memberattr_format_re, <<"">>},
-     {ldap_rfilter, ejabberd_config:get_option({ldap_rfilter, Host}, <<"">>)},
-     {ldap_ufilter, ejabberd_config:get_option({ldap_ufilter, Host}, <<"">>)},
+     {ldap_memberattr_format_re, undefined},
+     {ldap_rfilter, <<"">>},
+     {ldap_ufilter, <<"">>},
      {ldap_userdesc, <<"cn">>},
      {ldap_useruid, <<"cn">>},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}
-     | lists:map(
-	 fun({Opt, Default}) ->
-		 {Opt, ejabberd_config:get_option({Opt, Host}, Default)}
-	 end, eldap_utils:options(Host))].
+     {ldap_userjidattr, <<"">>},
+     {ldap_backups, ejabberd_option:ldap_backups(Host)},
+     {ldap_base, ejabberd_option:ldap_base(Host)},
+     {ldap_uids, ejabberd_option:ldap_uids(Host)},
+     {ldap_deref_aliases, ejabberd_option:ldap_deref_aliases(Host)},
+     {ldap_encrypt, ejabberd_option:ldap_encrypt(Host)},
+     {ldap_password, ejabberd_option:ldap_password(Host)},
+     {ldap_port, ejabberd_option:ldap_port(Host)},
+     {ldap_rootdn, ejabberd_option:ldap_rootdn(Host)},
+     {ldap_servers, ejabberd_option:ldap_servers(Host)},
+     {ldap_filter, ejabberd_option:ldap_filter(Host)},
+     {ldap_tls_certfile, ejabberd_option:ldap_tls_certfile(Host)},
+     {ldap_tls_cacertfile, ejabberd_option:ldap_tls_cacertfile(Host)},
+     {ldap_tls_depth, ejabberd_option:ldap_tls_depth(Host)},
+     {ldap_tls_verify, ejabberd_option:ldap_tls_verify(Host)},
+     {use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
 
-opt_type(O) when O == ldap_rfilter; O == ldap_gfilter; O == ldap_ufilter ->
-    fun(<<>>) -> <<>>;
-       (F) -> eldap_utils:check_filter(F)
-    end;
-opt_type(_) ->
-    [ldap_gfilter, ldap_rfilter, ldap_ufilter].
+mod_doc() ->
+    #{desc =>
+          [?T("This module lets the server administrator automatically "
+	      "populate users' rosters (contact lists) with entries based on "
+	      "users and groups defined in an LDAP-based directory."), "",
+           ?T("NOTE: 'mod_shared_roster_ldap' depends on 'mod_roster' being "
+	      "enabled. Roster queries will return '503' errors if "
+	      "'mod_roster' is not enabled."), "",
+           ?T("The module accepts many configuration options. Some of them, "
+	      "if unspecified, default to the values specified for the top "
+	      "level of configuration. This lets you avoid specifying, for "
+	      "example, the bind password in multiple places."), "",
+           ?T("- Filters: 'ldap_rfilter', 'ldap_ufilter', 'ldap_gfilter', "
+	      "'ldap_filter'. These options specify LDAP filters used to "
+	      "query for shared roster information. All of them are run "
+	      "against the ldap_base."),
+           ?T("- Attributes: 'ldap_groupattr', 'ldap_groupdesc', "
+	      "'ldap_memberattr', 'ldap_userdesc', 'ldap_useruid'. These "
+	      "options specify the names of the attributes which hold "
+	      "interesting data in the entries returned by running filters "
+	      "specified with the filter options."),
+           ?T("- Control parameters: 'ldap_auth_check', "
+	      "'ldap_group_cache_validity', 'ldap_memberattr_format', "
+	      "'ldap_memberattr_format_re', 'ldap_user_cache_validity'. "
+	      "These parameters control the behaviour of the module."),
+           ?T("- Connection parameters: The module also accepts the "
+	      "connection parameters, all of which default to the top-level "
+	      "parameter of the same name, if unspecified. "
+	      "See _`ldap.md#ldap-connection|LDAP Connection`_ "
+	      "section for more information about them."), "",
+           ?T("Check also the _`ldap.md#ldap-examples|Configuration examples`_ "
+	      "section to get details about "
+	      "retrieving the roster, "
+	      "and configuration examples including Flat DIT and Deep DIT.")],
+      opts =>
+          [
+	   %% Filters:
+           {ldap_rfilter,
+            #{desc =>
+                  ?T("So called \"Roster Filter\". Used to find names of "
+		     "all \"shared roster\" groups. See also the "
+		     "'ldap_groupattr' parameter. If unspecified, defaults to "
+		     "the top-level parameter of the same name. You must "
+		     "specify it in some place in the configuration, there is "
+		     "no default.")}},
+           {ldap_gfilter,
+            #{desc =>
+                  ?T("\"Group Filter\", used when retrieving human-readable "
+		     "name (a.k.a. \"Display Name\") and the members of a "
+		     "group. See also the parameters 'ldap_groupattr', "
+		     "'ldap_groupdesc' and 'ldap_memberattr'. If unspecified, "
+		     "defaults to the top-level parameter of the same name. "
+		     "If that one also is unspecified, then the filter is "
+		     "constructed exactly like \"User Filter\".")}},
+           {ldap_ufilter,
+            #{desc =>
+                  ?T("\"User Filter\", used for retrieving the human-readable "
+		     "name of roster entries (usually full names of people in "
+		     "the roster). See also the parameters 'ldap_userdesc' and "
+		     "'ldap_useruid'. For more information check the LDAP "
+		     "_`ldap.md#filters|Filters`_ section.")}},
+           {ldap_filter,
+            #{desc =>
+		  ?T("Additional filter which is AND-ed together "
+		     "with \"User Filter\" and \"Group Filter\". "
+		     "For more information check the LDAP "
+		     "_`ldap.md#filters|Filters`_ section.")}},
+	   %% Attributes:
+           {ldap_groupattr,
+            #{desc =>
+		  ?T("The name of the attribute that holds the group name, and "
+		     "that is used to differentiate between them. Retrieved "
+		     "from results of the \"Roster Filter\" "
+		     "and \"Group Filter\". Defaults to 'cn'.")}},
+
+           {ldap_groupdesc,
+            #{desc =>
+		  ?T("The name of the attribute which holds the human-readable "
+		     "group name in the objects you use to represent groups. "
+		     "Retrieved from results of the \"Group Filter\". "
+		     "Defaults to whatever 'ldap_groupattr' is set.")}},
+
+           {ldap_memberattr,
+            #{desc =>
+		  ?T("The name of the attribute which holds the IDs of the "
+		     "members of a group. Retrieved from results of the "
+		     "\"Group Filter\". Defaults to 'memberUid'. The name of "
+		     "the attribute differs depending on the objectClass you "
+		     "use for your group objects, for example: "
+		     "'posixGroup' -> 'memberUid'; 'groupOfNames' -> 'member'; "
+		     "'groupOfUniqueNames' -> 'uniqueMember'.")}},
+           {ldap_userdesc,
+            #{desc =>
+		  ?T("The name of the attribute which holds the human-readable "
+		     "user name. Retrieved from results of the "
+		     "\"User Filter\". Defaults to 'cn'.")}},
+           {ldap_useruid,
+            #{desc =>
+		  ?T("The name of the attribute which holds the ID of a roster "
+		     "item. Value of this attribute in the roster item objects "
+		     "needs to match the ID retrieved from the "
+		     "'ldap_memberattr' attribute of a group object. "
+		     "Retrieved from results of the \"User Filter\". "
+		     "Defaults to 'cn'.")}},
+           {ldap_userjidattr,
+            #{desc =>
+              ?T("The name of the attribute which is used to map user id "
+                 "to XMPP jid. If not specified (and that is default value "
+                 "of this option), user jid will be created from user id and "
+                 " this module host.")}},
+	   %% Control parameters:
+           {ldap_memberattr_format,
+            #{desc =>
+		  ?T("A globbing format for extracting user ID from the value "
+		     "of the attribute named by 'ldap_memberattr'. Defaults "
+		     "to '%u', which means that the whole value is the member "
+		     "ID. If you change it to something different, you may "
+		     "also need to specify the User and Group Filters "
+		     "manually; see section Filters.")}},
+
+           {ldap_memberattr_format_re,
+            #{desc =>
+		  ?T("A regex for extracting user ID from the value of the "
+		     "attribute named by 'ldap_memberattr'. Check the LDAP "
+		     "_`ldap.md#control-parameters|Control Parameters`_ section.")}},
+           {ldap_auth_check,
+            #{value => "true | false",
+              desc =>
+		  ?T("Whether the module should check (via the ejabberd "
+		     "authentication subsystem) for existence of each user in "
+		     "the shared LDAP roster. Set to 'false' if you want to "
+		     "disable the check. Default value is 'true'.")}}] ++
+          [{Opt,
+            #{desc =>
+                  {?T("Same as top-level _`~s`_ option, but "
+                      "applied to this module only."), [Opt]}}}
+           || Opt <- [ldap_backups, ldap_base, ldap_uids, ldap_deref_aliases,
+		      ldap_encrypt, ldap_password, ldap_port, ldap_rootdn,
+		      ldap_servers, ldap_tls_certfile, ldap_tls_cacertfile,
+		      ldap_tls_depth, ldap_tls_verify, use_cache, cache_size,
+		      cache_missed, cache_life_time]]}.

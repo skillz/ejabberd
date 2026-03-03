@@ -1,0 +1,135 @@
+define_macro:
+  CERTFILE: cert.pem
+  CAFILE: ca.pem
+  C2S_PORT: @@c2s_port@@
+  S2S_PORT: @@s2s_port@@
+  WEB_PORT: @@web_port@@
+  STUN_PORT: @@stun_port@@
+  COMPONENT_PORT: @@component_port@@
+  PROXY_PORT: @@proxy_port@@
+  PASSWORD: >-
+    @@password@@
+  LOGLEVEL: @@loglevel@@
+  PRIV_DIR: "@@priv_dir@@"
+  PUT_URL: "http://upload.@HOST@:@@web_port@@/upload"
+  GET_URL: "http://upload.@HOST@:@@web_port@@/upload"
+  MULTIHOST_SCHEMA: @@multihost_schema@@
+  UPDATE_SQL_SCHEMA: @@update_sql_schema@@
+  MYSQL_USER: "@@mysql_user@@"
+  MYSQL_SERVER: "@@mysql_server@@"
+  MYSQL_PORT: @@mysql_port@@
+  MYSQL_PASS: "@@mysql_pass@@"
+  MYSQL_DB: "@@mysql_db@@"
+  MSSQL_USER: "@@mssql_user@@"
+  MSSQL_SERVER: "@@mssql_server@@"
+  MSSQL_PORT: @@mssql_port@@
+  MSSQL_PASS: "@@mssql_pass@@"
+  MSSQL_DB: "@@mssql_db@@"
+  PGSQL_USER: "@@pgsql_user@@"
+  PGSQL_SERVER: "@@pgsql_server@@"
+  PGSQL_PORT: @@pgsql_port@@
+  PGSQL_PASS: "@@pgsql_pass@@"
+  PGSQL_DB: "@@pgsql_db@@"
+  VCARD:
+    version: "1.0"
+    fn: Full Name
+    n:
+      family: Family
+      given: Given
+      middle: Middle
+      prefix: Prefix
+      suffix: Suffix
+    nickname: Nickname
+    photo:
+      type: image/png
+      extval: https://domain.tld/photo.png
+      binval: >-
+        iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA3bvkkAA
+        AACklEQVR4AWNoAAAAggCBTBfX3wAAAABJRU5ErkJggg==
+    bday: 2000-01-01
+    adr:
+      -
+        home: true
+        work: true
+        postal: true
+        parcel: true
+        dom: true
+        intl: true
+        pref: true
+        pobox: Pobox
+        extadd: Extadd
+        street: Street
+        locality: Locality
+        region: Region
+        pcode: Pcode
+        ctry: Ctry
+    label:
+      -
+        home: true
+        work: true
+        postal: true
+        parcel: true
+        dom: true
+        intl: true
+        pref: true
+        line:
+          - Line1
+          - Line2
+    tel:
+      -
+        home: true
+        work: true
+        voice: true
+        fax: true
+        pager: true
+        msg: true
+        cell: true
+        video: true
+        bbs: true
+        modem: true
+        isdn: true
+        pcs: true
+        pref: true
+        number: +7-900-01-02
+    email:
+      -
+        home: true
+        work: true
+        internet: true
+        pref: true
+        x400: true
+        userid: user@domain.tld
+    jabberid: user@domain.tld
+    mailer: Mailer
+    tz: TZ
+    geo:
+      lat: "12.0"
+      lon: "21.0"
+    title: Title
+    role: Role
+    logo:
+      type: image/png
+      extval: https://domain.tld/logo.png
+      binval: >-
+        iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA3bvkkAA
+        AACklEQVR4AWNoAAAAggCBTBfX3wAAAABJRU5ErkJggg==
+    categories:
+      - Cat1
+      - Cat2
+    note: Note
+    prodid: ProdID
+    rev: Rev
+    sort_string: SortString
+    sound:
+      phonetic: Phonetic
+      extval: https://domain.tld/sound.ogg
+      binval: >-
+        iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA3bvkkAA
+        AACklEQVR4AWNoAAAAggCBTBfX3wAAAABJRU5ErkJggg==
+    uid: UID
+    url: https://domain.tld
+    class: public
+    key:
+      type: Type
+      cred: Cred
+    desc: Desc

@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,10 +26,10 @@
 
 -behaviour(mod_caps).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 %% API
 -export([init/2, caps_read/2, caps_write/3, export/1, import/3]).
+-export([sql_schemas/0]).
 
 -include("mod_caps.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -38,8 +38,24 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"caps_features">>,
+                columns =
+                    [#sql_column{name = <<"node">>, type = text},
+                     #sql_column{name = <<"subnode">>, type = text},
+                     #sql_column{name = <<"feature">>, type = text},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"node">>, <<"subnode">>]}]}]}].
 
 caps_read(LServer, {Node, SubNode}) ->
     case ejabberd_sql:sql_query(

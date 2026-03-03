@@ -1,349 +1,338 @@
-%% -*- coding: latin-1 -*-
+%% Generated automatically
+%% DO NOT EDIT: run `make translations` instead
+%% To improve translations please read:
+%%   https://docs.ejabberd.im/developer/extending-ejabberd/localization/
+
 {" has set the subject to: "," har satt emnet til: "}.
+{"A friendly name for the node","Et vennlig navn for noden"}.
 {"A password is required to enter this room","Et passord kreves for tilgang til samtalerommet"}.
-{"Access Configuration","Tilgangskonfigurasjon"}.
-{"Access Control List Configuration","Konfigurasjon for Tilgangskontroll lister"}.
-{"Access Control Lists","Tilgangskontrollister"}.
-{"Access denied by service policy","Tilgang nektes på grunn av en tjeneste regel"}.
-{"Access Rules","Tilgangsregler"}.
+{"Accept","Godta"}.
+{"Access denied by service policy","Tilgang nektes på grunn av en tjenesteregel"}.
 {"Action on user","Handling på bruker"}.
-{"Add Jabber ID","Legg til Jabber ID"}.
-{"Add New","Legg til ny"}.
-{"Add User","Legg til Bruker"}.
+{"Add User","Legg til bruker"}.
 {"Administration of ","Administrasjon av "}.
 {"Administration","Administrasjon"}.
 {"Administrator privileges required","Administratorprivilegier kreves"}.
 {"All activity","All aktivitet"}.
-{"All Users","Alle Brukere"}.
-{"Allow users to change the subject","Tillat brukere å endre emne"}.
-{"Allow users to query other users","Tillat brukere å sende forespørsel til andre brukere"}.
+{"All Users","Alle brukere"}.
+{"Allow this Jabber ID to subscribe to this pubsub node?","Tillat denne Jabber-ID-en å abonnere på denne pubsub -noden?"}.
+{"Allow users to change the subject","Tillat brukere å endre emnet"}.
+{"Allow users to query other users","Tillat brukere å sende forespørsler til andre brukere"}.
 {"Allow users to send invites","Tillat brukere å sende invitasjoner"}.
 {"Allow users to send private messages","Tillat brukere å sende private meldinger"}.
 {"Allow visitors to change nickname","Tillat besøkende å endre kallenavn"}.
 {"Allow visitors to send private messages to","Tillat brukere å sende private meldinger til"}.
-{"Allow visitors to send status text in presence updates","Tillat besøkende å sende status tekst i "}.
+{"Allow visitors to send status text in presence updates","Tillat besøkende å sende statustekst i tilstedeværelsesoppdateringer"}.
+{"Allow visitors to send voice requests","Tillat brukere å sende lydforespørsler"}.
 {"Announcements","Kunngjøringer"}.
+{"Answer to a question","Svar på spørsmål"}.
 {"April","april"}.
 {"August","august"}.
-{"Backup Management","Håndtere Sikkerehetskopiering"}.
-{"Backup to File at ","Sikkerhetskopiere til Fil på "}.
-{"Backup","Sikkerhetskopier"}.
-{"Bad format","Feil format"}.
-{"Birthday","Fødselsdag"}.
-{"CAPTCHA web page","CAPTCHA web side"}.
-{"Change Password","Endre Passord"}.
-{"Change User Password","Endre Brukers Passord"}.
+{"Backup Management","Håndtering av sikkerehetskopiering"}.
+{"Backup of ~p","Sikkerhetskopi av ~p"}.
+{"Backup to File at ","Sikkerhetskopier til fil på "}.
+{"Backup","Sikkerhetskopiering"}.
+{"Bad format","Feilaktig format"}.
+{"Birthday","Geburtsdag"}.
+{"Both the username and the resource are required","Både brukernavn og ressurs kreves"}.
+{"Cannot remove active list","Kan ikke fjerne aktiv liste"}.
+{"Cannot remove default list","Kan ikke fjerne forvalgt liste"}.
+{"CAPTCHA web page","CAPTCHA-nettside"}.
+{"Challenge ID","Utfordrings-ID"}.
+{"Change Password","Endre passord"}.
+{"Change User Password","Endre brukerpassord"}.
+{"Channel already exists","Kanalen finnes allerede"}.
+{"Channels","Kanaler"}.
 {"Characters not allowed:","Ikke godtatte tegn:"}.
-{"Chatroom configuration modified","Samtalerommets konfigurasjon er endret"}.
-{"Chatroom is created","Samtalerom er opprettet"}.
+{"Chatroom configuration modified","Samtalerommets oppsett er endret"}.
+{"Chatroom is created","Samtalerom opprettet"}.
 {"Chatroom is destroyed","Samtalerom er fjernet"}.
-{"Chatroom is started","Samtalerom er startet"}.
-{"Chatroom is stopped","Samtalerom er stoppet"}.
+{"Chatroom is started","Samtalerom startet"}.
+{"Chatroom is stopped","Samtalerom stoppet"}.
 {"Chatrooms","Samtalerom"}.
-{"Choose a username and password to register with this server","Velg et brukernavn og passord for å registrere på "}.
-{"Choose modules to stop","Velg hvilke moduler som skal stoppes"}.
+{"Choose a username and password to register with this server","Velg et brukernavn og passord for å registrere deg på denne tjeneren"}.
 {"Choose storage type of tables","Velg lagringstype for tabeller"}.
-{"Choose whether to approve this entity's subscription.","Velg om du vil godkjenne denne eksistensens abonement"}.
 {"City","By"}.
 {"Commands","Kommandoer"}.
 {"Conference room does not exist","Konferanserommet finnes ikke"}.
-{"Configuration of room ~s","Konfigurasjon for rom ~s"}.
-{"Configuration","Konfigurasjon"}.
-{"Connected Resources:","Tilkoblede Ressurser:"}.
+{"Configuration of room ~s","Oppsett for rom ~s"}.
+{"Configuration","Oppsett"}.
 {"Country","Land"}.
-{"CPU Time:","CPU Tid:"}.
-{"Database Tables Configuration at ","Database Tabell Konfigurasjon på "}.
+{"Current Discussion Topic","Nåværende diskusjonstema"}.
+{"Database Tables Configuration at ","Database-tabelloppsett på "}.
 {"Database","Database"}.
 {"December","desember"}.
 {"Default users as participants","Standard brukere som deltakere"}.
-{"Delete message of the day on all hosts","Slett melding for dagen på alle maskiner"}.
 {"Delete message of the day","Slett melding for dagen"}.
-{"Delete Selected","Slett valgte"}.
-{"Delete User","Slett Bruker"}.
-{"Description:","Beskrivelse:"}.
+{"Delete User","Slett bruker"}.
+{"Deliver event notifications","Lever begivenhetskunngjøringer"}.
+{"Deliver payloads with event notifications","Send innhold sammen med hendelsesmerknader"}.
 {"Disc only copy","Kun diskkopi"}.
-{"Displayed Groups:","Viste grupper:"}.
-{"Don't tell your password to anybody, not even the administrators of the Jabber server.","Ikke fortell passordet til noen, ikke en gang til administratoren av Jabber serveren."}.
-{"Dump Backup to Text File at ","Dump Sikkerhetskopi til Tekstfil på "}.
-{"Dump to Text File","Dump til Tekstfil"}.
-{"Edit Properties","Redigere Egenskaper"}.
-{"Either approve or decline the voice request.","Enten godkjenn eller forby lyd forespørselen"}.
-{"ejabberd MUC module","ejabberd MUC modul"}.
-{"ejabberd Publish-Subscribe module","ejabberd Publish-Subscribe modul"}.
-{"ejabberd SOCKS5 Bytestreams module","ejabberd SOCKS5 Bytestreams modul"}.
-{"ejabberd vCard module","ejabberd vCard modul"}.
-{"ejabberd Web Admin","ejabberd Web Admin"}.
-{"Elements","Elementer"}.
-{"Email","Epost"}.
-{"Enable logging","Slå på logging"}.
-{"End User Session","Avslutt Bruker Sesjon"}.
-{"Enter list of {Module, [Options]}","Skriv inn en liste av {Module, [Options]}"}.
+{"Dump Backup to Text File at ","Dump sikkerhetskopi til tekstfil på "}.
+{"Dump to Text File","Dump til tekstfil"}.
+{"Edit Properties","Rediger egenskaper"}.
+{"Either approve or decline the voice request.","Enten godkjenn eller forby lydforespørselen."}.
+{"ejabberd HTTP Upload service","ejabberd-HTTP-opplastingstjeneste"}.
+{"ejabberd MUC module","ejabberd-MUC-modul"}.
+{"ejabberd Multicast service","ejabberd-multikastingstjeneste"}.
+{"ejabberd Publish-Subscribe module","ejabberd-Publish-Subscribe-modul"}.
+{"Email","E-post"}.
+{"Enable logging","Skru på loggføring"}.
+{"Enable message archiving","Skru på meldingsarkivering"}.
+{"Enabling push without 'node' attribute is not supported","Å skru på dytting uten «node»-attributt støttes ikke"}.
+{"End User Session","Avslutt brukerøkt"}.
 {"Enter nickname you want to register","Skriv inn kallenavnet du ønsker å registrere"}.
-{"Enter path to backup file","Skriv inn sti til sikkerhetskopi filen"}.
+{"Enter path to backup file","Skriv inn sti til sikkerhetskopifilen"}.
 {"Enter path to jabberd14 spool dir","Skriv inn sti til jabberd14 spoolkatalog"}.
-{"Enter path to jabberd14 spool file","Skriv inn sti til jabberd14 spoolfil"}.
 {"Enter path to text file","Skriv inn sti til tekstfil"}.
 {"Enter the text you see","Skriv inn teksten du ser"}.
-{"Erlang Jabber Server","Erlang Jabber Server"}.
-{"Error","Feil"}.
-{"Export data of all users in the server to PIEFXIS files (XEP-0227):","Eksporter data om alle brukere i en server til PIEFXIS filer"}.
-{"Export data of users in a host to PIEFXIS files (XEP-0227):","Eksporter data om alle brukere i en host til PIEFXIS filer (XEP-0227):"}.
-{"Failed to extract JID from your voice request approval","Feilet i forsøk på å hente JID fra din lyd forespørsel godkjenning"}.
+{"Exclude Jabber IDs from CAPTCHA challenge","Ekskluder Jabber-ID-er fra CAPTCHA-utfordring"}.
+{"Export all tables as SQL queries to a file:","Eksporter alle tabeller som SQL-spørringer til en fil:"}.
+{"Export data of all users in the server to PIEFXIS files (XEP-0227):","Eksporter data om alle brukere på en tjener til PIEFXIS-filer (XEP-0227):"}.
+{"Export data of users in a host to PIEFXIS files (XEP-0227):","Eksporter data om alle brukere på en vert til PIEFXIS-filer (XEP-0227):"}.
+{"External component failure","Feil med ekstern komponent"}.
+{"External component timeout","Tidsavbrudd for ekstern komponent"}.
 {"Family Name","Etternavn"}.
+{"FAQ Entry","O-S-S -oppføring"}.
 {"February","februar"}.
-{"Fill in the form to search for any matching Jabber User (Add * to the end of field to match substring)","Fyll inn skjemaet for å søke etter Jabber bruker (Legg til * på slutten av feltet for å treffe alle som starter slik)"}.
+{"File larger than ~w bytes","Fil større enn ~w byte"}.
 {"Friday","fredag"}.
-{"From ~s","Fra ~s"}.
-{"From","Fra"}.
-{"Full Name","Fullstendig Navn"}.
-{"Get Number of Online Users","Vis Antall Tilkoblede Brukere"}.
-{"Get Number of Registered Users","Vis Antall Registrerte Brukere"}.
-{"Get User Last Login Time","Vis Brukers Siste Påloggings Tidspunkt"}.
-{"Get User Password","Hent Brukers Passord"}.
-{"Get User Statistics","Vis Bruker Statistikk"}.
-{"Group ","Gruppe "}.
-{"Groups","Grupper"}.
+{"Full List of Room Admins","Full liste over romadministratorer"}.
+{"Full List of Room Owners","Full liste over romeiere"}.
+{"Full Name","Fullt navn"}.
+{"Get Number of Online Users","Vis antall tilkoblede brukere"}.
+{"Get Number of Registered Users","Vis antall registrerte brukere"}.
+{"Get User Last Login Time","Vis brukers siste innloggingstidspunkt"}.
+{"Get User Statistics","Vis brukerstatistikk"}.
 {"has been banned","har blitt bannlyst"}.
-{"has been kicked because of a system shutdown","har blitt kastet ut på grunn av at systemet avslutter"}.
-{"has been kicked because of an affiliation change","har blitt kastet ut på grunn av en tilknytnings endring"}.
-{"has been kicked because the room has been changed to members-only","har blitt kastet ut på grunn av at rommet er endret til kun-for-medlemmer"}.
+{"has been kicked because of a system shutdown","har blitt kastet ut på grunn av systemavstenging"}.
+{"has been kicked because of an affiliation change","har blitt kastet ut på grunn av en tilknytningsendring"}.
 {"has been kicked","har blitt kastet ut"}.
-{"Host","Maskin"}.
-{"If you don't see the CAPTCHA image here, visit the web page.","Dersom du ikke ser CAPTCHA bilde her, besøk web siden. "}.
-{"Import Directory","Importer Katalog"}.
-{"Import File","Importer File"}.
-{"Import user data from jabberd14 spool file:","Importer bruker data fra jabberd14 spoolfiler:"}.
-{"Import User from File at ","Importer Bruker fra Fil på "}.
-{"Import users data from a PIEFXIS file (XEP-0227):","Importer brukeres data fra en PIEFXIS fil (XEP-0227):"}.
-{"Import users data from jabberd14 spool directory:","Importer brukeres data fra jabberd14 spoolfil katalog:"}.
-{"Import Users from Dir at ","Importer Brukere fra Katalog på "}.
-{"Import Users From jabberd14 Spool Files","Importer Brukere Fra jabberd14 Spoolfiler"}.
+{"Host unknown","Ukjent vert"}.
+{"HTTP File Upload","HTTP-filopplasting"}.
+{"If you don't see the CAPTCHA image here, visit the web page.","Dersom du ikke ser et CAPTCHA-bilde her, besøk nettsiden."}.
+{"Import Directory","Importer mappe"}.
+{"Import File","Importer file"}.
+{"Import User from File at ","Importer bruker fra fil på "}.
+{"Import users data from a PIEFXIS file (XEP-0227):","Importer data fra bruker fra en PIEFXIS-fil (XEP-0227):"}.
+{"Import Users from Dir at ","Importer brukere fra mappe på "}.
 {"Improper message type","Feilaktig meldingstype"}.
 {"Incorrect password","Feil passord"}.
-{"IP addresses","IP adresser"}.
-{"IP","IP"}.
+{"Insufficient privilege","Mangler tilstrekkelige rettigheter"}.
+{"Internal server error","Intern tjenerfeil"}.
+{"Invalid 'from' attribute in forwarded message","Ugyldig «fra»-attributt i videresendt melding"}.
+{"IP addresses","IP-adresser"}.
 {"is now known as","er nå kjent som"}.
-{"It is not allowed to send private messages of type \"groupchat\"","Det er ikke tillatt å sende private meldinger med typen "}.
-{"It is not allowed to send private messages to the conference","Det er ikke tillatt å sende private meldinger til "}.
-{"It is not allowed to send private messages","Det er ikke tillatt å sende private meldinger"}.
-{"Jabber Account Registration","Jabber Konto Registrering"}.
-{"Jabber ID","Jabber ID"}.
+{"It is not allowed to send private messages to the conference","Det er ikke tillatt å sende private meldinger til konferansen"}.
+{"Jabber ID","Jabber-ID"}.
 {"January","januar"}.
-{"joins the room","kommer inn i rommet"}.
+{"JID normalization failed","JID-normalisering mislyktes"}.
+{"joins the room","tar del i rommet"}.
 {"July","juli"}.
 {"June","juni"}.
-{"Last Activity","Siste Aktivitet"}.
-{"Last login","Siste pålogging"}.
+{"Just created","Akkurat opprettet"}.
+{"Last Activity","Siste aktivitet"}.
+{"Last login","Siste innlogging"}.
 {"Last month","Siste måned"}.
-{"Last year","Siste året"}.
+{"Last year","Siste år"}.
+{"Least significant bits of SHA-256 hash of text should equal hexadecimal label","De minst viktige bit-ene av SHA-256-sjekksummen for tekst skal tilsvare heksadesimal etikett"}.
 {"leaves the room","forlater rommet"}.
-{"List of modules to start","Liste over moduler som skal startes"}.
-{"Listened Ports at ","Lyttende Porter på "}.
-{"Listened Ports","Lyttende Porter"}.
-{"Low level update script","Lavnivå oppdaterings skript"}.
+{"Logging","Loggføring"}.
 {"Make participants list public","Gjør deltakerlisten offentlig"}.
-{"Make room CAPTCHA protected","Gjør rommet CAPTCHA beskyttet"}.
 {"Make room members-only","Gjør rommet tilgjengelig kun for medlemmer"}.
-{"Make room moderated","Gjør rommet redaktørstyrt"}.
 {"Make room password protected","Passordbeskytt rommet"}.
-{"Make room persistent","Gjør rommet permanent"}.
+{"Make room persistent","Gjør rommet vedvarende"}.
 {"Make room public searchable","Gjør rommet offentlig søkbart"}.
 {"March","mars"}.
-{"Maximum Number of Occupants","Maksimum Antall Deltakere"}.
+{"Maximum file size","Maksimal filstørrelse"}.
+{"Maximum Number of History Messages Returned by Room","Maksimalt antall historikkmeldinger tilbudt av rommet"}.
 {"May","mai"}.
-{"Membership is required to enter this room","Medlemskap kreves for tilgang til samtalerommet"}.
-{"Members:","Medlemmer:"}.
-{"Memorize your password, or write it in a paper placed in a safe place. In Jabber there isn't an automated way to recover your password if you forget it.","Husk passordet, eller skriv det ned på et papir lagret på et trygt sted. I Jabber er det ingen automatisert måte å gjenskape passordet om du glemmer det. "}.
-{"Memory","Minne"}.
+{"Membership is required to enter this room","Medlemskap kreves for tilgang til dette rommet"}.
 {"Message body","Meldingskropp"}.
+{"Message not found in forwarded payload","Fant ikke melding i videresendt nyttelast"}.
+{"Messages from strangers are rejected","Meldinger fra ukjente avvises"}.
+{"Messages of type headline","Meldinger av typen overskrift"}.
+{"Messages of type normal","Meldinger av normal type"}.
 {"Middle Name","Mellomnavn"}.
-{"Moderator privileges required","Redaktørprivilegier kreves"}.
-{"Modified modules","Endrede moduler"}.
-{"Module","Modul"}.
-{"Modules","Moduler"}.
+{"Minimum interval between voice requests (in seconds)","Minimumsintervall mellom lydforespørsler (i sekunder)"}.
 {"Monday","mandag"}.
+{"Multicast","Multikasting"}.
+{"Multi-User Chat","Multibrukersludring"}.
 {"Name","Navn"}.
-{"Name:","Navn:"}.
 {"Never","Aldri"}.
-{"New Password:","Nytt Passord:"}.
-{"Nickname Registration at ","Registrer Kallenavn på "}.
-{"Nickname ~s does not exist in the room","Kallenavn ~s eksisterer ikke i dette rommet"}.
+{"New Password:","Nytt passord:"}.
+{"Nickname can't be empty","Kallenavn kan ikke stå tomt"}.
+{"Nickname Registration at ","Registrer kallenavn på "}.
 {"Nickname","Kallenavn"}.
-{"No body provided for announce message","Ingen meldingskropp gitt for kunngjørings melding"}.
-{"No Data","Ingen Data"}.
+{"No available resource found","Fant ingen tilgjengelig ressurs"}.
+{"No body provided for announce message","Ingen meldingskropp angitt for kunngjøringsmelding"}.
+{"No Data","Ingen data"}.
+{"No features available","Ingen tilgjengelige funksjoner"}.
+{"No <forwarded/> element found","Fant ikke noe <forwarded/>-element"}.
+{"No limit","Ingen grense"}.
+{"Node already exists","Node finnes allerede"}.
+{"Node ID","Node-ID"}.
 {"Node not found","Noden finnes ikke"}.
 {"Nodes","Noder"}.
 {"None","Ingen"}.
-{"Not Found","Finnes Ikke"}.
+{"Not Found","Finnes ikke"}.
+{"Notify subscribers when the node configuration changes","Informer abonnenter når nodeoppsettet endres"}.
+{"Notify subscribers when the node is deleted","Informer abonnenter når noden slettes"}.
 {"November","november"}.
+{"Number of occupants","Antall deltakere"}.
 {"Number of online users","Antall tilkoblede brukere"}.
 {"Number of registered users","Antall registrerte brukere"}.
 {"October","oktober"}.
-{"Offline Messages","Frakoblede Meldinger"}.
-{"Offline Messages:","Frakoblede Meldinger:"}.
 {"OK","OK"}.
-{"Old Password:","Gammelt Passord:"}.
-{"Online Users","Tilkoblede Brukere"}.
-{"Online Users:","Tilkoblede Brukere:"}.
+{"Old Password:","Gammelt passord:"}.
+{"Online Users","Tilkoblede brukere"}.
 {"Online","Tilkoblet"}.
-{"Only moderators and participants are allowed to change the subject in this room","Bare redaktører og deltakere kan endre emnet i dette rommet"}.
-{"Only moderators are allowed to change the subject in this room","Bare ordstyrer tillates å  endre emnet i dette rommet"}.
-{"Only moderators can approve voice requests","Bare ordstyrer kan godkjenne lyd forespørsler"}.
+{"Only deliver notifications to available users","Kun send kunngjøringer til tilgjengelige brukere"}.
 {"Only occupants are allowed to send messages to the conference","Bare deltakere får sende normale meldinger til konferansen"}.
-{"Only occupants are allowed to send queries to the conference","Bare deltakere er tillatt å sende forespørsler til "}.
-{"Only service administrators are allowed to send service messages","Bare tjeneste administratorer er tilatt å sende tjeneste "}.
-{"Options","Alternativer"}.
+{"Only occupants are allowed to send queries to the conference","Kun deltakere tillates å sende forespørsler til konferansen"}.
+{"Only publishers may publish","Kun publiserere kan publisere"}.
+{"Only service administrators are allowed to send service messages","Bare tjenesteadministratorer tillates å sende tjenestemeldinger"}.
 {"Organization Name","Organisasjonsnavn"}.
 {"Organization Unit","Organisasjonsenhet"}.
-{"Outgoing s2s Connections","Utgående s2s Koblinger"}.
-{"Outgoing s2s Connections:","Utgående s2s Koblinger"}.
+{"Outgoing s2s Connections","Utgående s2s-koblinger"}.
 {"Owner privileges required","Eierprivilegier kreves"}.
-{"Packet","Pakke"}.
-{"Password Verification","Passord Bekreftelse"}.
-{"Password Verification:","Passord Bekreftelse:"}.
+{"Participant","Deltager"}.
+{"Password Verification","Passordbekreftelse"}.
+{"Password Verification:","Passordbekreftelse:"}.
 {"Password","Passord"}.
 {"Password:","Passord:"}.
-{"Path to Dir","Sti til Katalog"}.
-{"Path to File","Sti til Fil"}.
-{"Pending","Ventende"}.
+{"Path to Dir","Sti til mappe"}.
+{"Path to File","Sti til fil"}.
 {"Period: ","Periode: "}.
-{"Ping","Ping"}.
-{"Please note that these options will only backup the builtin Mnesia database. If you are using the ODBC module, you also need to backup your SQL database separately.","Merk at disse valgene vil bare sikkerhetskopiere den innebygde Mnesia databasen. Dersom du bruker ODBC modulen må du også ta backup av din SQL database."}.
-{"Please, wait for a while before sending new voice request","Vennligst vent en stund før du sender en ny lyd forespørsel"}.
-{"Pong","Pong"}.
-{"Port","Port"}.
+{"Persist items to storage","Vedvarende elementer til lagring"}.
+{"Please note that these options will only backup the builtin Mnesia database. If you are using the ODBC module, you also need to backup your SQL database separately.","Merk at disse valgene kun vil sikkerhetskopiere den innebygde Mnesia-databasen. Dersom du bruker ODBC-modulen må du også ta sikkerhetskopi av din SQL-database."}.
+{"Previous session PID has exited","Forrige økt-ID har avsluttet"}.
+{"Previous session PID is dead","Forrige økt-PID er død"}.
+{"Previous session timed out","Tidsavbrudd for forrige økt"}.
 {"private, ","privat, "}.
-{"Protocol","Protokoll"}.
-{"Publish-Subscribe","Publish-Subscribe"}.
-{"PubSub subscriber request","PubSub abonements forespørsel"}.
-{"Queries to the conference members are not allowed in this room","Forespørsler til konferanse medlemmene er ikke tillat i dette rommet"}.
-{"RAM and disc copy","RAM og diskkopi"}.
-{"RAM copy","RAM kopi"}.
-{"Raw","Rå"}.
-{"Really delete message of the day?","Virkelig slette melding for dagen?"}.
+{"Public","Offentlig"}.
+{"PubSub subscriber request","PubSub-abonementsforespørsel"}.
+{"Purge all items when the relevant publisher goes offline","Rydd alle elementer når den aktuelle utgiveren logger av"}.
+{"Queries to the conference members are not allowed in this room","Forespørsler til konferansemedlemmerer tillates ikke i dette rommet"}.
+{"Query to another users is forbidden","Spørringer til andre brukere er forbudt"}.
+{"RAM and disc copy","Minne og diskkopi"}.
+{"RAM copy","Minnekopi"}.
+{"Really delete message of the day?","Vil du virkelig slette melding for dagen?"}.
 {"Recipient is not in the conference room","Mottakeren er ikke i konferanserommet"}.
-{"Register a Jabber account","Registrer en Jabber konto"}.
-{"Registered Users","Registrerte Brukere"}.
-{"Registered Users:","Registrerte Brukere:"}.
 {"Register","Registrer"}.
-{"Remote copy","Lagres ikke lokalt"}.
-{"Remove All Offline Messages","Fjern Alle Frakoblede Meldinger"}.
-{"Remove User","Fjern Bruker"}.
-{"Remove","Fjern"}.
+{"Remove User","Fjern bruker"}.
 {"Replaced by new connection","Erstattet av en ny tilkobling"}.
+{"Request has timed out","Tidsavbrudd for forespørsel"}.
+{"Request is ignored","Forespørsel ignorert"}.
+{"Requested role","Forespurt rolle"}.
 {"Resources","Ressurser"}.
-{"Restart Service","Start Tjeneste på Nytt"}.
-{"Restart","Starte på nytt"}.
-{"Restore Backup from File at ","Gjenopprett fra Sikkerhetsopifil på "}.
-{"Restore binary backup after next ejabberd restart (requires less memory):","Gjenopprette binær backup etter neste ejabberd omstart (krever mindre minne):"}.
-{"Restore binary backup immediately:","Gjenopprette binær backup umiddelbart:"}.
+{"Restart Service","Omstart av tjeneste"}.
+{"Restore Backup from File at ","Gjenopprett fra sikkerhetskopifil på "}.
+{"Restore binary backup after next ejabberd restart (requires less memory):","Gjenopprett binær sikkerhetskopi etter neste ejabberd-omstart (krever mindre minne):"}.
+{"Restore binary backup immediately:","Gjenopprett binær sikkerhetskopi umiddelbart:"}.
 {"Restore plain text backup immediately:","Gjenopprette rentekst sikkerhetskopi umiddelbart:"}.
 {"Restore","Gjenopprett"}.
-{"Room Configuration","Rom Konfigurasjon"}.
-{"Room creation is denied by service policy","Oppretting av rom nektes av en tjenste regel"}.
-{"Room description","Rom beskrivelse"}.
-{"Room Occupants","Samtalerom Deltakere"}.
-{"Room title","Romtittel"}.
-{"Roster of ","Kontaktliste for "}.
-{"Roster size","Kontaktliste størrelse"}.
-{"Roster","Kontaktliste"}.
-{"RPC Call Error","RPC Kall Feil"}.
-{"Running Nodes","Kjørende Noder"}.
-{"~s access rule configuration","tilgangsregel konfigurasjon for ~s"}.
-{"~s invites you to the room ~s","~s inviterer deg til rommet ~s"}.
+{"Room Configuration","Rom-oppsett"}.
+{"Room creation is denied by service policy","Oppretting av rom nektes av en tjensteregel"}.
+{"Room description","Rom-beskrivelse"}.
+{"Room Occupants","Samtaleromsdeltagere"}.
+{"Room title","Rom-tittel"}.
+{"Roster groups allowed to subscribe","Kontaktlistegrupper som tillates å abonnere"}.
+{"Roster size","Kontaktlistestørrelse"}.
+{"Running Nodes","Kjørende noder"}.
 {"Saturday","lørdag"}.
-{"Script check","Skript sjekk"}.
-{"Search Results for ","Søke Resultater for "}.
+{"Search Results for ","Søkeresultater for "}.
 {"Search users in ","Søk etter brukere i "}.
-{"Send announcement to all online users on all hosts","Send kunngjøring til alle tilkoblede brukere på alle "}.
+{"Send announcement to all online users on all hosts","Send kunngjøring til alle tilkoblede brukere på alle verter"}.
 {"Send announcement to all online users","Send kunngjøring alle tilkoblede brukere"}.
-{"Send announcement to all users on all hosts","Send kunngjøring til alle brukere på alle maskiner"}.
+{"Send announcement to all users on all hosts","Send kunngjøring til alle brukere på alle verter"}.
 {"Send announcement to all users","Send kunngjøring til alle brukere"}.
 {"September","september"}.
-{"Server:","Server:"}.
+{"Server:","Tjener:"}.
 {"Set message of the day and send to online users","Angi melding for dagen og send til tilkoblede brukere"}.
-{"Set message of the day on all hosts and send to online users","Angi melding for dagen på alle maskiner og send til "}.
-{"Shared Roster Groups","Delte Kontaktgrupper"}.
-{"Show Integral Table","Vis Integral Tabell"}.
-{"Show Ordinary Table","Vis Ordinær Tabell"}.
-{"Shut Down Service","Avslutt Tjeneste"}.
-{"Some Jabber clients can store your password in the computer, but you should do this only in your personal computer for safety reasons.","Noen Jabber klienter kan lagre passordet på datamaskinen. Bruk bare den funksjonen dersom du er sikker på at maskinen er trygg."}.
-{"~s's Offline Messages Queue","~ss kø for Frakoblede Meldinger"}.
-{"Start Modules at ","Start Moduler på "}.
-{"Start Modules","Start Moduler"}.
-{"Start","Start"}.
-{"Statistics of ~p","Statistikk for ~p"}.
-{"Statistics","Statistikk"}.
-{"Stop Modules at ","Stopp Moduler på "}.
-{"Stop Modules","Stop Moduler"}.
-{"Stopped Nodes","Stoppede Noder"}.
-{"Stop","Stoppe"}.
-{"Storage Type","Lagringstype"}.
+{"Shared Roster Groups","Delte kontaktgrupper"}.
+{"Show Ordinary Table","Vis ordinær tabell"}.
+{"Shut Down Service","Avslutt tjeneste"}.
+{"Specify the access model","Spesifiser tilgangsmodellen"}.
+{"Specify the event message type","Spesifiser hendelsesbeskjedtypen"}.
+{"Specify the publisher model","Angi publiseringsmodell"}.
+{"Stopped Nodes","Stoppede noder"}.
 {"Store binary backup:","Lagre binær sikkerhetskopi:"}.
-{"Store plain text backup:","Lagre rentekst sikkerhetskopi:"}.
-{"Subject","Tittel"}.
+{"Store plain text backup:","Lagre klartekst-sikkerhetskopi:"}.
+{"Subject","Emne"}.
 {"Submit","Send"}.
 {"Submitted","Innsendt"}.
-{"Subscription","Abonnement"}.
+{"Subscriber Address","Abonnementsadresse"}.
+{"Subscribers may publish","Abonnenter kan publisere"}.
+{"Subscriptions are not allowed","Abonnementer tillates ikke"}.
 {"Sunday","søndag"}.
+{"Text associated with a picture","Tekst tilknyttet et bilde"}.
+{"Text associated with a sound","Tekst tilknyttet en lyd"}.
+{"Text associated with a video","Tekst tilknyttet en video"}.
+{"Text associated with speech","Tekst tilknyttet tale"}.
 {"That nickname is already in use by another occupant","Det kallenavnet er allerede i bruk av en annen deltaker"}.
 {"That nickname is registered by another person","Det kallenavnet er registrert av en annen person"}.
-{"The CAPTCHA is valid.","Captchaen er ikke gyldig"}.
-{"The CAPTCHA verification has failed","CAPTCHA godkjenningen har feilet"}.
+{"The account already exists","Kontoen finnes allerede"}.
+{"The account was not unregistered","Kontoen ble ikke avregistrert"}.
+{"The body text of the last received message","Brødteksten i sist mottatte melding"}.
+{"The CAPTCHA is valid.","CAPTCHA-en er gyldig."}.
+{"The CAPTCHA verification has failed","CAPTCHA-godkjenning mislyktes"}.
+{"The captcha you entered is wrong","CAPTCHA-en du skrev inn er feil"}.
+{"The number of unread or undelivered messages","Antallet uleste eller uleverte meldinger"}.
+{"The password contains unacceptable characters","Passordet inneholder ulovlige tegn"}.
 {"The password is too weak","Passordet er for svakt"}.
 {"the password is","passordet er"}.
-{"The password of your Jabber account was successfully changed.","Passordet for din Jabber konto ble endret."}.
-{"There was an error changing the password: ","En feil skjedde under endring av passordet:"}.
-{"There was an error creating the account: ","En feil skjedde under oppretting av kontoen:"}.
-{"There was an error deleting the account: ","En feil skjedde under sletting av kontoen: "}.
-{"This is case insensitive: macbeth is the same that MacBeth and Macbeth.","Denne er ufølsom for små og store bokstaver: macbeth er det samme som MacBeth og Macbeth. "}.
-{"This page allows to create a Jabber account in this Jabber server. Your JID (Jabber IDentifier) will be of the form: username@server. Please read carefully the instructions to fill correctly the fields.","Denne siden lar deg lage en Jabber konto på denne Jabber serveren. Din JID (Jabber ID) vil være i formatet: brukernavn@server. Vennligst les instruksjonene nøye slik at du fyller ut skjemaet riktig."}.
-{"This page allows to unregister a Jabber account in this Jabber server.","Denne siden lar deg avregistrere en Jabber konto på denne Jabber serveren."}.
+{"The presence states for which an entity wants to receive notifications","Tilstedeværelsestilstandene en eksistens ønsker å motta merknader for"}.
+{"The query is only allowed from local users","Spørringen tillates kun fra lokale brukere"}.
+{"The query must not contain <item/> elements","Spørringen kan ikke inneholde <item/>-elementer"}.
+{"The room subject can be modified by participants","Romemnet kan endres av dets deltagere"}.
+{"The sender of the last received message","Avsender for sist mottatte melding"}.
+{"There was an error creating the account: ","En feil inntraff under oppretting av kontoen: "}.
+{"There was an error deleting the account: ","En feil inntraff under sletting av kontoen: "}.
 {"This room is not anonymous","Dette rommet er ikke anonymt"}.
 {"Thursday","torsdag"}.
-{"Time delay","Tids forsinkelse"}.
-{"Time","Tid"}.
-{"To ~s","Til ~s"}.
-{"Too many CAPTCHA requests","For mange CAPTCHA forespørsler"}.
-{"To","Til"}.
-{"Traffic rate limit is exceeded","Trafikkmengde grense overskredet"}.
-{"Transactions Aborted:","Avbrutte Transasksjoner:"}.
-{"Transactions Committed:","Sendte Transaksjoner:"}.
-{"Transactions Logged:","Loggede Transasksjoner:"}.
-{"Transactions Restarted:","Omstartede Transasksjoner:"}.
+{"Time delay","Tidsforsinkelse"}.
+{"To register, visit ~s","Besøk ~s for registrering"}.
+{"Too many CAPTCHA requests","For mange CAPTCHA-forespørsler"}.
+{"Too many <item/> elements","For mange <item/>-elementer"}.
+{"Too many <list/> elements","For mange <list/>-elementer"}.
+{"Traffic rate limit is exceeded","Grense for tillatt trafikkmengde overskredet"}.
 {"Tuesday","tirsdag"}.
-{"Unable to generate a CAPTCHA","Umulig å generere en CAPTCHA"}.
+{"Unable to generate a CAPTCHA","Kunne ikke generere CAPTCHA"}.
 {"Unauthorized","Uautorisert"}.
-{"Unregister a Jabber account","Avregistrer en Jabber konto"}.
 {"Unregister","Avregistrer"}.
+{"Unsupported <index/> element","Ustøttet <index/>-element"}.
+{"Unsupported version","Ustøttet versjon"}.
 {"Update message of the day (don't send)","Oppdater melding for dagen (ikke send)"}.
-{"Update message of the day on all hosts (don't send)","Oppdater melding for dagen på alle maskiner (ikke send)"}.
-{"Update plan","Oppdaterings plan"}.
-{"Update script","Oppdaterings skript"}.
-{"Update","Oppdatere"}.
-{"Uptime:","Oppetid:"}.
-{"User Management","Bruker Behandling"}.
+{"Update message of the day on all hosts (don't send)","Oppdater melding for dagen på alle verter (ikke send)"}.
+{"User already exists","Brukeren finnes allerede"}.
+{"User Management","Brukerhåndtering"}.
+{"User removed","Fjernet bruker"}.
+{"User ~ts","Bruker ~ts"}.
 {"User","Bruker"}.
 {"Username:","Brukernavn:"}.
-{"Users are not allowed to register accounts so quickly","Brukere får ikke lov til  registrere kontoer så fort"}.
-{"Users Last Activity","Brukers Siste Aktivitet"}.
+{"Users are not allowed to register accounts so quickly","Brukere har ikke lov til registrere kontoer så fort"}.
+{"Users Last Activity","Brukers siste aktivitet"}.
 {"Users","Brukere"}.
-{"Validate","Bekrefte gyldighet"}.
-{"vCard User Search","vCard Bruker Søk"}.
-{"Virtual Hosts","Virtuella Maskiner"}.
-{"Visitors are not allowed to change their nicknames in this room","Besøkende får ikke lov å endre kallenavn i dette "}.
+{"vCard User Search","vCard-brukersøk"}.
+{"Virtual Hosts","Virtuelle maskiner"}.
+{"Visitor","Besøker"}.
+{"Visitors are not allowed to change their nicknames in this room","Besøkende får ikke lov å endre kallenavn i dette rommet"}.
 {"Visitors are not allowed to send messages to all occupants","Besøkende får ikke sende meldinger til alle deltakere"}.
-{"Voice request","Lyd forespørsel"}.
-{"Voice requests are disabled in this conference","Lyd forespørsler er blokkert i denne konferansen"}.
+{"Voice requests are disabled in this conference","Stemmeforespørsler er blokkert i denne konferansen"}.
+{"Voice request","Stemmeforespørsel"}.
 {"Wednesday","onsdag"}.
-{"You can later change your password using a Jabber client.","Du kan når som helst endre passordet via en Jabber klient."}.
-{"You have been banned from this room","Du har blitt bannlyst i dette rommet."}.
-{"You must fill in field \"Nickname\" in the form","Du må fylle inn feltet \"Nickname\" i skjemaet"}.
-{"You need a client that supports x:data and CAPTCHA to register","Du trenger en klient som støtter x:data og CAPTCHA for registrering "}.
+{"When to send the last published item","Når skal siste publiserte artikkel sendes"}.
+{"Whether an entity wants to receive an XMPP message body in addition to the payload format","Hvorvidt en eksistens ønsker å motta en XMPP-meldingsbrødtekst i tillegg til nyttedata-formatet"}.
+{"Whether an entity wants to receive or disable notifications","Hvorvidt en eksistens ønsker å motta eller skru av merknader"}.
+{"Whether owners or publisher should receive replies to items","Hvorvidt elere eller publisererer skal motta svar på elementer"}.
+{"Whether to allow subscriptions","Hvorvidt abonnementer skal tillates"}.
+{"XMPP Domains","XMPP-domener"}.
+{"You have been banned from this room","Du har blitt bannlyst fra dette rommet."}.
+{"You have joined too many conferences","Du har tilknyttet deg for mange konferanser"}.
+{"You must fill in field \"Nickname\" in the form","Du må fylle inn feltet «Kallenavn» i skjemaet"}.
+{"You need a client that supports x:data and CAPTCHA to register","Du trenger en klient som støtter x:data og CAPTCHA for registrering"}.
 {"You need a client that supports x:data to register the nickname","Du trenger en klient som støtter x:data for å registrere kallenavnet"}.
-{"You need an x:data capable client to search","Du tregner en klient som støtter x:data for å kunne "}.
-{"Your active privacy list has denied the routing of this stanza.","Din aktive privat liste har blokkert rutingen av denne strofen."}.
+{"You need an x:data capable client to search","Du trenger en klient som støtter x:data for å søke"}.
 {"Your contact offline message queue is full. The message has been discarded.","Kontaktens frakoblede meldingskø er full. Meldingen har blitt kassert."}.
-{"Your Jabber account was successfully created.","Din Jabber konto ble opprettet"}.
-{"Your Jabber account was successfully deleted.","Dni Jabber konto er blitt sltettet."}.
-{"Your messages to ~s are being blocked. To unblock them, visit ~s","Dine meldinger til ~s blir blokkert. For å åpne igjen, besøk ~s"}.
+{"Your subscription request and/or messages to ~s have been blocked. To unblock your subscription request, visit ~s","Din abonnementsforespørsel og/eller meldinger til ~s har blitt blokkert. For å avblokkere din abonnementsforespørsel, besøk ~s"}.

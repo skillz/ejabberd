@@ -7,12 +7,13 @@ defmodule Ejabberd.Config.EjabberdModule do
   the already existing Elixir.Module.
   """
 
-  @type t :: %{module: atom, attrs: [Attr.t]}
-
-  defstruct [:module, :attrs]
-
   alias Ejabberd.Config.EjabberdModule
   alias Ejabberd.Config.Validation
+  alias Ejabberd.Config.Attr
+
+  @type t :: %{module: atom, attrs: [Attr.attr]}
+
+  defstruct [:module, :attrs]
 
   @doc """
   Given a list of modules / single module
@@ -29,7 +30,6 @@ defmodule Ejabberd.Config.EjabberdModule do
   a git attribute and tries to fetch the repo,
   then, it install them through :ext_mod.install/1
   """
-  @spec fetch_git_repos([EjabberdModule.t]) :: none()
   def fetch_git_repos(modules) do
     modules
     |> Enum.filter(&is_git_module?/1)
@@ -60,7 +60,7 @@ defmodule Ejabberd.Config.EjabberdModule do
   defp fetch_and_store_repo_source_if_not_exists(path, repo) do
     unless File.exists?(path) do
       IO.puts "[info] Fetching: #{repo}"
-      :os.cmd('git clone #{repo} #{path}')
+      :os.cmd(~c"git clone #{repo} #{path}")
     end
   end
 

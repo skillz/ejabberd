@@ -15,6 +15,7 @@ use Term::ANSIColor;
 use Term::ReadKey;
 use List::Util qw(first);
 use Clone qw(clone);
+use LWP::UserAgent;
 
 sub get_deps {
     my ($config, %fdeps) = @_;
@@ -64,7 +65,7 @@ sub update_deps_repos {
             say "Downloading $dep...";
             my $repo = $deps->{$dep}->{repo};
             $repo =~ s!^https?://github.com/!git\@github.com:!;
-            system("git", "-C", ".deps-update", "clone", $repo);
+            system("git", "-C", ".deps-update", "clone", $repo, $dep);
         } elsif (time() - stat($dd)->mtime > 24 * 60 * 60 or $force) {
             say "Updating $dep...";
             system("git", "-C", $dd, "pull");
@@ -204,7 +205,7 @@ sub cmp_ver {
                     return 1 if $ap > $bp;
                     return - 1;
                 } else {
-                    next if $ap eq $bp;
+                    next if $ap eq $bp or $ap eq "" or $bp eq "";
                     return 1 if $ap gt $bp;
                     return - 1;
                 }
@@ -331,7 +332,7 @@ sub git_tag {
     my ($dep, $ver, $msg) = @_;
 
     system("git", "-C", ".deps-update/$dep", "commit", "-a", "-m", $msg);
-    system("git", "-C", ".deps-update/$dep", "tag", $ver);
+    system("git", "-C", ".deps-update/$dep", "tag", $ver, "-a", "-m", $msg);
 }
 
 sub git_push {
@@ -412,7 +413,8 @@ while (1) {
     my $cmd = show_commands($old_deps ? (U => "Update dependency") : (),
         $changed_deps ? (T => "Tag new release") : (),
         @operations ? (A => "Apply changes") : (),
-        R => "Refresh repositiories",
+        R => "Refresh repositories",
+        H => "What release to Hex",
         E => "Exit");
     last if $cmd eq "E";
 
@@ -440,6 +442,16 @@ while (1) {
 
     if ($cmd eq "R") {
         update_deps_repos(1);
+    }
+    if ($cmd eq "H") {
+        my $ua = LWP::UserAgent->new();
+        for my $dep (sort keys %$top_deps) {
+            say "checking https://hex.pm/packages/$dep/$git_info->{$dep}->{last_tag}";
+            my $res = $ua->head("https://hex.pm/packages/$dep/$git_info->{$dep}->{last_tag}");
+            if ($res->code == 404) {
+                say color("red"), "$dep", color("reset"), " ($top_deps->{$dep}->{commit})";
+            }
+        }
     }
     if ($cmd eq "T") {
         while (1) {

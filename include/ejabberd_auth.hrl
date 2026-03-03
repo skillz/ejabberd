@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -18,5 +18,5 @@
 %%%
 %%%----------------------------------------------------------------------
 
--record(passwd, {us = {<<"">>, <<"">>} :: {binary(), binary()} | '$1',
+-record(passwd, {us = {<<"">>, <<"">>} :: {binary(), binary()} | {binary(), binary(), atom()} | '$1',
                  password = <<"">> :: binary() | scram() | '_'}).

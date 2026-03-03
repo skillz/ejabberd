@@ -5,7 +5,7 @@
 %%% Created : 7 Oct 2006 by Magnus Henoch <henoch@dtek.chalmers.se>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -29,7 +29,7 @@
 
 -author('henoch@dtek.chalmers.se').
 
--protocol({xep, 115, '1.5'}).
+-protocol({xep, 115, '1.6.0', '2.1.4', "complete", ""}).
 
 -behaviour(gen_server).
 
@@ -49,16 +49,20 @@
 	 handle_cast/2, terminate/2, code_change/3]).
 
 -export([user_send_packet/1, user_receive_packet/1,
-	 c2s_presence_in/2, mod_opt_type/1, mod_options/1]).
+	 c2s_presence_in/2, c2s_copy_session/2,
+	 mod_opt_type/1, mod_options/1, mod_doc/0]).
 
 -include("logger.hrl").
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_caps.hrl").
+-include("translate.hrl").
 
 -define(BAD_HASH_LIFETIME, 600).
 
 -record(state, {host = <<"">> :: binary()}).
+
+-type digest_type() :: md5 | sha | sha224 | sha256 | sha384 | sha512.
 
 -callback init(binary(), gen_mod:opts()) -> any().
 -callback import(binary(), {binary(), binary()}, [binary() | pos_integer()]) -> ok.
@@ -104,7 +108,7 @@ list_features(C2SState) ->
     Rs = maps:get(caps_resources, C2SState, gb_trees:empty()),
     gb_trees:to_list(Rs).
 
--spec get_user_caps(jid(), ejabberd_c2s:state()) -> {ok, caps()} | error.
+-spec get_user_caps(jid() | ljid(), ejabberd_c2s:state()) -> {ok, caps()} | error.
 get_user_caps(JID, C2SState) ->
     Rs = maps:get(caps_resources, C2SState, gb_trees:empty()),
     LJID = jid:tolower(JID),
@@ -140,7 +144,19 @@ user_send_packet(Acc) ->
 -spec user_receive_packet({stanza(), ejabberd_c2s:state()}) -> {stanza(), ejabberd_c2s:state()}.
 user_receive_packet({#presence{from = From, type = available} = Pkt,
 		     #{lserver := LServer, jid := To} = State}) ->
-    IsRemote = not ejabberd_router:is_my_host(From#jid.lserver),
+    IsRemote = case From#jid.lresource of
+		   % Don't store caps for presences sent by our muc rooms
+		   <<>> ->
+		       try ejabberd_router:host_of_route(From#jid.lserver) of
+			   MaybeMuc ->
+			       not lists:member(From#jid.lserver,
+						gen_mod:get_module_opt_hosts(MaybeMuc, mod_muc))
+		       catch error:{unregistered_route, _} ->
+			   true
+		       end;
+		   _ ->
+		       not ejabberd_router:is_my_host(From#jid.lserver)
+	       end,
     if IsRemote ->
 	   case read_caps(Pkt) of
 	     nothing -> ok;
@@ -211,49 +227,68 @@ disco_info(Acc, _, _, _Node, _Lang) ->
 -spec c2s_presence_in(ejabberd_c2s:state(), presence()) -> ejabberd_c2s:state().
 c2s_presence_in(C2SState,
 		#presence{from = From, to = To, type = Type} = Presence) ->
-    {Subscription, _, _} = ejabberd_hooks:run_fold(
-			     roster_get_jid_info, To#jid.lserver,
-			     {none, none, []},
-			     [To#jid.luser, To#jid.lserver, From]),
     ToSelf = (From#jid.luser == To#jid.luser)
-	       and (From#jid.lserver == To#jid.lserver),
-    Insert = (Type == available)
-	       and ((Subscription == both) or (Subscription == from) or ToSelf),
-    Delete = (Type == unavailable) or (Type == error),
-    if Insert or Delete ->
-	   LFrom = jid:tolower(From),
-	   Rs = maps:get(caps_resources, C2SState, gb_trees:empty()),
-	   Caps = read_caps(Presence),
-	   NewRs = case Caps of
-		     nothing when Insert == true -> Rs;
-		     _ when Insert == true ->
-			 case gb_trees:lookup(LFrom, Rs) of
-			   {value, Caps} -> Rs;
-			   none ->
-				ejabberd_hooks:run(caps_add, To#jid.lserver,
-						   [From, To,
-						    get_features(To#jid.lserver, Caps)]),
-				gb_trees:insert(LFrom, Caps, Rs);
-			   _ ->
-				ejabberd_hooks:run(caps_update, To#jid.lserver,
-						   [From, To,
-						    get_features(To#jid.lserver, Caps)]),
-				gb_trees:update(LFrom, Caps, Rs)
-			 end;
-		     _ -> gb_trees:delete_any(LFrom, Rs)
-		   end,
-	    C2SState#{caps_resources => NewRs};
-       true ->
-	    C2SState
+	       andalso (From#jid.lserver == To#jid.lserver),
+    Caps = read_caps(Presence),
+    Operation =
+    case {Type, ToSelf, Caps} of
+	{unavailable, _, _} -> delete;
+	{error, _, _} -> delete;
+	{available, _, nothing} -> skip;
+	{available, true, _} -> insert;
+	{available, _, _} ->
+	    {Subscription, _, _} = ejabberd_hooks:run_fold(
+		roster_get_jid_info, To#jid.lserver,
+		{none, none, []},
+		[To#jid.luser, To#jid.lserver, From]),
+	    case Subscription of
+		from -> insert;
+		both -> insert;
+		_ -> skip
+	    end;
+	_ ->
+	    skip
+    end,
+    case Operation of
+	skip ->
+	    C2SState;
+	delete ->
+	    LFrom = jid:tolower(From),
+	    Rs = maps:get(caps_resources, C2SState, gb_trees:empty()),
+	    C2SState#{caps_resources => gb_trees:delete_any(LFrom, Rs)};
+	insert ->
+	    LFrom = jid:tolower(From),
+	    Rs = maps:get(caps_resources, C2SState, gb_trees:empty()),
+	    NewRs = case gb_trees:lookup(LFrom, Rs) of
+			{value, Caps} -> Rs;
+			none ->
+			    ejabberd_hooks:run(caps_add, To#jid.lserver,
+					       [From, To,
+						get_features(To#jid.lserver, Caps)]),
+			    gb_trees:insert(LFrom, Caps, Rs);
+			_ ->
+			    ejabberd_hooks:run(caps_update, To#jid.lserver,
+					       [From, To,
+						get_features(To#jid.lserver, Caps)]),
+			    gb_trees:update(LFrom, Caps, Rs)
+		    end,
+	    C2SState#{caps_resources => NewRs}
     end.
+
+-spec c2s_copy_session(ejabberd_c2s:state(), ejabberd_c2s:state())
+      -> ejabberd_c2s:state().
+c2s_copy_session(C2SState, #{caps_resources := Rs}) ->
+    C2SState#{caps_resources => Rs};
+c2s_copy_session(C2SState, _) ->
+    C2SState.
 
 -spec depends(binary(), gen_mod:opts()) -> [{module(), hard | soft}].
 depends(_Host, _Opts) ->
     [].
 
 reload(Host, NewOpts, OldOpts) ->
-    NewMod = gen_mod:db_mod(Host, NewOpts, ?MODULE),
-    OldMod = gen_mod:db_mod(Host, OldOpts, ?MODULE),
+    NewMod = gen_mod:db_mod(NewOpts, ?MODULE),
+    OldMod = gen_mod:db_mod(OldOpts, ?MODULE),
     if OldMod /= NewMod ->
 	    NewMod:init(Host, NewOpts);
        true ->
@@ -261,9 +296,10 @@ reload(Host, NewOpts, OldOpts) ->
     end,
     init_cache(NewMod, Host, NewOpts).
 
-init([Host, Opts]) ->
+init([Host|_]) ->
     process_flag(trap_exit, true),
-    Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
+    Opts = gen_mod:get_module_opts(Host, ?MODULE),
+    Mod = gen_mod:db_mod(Opts, ?MODULE),
     init_cache(Mod, Host, Opts),
     Mod:init(Host, Opts),
     ejabberd_hooks:add(c2s_presence_in, Host, ?MODULE,
@@ -276,6 +312,8 @@ init([Host, Opts]) ->
 		       caps_stream_features, 75),
     ejabberd_hooks:add(s2s_in_post_auth_features, Host, ?MODULE,
 		       caps_stream_features, 75),
+    ejabberd_hooks:add(c2s_copy_session, Host, ?MODULE,
+		       c2s_copy_session, 75),
     ejabberd_hooks:add(disco_local_features, Host, ?MODULE,
 		       disco_features, 75),
     ejabberd_hooks:add(disco_local_identity, Host, ?MODULE,
@@ -286,16 +324,19 @@ init([Host, Opts]) ->
 
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State};
-handle_call(_Req, _From, State) ->
-    {reply, {error, badarg}, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
-handle_cast(_Msg, State) -> {noreply, State}.
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
+    {noreply, State}.
 
 handle_info({iq_reply, IQReply, {Host, From, To, Caps, SubNodes}}, State) ->
     feature_response(IQReply, Host, From, To, Caps, SubNodes),
     {noreply, State};
 handle_info(Info, State) ->
-    ?WARNING_MSG("unexpected info: ~p", [Info]),
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, State) ->
@@ -310,6 +351,8 @@ terminate(_Reason, State) ->
 			  ?MODULE, caps_stream_features, 75),
     ejabberd_hooks:delete(s2s_in_post_auth_features, Host,
 			  ?MODULE, caps_stream_features, 75),
+    ejabberd_hooks:delete(c2s_copy_session, Host, ?MODULE,
+			  c2s_copy_session, 75),
     ejabberd_hooks:delete(disco_local_features, Host,
 			  ?MODULE, disco_features, 75),
     ejabberd_hooks:delete(disco_local_identity, Host,
@@ -416,19 +459,18 @@ make_my_disco_hash(Host) ->
       _Err -> <<"">>
     end.
 
--type digest_type() :: md5 | sha | sha224 | sha256 | sha384 | sha512.
 -spec compute_disco_hash(disco_info(), digest_type()) -> binary().
 compute_disco_hash(DiscoInfo, Algo) ->
     Concat = list_to_binary([concat_identities(DiscoInfo),
                              concat_features(DiscoInfo), concat_info(DiscoInfo)]),
     base64:encode(case Algo of
-                           md5 -> erlang:md5(Concat);
-                           sha -> crypto:hash(sha, Concat);
-                           sha224 -> crypto:hash(sha224, Concat);
-                           sha256 -> crypto:hash(sha256, Concat);
-                           sha384 -> crypto:hash(sha384, Concat);
-                           sha512 -> crypto:hash(sha512, Concat)
-                       end).
+		      md5 -> erlang:md5(Concat);
+		      sha -> crypto:hash(sha, Concat);
+		      sha224 -> crypto:hash(sha224, Concat);
+		      sha256 -> crypto:hash(sha256, Concat);
+		      sha384 -> crypto:hash(sha384, Concat);
+		      sha512 -> crypto:hash(sha512, Concat)
+		  end).
 
 -spec check_hash(caps(), disco_info()) -> boolean().
 check_hash(Caps, DiscoInfo) ->
@@ -497,16 +539,13 @@ init_cache(Mod, Host, Opts) ->
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false -> mod_caps_opt:use_cache(Host)
     end.
 
 cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_caps_opt:cache_size(Opts),
+    CacheMissed = mod_caps_opt:cache_missed(Opts),
+    LifeTime = mod_caps_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
 export(LServer) ->
@@ -544,17 +583,49 @@ import_next(LServer, DBType, NodePair) ->
     Mod:import(LServer, NodePair, Features),
     import_next(LServer, DBType, ets:next(caps_features_tmp, NodePair)).
 
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun (I) when is_integer(I), I > 0 -> I;
-	(infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end;
-mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end.
+mod_opt_type(db_type) ->
+    econf:db_type(?MODULE);
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
 mod_options(Host) ->
     [{db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+     {use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
+
+mod_doc() ->
+    #{desc =>
+          [?T("This module implements "
+              "https://xmpp.org/extensions/xep-0115.html"
+              "[XEP-0115: Entity Capabilities]."),
+           ?T("The main purpose of the module is to provide "
+              "PEP functionality (see _`mod_pubsub`_).")],
+      opts =>
+          [{db_type,
+            #{value => "mnesia | sql",
+              desc =>
+                  ?T("Same as top-level _`default_db`_ option, but applied to this module only.")}},
+           {use_cache,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`use_cache`_ option, but applied to this module only.")}},
+           {cache_size,
+            #{value => "pos_integer() | infinity",
+              desc =>
+                  ?T("Same as top-level _`cache_size`_ option, but applied to this module only.")}},
+           {cache_missed,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`cache_missed`_ option, but applied to this module only.")}},
+           {cache_life_time,
+            #{value => "timeout()",
+              desc =>
+                  ?T("Same as top-level _`cache_life_time`_ option, but applied to this module only.")}}]}.

@@ -1,12 +1,11 @@
 %%%----------------------------------------------------------------------
 %%% File    : ejabberd_web.erl
 %%% Author  : Alexey Shchepin <alexey@process-one.net>
-%%% Purpose : 
 %%% Purpose :
 %%% Created : 28 Feb 2004 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -33,7 +32,7 @@
 
 -include("logger.hrl").
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 -include("ejabberd_http.hrl").
 

@@ -4,7 +4,7 @@
 %%% Created : 14 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -32,7 +32,7 @@
 	 remove_list/3, use_cache/1, import/1]).
 -export([need_transform/1, transform/1]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_privacy.hrl").
 -include("logger.hrl").
 
@@ -47,7 +47,7 @@ init(_Host, _Opts) ->
 use_cache(Host) ->
     case mnesia:table_info(privacy, storage_type) of
         disc_only_copies ->
-            gen_mod:get_module_opt(Host, mod_privacy, use_cache);
+            mod_privacy_opt:use_cache(Host);
         _ ->
             false
     end.
@@ -143,7 +143,7 @@ remove_lists(LUser, LServer) ->
 import(#privacy{} = P) ->
     mnesia:dirty_write(P).
 
-need_transform(#privacy{us = {U, S}}) when is_list(U) orelse is_list(S) ->
+need_transform({privacy, {U, S}, _, _}) when is_list(U) orelse is_list(S) ->
     ?INFO_MSG("Mnesia table 'privacy' will be converted to binary", []),
     true;
 need_transform(_) ->

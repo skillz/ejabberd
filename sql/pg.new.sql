@@ -1,5 +1,5 @@
 --
--- ejabberd, Copyright (C) 2002-2019   ProcessOne
+-- ejabberd, Copyright (C) 2002-2026   ProcessOne
 --
 -- This program is free software; you can redistribute it and/or
 -- modify it under the terms of the GNU General Public License as
@@ -20,7 +20,7 @@
 
 -- ALTER TABLE users ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
 -- ALTER TABLE users DROP CONSTRAINT users_pkey;
--- ALTER TABLE users ADD PRIMARY KEY (server_host, username);
+-- ALTER TABLE users ADD PRIMARY KEY (server_host, username, "type");
 -- ALTER TABLE users ALTER COLUMN server_host DROP DEFAULT;
 
 -- ALTER TABLE last ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
@@ -30,10 +30,8 @@
 
 -- ALTER TABLE rosterusers ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
 -- DROP INDEX i_rosteru_user_jid;
--- DROP INDEX i_rosteru_username;
 -- DROP INDEX i_rosteru_jid;
 -- CREATE UNIQUE INDEX i_rosteru_sh_user_jid ON rosterusers USING btree (server_host, username, jid);
--- CREATE INDEX i_rosteru_sh_username ON rosterusers USING btree (server_host, username);
 -- CREATE INDEX i_rosteru_sh_jid ON rosterusers USING btree (server_host, jid);
 -- ALTER TABLE rosterusers ALTER COLUMN server_host DROP DEFAULT;
 
@@ -43,15 +41,15 @@
 -- ALTER TABLE rostergroups ALTER COLUMN server_host DROP DEFAULT;
 
 -- ALTER TABLE sr_group ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
+-- DROP INDEX i_sr_group_name;
 -- ALTER TABLE sr_group ADD PRIMARY KEY (server_host, name);
+-- CREATE UNIQUE INDEX i_sr_group_sh_name ON sr_group USING btree (server_host, name);
 -- ALTER TABLE sr_group ALTER COLUMN server_host DROP DEFAULT;
 
 -- ALTER TABLE sr_user ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
 -- DROP INDEX i_sr_user_jid_grp;
--- DROP INDEX i_sr_user_jid;
 -- DROP INDEX i_sr_user_grp;
 -- ALTER TABLE sr_user ADD PRIMARY KEY (server_host, jid, grp);
--- CREATE INDEX i_sr_user_sh_jid ON sr_user USING btree (server_host, jid);
 -- CREATE INDEX i_sr_user_sh_grp ON sr_user USING btree (server_host, grp);
 -- ALTER TABLE sr_user ALTER COLUMN server_host DROP DEFAULT;
 
@@ -94,7 +92,7 @@
 -- DROP INDEX i_vcard_search_lemail;
 -- DROP INDEX i_vcard_search_lorgname;
 -- DROP INDEX i_vcard_search_lorgunit;
--- ALTER TABLE vcard_search ADD PRIMARY KEY (server_host, username);
+-- ALTER TABLE vcard_search ADD PRIMARY KEY (server_host, lusername);
 -- CREATE INDEX i_vcard_search_sh_lfn       ON vcard_search(server_host, lfn);
 -- CREATE INDEX i_vcard_search_sh_lfamily   ON vcard_search(server_host, lfamily);
 -- CREATE INDEX i_vcard_search_sh_lgiven    ON vcard_search(server_host, lgiven);
@@ -114,17 +112,13 @@
 -- ALTER TABLE privacy_default_list ALTER COLUMN server_host DROP DEFAULT;
 
 -- ALTER TABLE privacy_list ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
--- DROP INDEX i_privacy_list_username;
 -- DROP INDEX i_privacy_list_username_name;
--- CREATE INDEX i_privacy_list_sh_username ON privacy_list USING btree (server_host, username);
 -- CREATE UNIQUE INDEX i_privacy_list_sh_username_name ON privacy_list USING btree (server_host, username, name);
 -- ALTER TABLE privacy_list ALTER COLUMN server_host DROP DEFAULT;
 
 -- ALTER TABLE private_storage ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
--- DROP INDEX i_private_storage_username;
 -- DROP INDEX i_private_storage_username_namespace;
 -- ALTER TABLE private_storage ADD PRIMARY KEY (server_host, username, namespace);
--- CREATE INDEX i_private_storage_sh_username ON private_storage USING btree (server_host, username);
 -- ALTER TABLE private_storage ALTER COLUMN server_host DROP DEFAULT;
 
 -- ALTER TABLE roster_version ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
@@ -156,16 +150,35 @@
 -- CREATE INDEX i_sm_sh_username ON sm USING btree (server_host, username);
 -- ALTER TABLE sm ALTER COLUMN server_host DROP DEFAULT;
 
+-- ALTER TABLE push_session ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
+-- DROP INDEX i_push_usn;
+-- DROP INDEX i_push_ut;
+-- ALTER TABLE push_session ADD PRIMARY KEY (server_host, username, timestamp);
+-- CREATE UNIQUE INDEX i_push_session_susn ON push_session USING btree (server_host, username, service, node);
+-- CREATE INDEX i_push_session_sh_username_timestamp ON push_session USING btree (server_host, username, timestamp);
+-- ALTER TABLE push_session ALTER COLUMN server_host DROP DEFAULT;
+
+-- ALTER TABLE mix_pam ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
+-- DROP INDEX i_mix_pam;
+-- CREATE UNIQUE INDEX i_mix_pam ON mix_pam (username, server_host, channel, service);
+-- ALTER TABLE mix_pam ALTER COLUMN server_host DROP DEFAULT;
+
+-- ALTER TABLE mqtt_pub ADD COLUMN server_host text NOT NULL DEFAULT '<HOST>';
+-- DROP INDEX i_mqtt_topic;
+-- CREATE UNIQUE INDEX i_mqtt_topic_server ON mqtt_pub (topic, server_host);
+-- ALTER TABLE mqtt_pub ALTER COLUMN server_host DROP DEFAULT;
+
 
 CREATE TABLE users (
     username text NOT NULL,
     server_host text NOT NULL,
+    "type" smallint NOT NULL,
     "password" text NOT NULL,
     serverkey text NOT NULL DEFAULT '',
     salt text NOT NULL DEFAULT '',
     iterationcount integer NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    PRIMARY KEY (server_host, username)
+    PRIMARY KEY (server_host, username, "type")
 );
 
 -- Add support for SCRAM auth to a database created before ejabberd 16.03:
@@ -197,7 +210,6 @@ CREATE TABLE rosterusers (
 );
 
 CREATE UNIQUE INDEX i_rosteru_sh_user_jid ON rosterusers USING btree (server_host, username, jid);
-CREATE INDEX i_rosteru_sh_username ON rosterusers USING btree (server_host, username);
 CREATE INDEX i_rosteru_sh_jid ON rosterusers USING btree (server_host, jid);
 
 
@@ -214,26 +226,26 @@ CREATE TABLE sr_group (
     name text NOT NULL,
     server_host text NOT NULL,
     opts text NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT now(),
-    PRIMARY KEY (server_host, name)
+    created_at TIMESTAMP NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX i_sr_group_sh_name ON sr_group USING btree (server_host, name);
 
 CREATE TABLE sr_user (
     jid text NOT NULL,
     server_host text NOT NULL,
     grp text NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT now(),
-    PRIMARY KEY (server_host, jid, grp)
+    created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE INDEX i_sr_user_sh_jid ON sr_user USING btree (server_host, jid);
+CREATE UNIQUE INDEX i_sr_user_sh_jid_grp ON sr_user USING btree (server_host, jid, grp);
 CREATE INDEX i_sr_user_sh_grp ON sr_user USING btree (server_host, grp);
 
 CREATE TABLE spool (
     username text NOT NULL,
     server_host text NOT NULL,
     xml text NOT NULL,
-    seq SERIAL,
+    seq BIGSERIAL,
     created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
@@ -247,9 +259,10 @@ CREATE TABLE archive (
     bare_peer text NOT NULL,
     xml text NOT NULL,
     txt text,
-    id SERIAL,
+    id BIGSERIAL,
     kind text,
     nick text,
+    origin_id text,
     created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
@@ -257,6 +270,12 @@ CREATE INDEX i_archive_sh_username_timestamp ON archive USING btree (server_host
 CREATE INDEX i_archive_sh_username_peer ON archive USING btree (server_host, username, peer);
 CREATE INDEX i_archive_sh_username_bare_peer ON archive USING btree (server_host, username, bare_peer);
 CREATE INDEX i_archive_sh_timestamp ON archive USING btree (server_host, timestamp);
+CREATE INDEX i_archive_sh_username_origin_id ON archive USING btree (server_host, username, origin_id);
+
+-- To update 'archive' from ejabberd <= 23.10:
+-- ALTER TABLE archive ADD COLUMN origin_id text NOT NULL DEFAULT '';
+-- ALTER TABLE archive ALTER COLUMN origin_id DROP DEFAULT;
+-- CREATE INDEX i_archive_sh_username_origin_id ON archive USING btree (server_host, username, origin_id);
 
 CREATE TABLE archive_prefs (
     username text NOT NULL,
@@ -282,7 +301,7 @@ CREATE TABLE vcard_search (
     server_host text NOT NULL,
     fn text NOT NULL,
     lfn text NOT NULL,
-    family text NOT NULL,
+    "family" text NOT NULL,
     lfamily text NOT NULL,
     given text NOT NULL,
     lgiven text NOT NULL,
@@ -302,7 +321,7 @@ CREATE TABLE vcard_search (
     lorgname text NOT NULL,
     orgunit text NOT NULL,
     lorgunit text NOT NULL,
-    PRIMARY KEY (server_host, username)
+    PRIMARY KEY (server_host, lusername)
 );
 
 CREATE INDEX i_vcard_search_sh_lfn       ON vcard_search(server_host, lfn);
@@ -328,11 +347,10 @@ CREATE TABLE privacy_list (
     username text NOT NULL,
     server_host text NOT NULL,
     name text NOT NULL,
-    id SERIAL UNIQUE,
+    id BIGSERIAL UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE INDEX i_privacy_list_sh_username ON privacy_list USING btree (server_host, username);
 CREATE UNIQUE INDEX i_privacy_list_sh_username_name ON privacy_list USING btree (server_host, username, name);
 
 CREATE TABLE privacy_list_data (
@@ -355,12 +373,10 @@ CREATE TABLE private_storage (
     server_host text NOT NULL,
     namespace text NOT NULL,
     data text NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT now(),
-    PRIMARY KEY (server_host, username, namespace)
+    created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE INDEX i_private_storage_sh_username ON private_storage USING btree (server_host, username);
-
+CREATE UNIQUE INDEX i_private_storage_sh_username_namespace ON private_storage USING btree (server_host, username, namespace);
 
 CREATE TABLE roster_version (
     username text NOT NULL,
@@ -386,7 +402,7 @@ CREATE TABLE pubsub_node (
   node text NOT NULL,
   parent text NOT NULL DEFAULT '',
   plugin text NOT NULL,
-  nodeid SERIAL UNIQUE
+  nodeid BIGSERIAL UNIQUE
 );
 CREATE INDEX i_pubsub_node_parent ON pubsub_node USING btree (parent);
 CREATE UNIQUE INDEX i_pubsub_node_tuple ON pubsub_node USING btree (host, node);
@@ -409,7 +425,7 @@ CREATE TABLE pubsub_state (
   jid text NOT NULL,
   affiliation character(1),
   subscriptions text NOT NULL DEFAULT '',
-  stateid SERIAL UNIQUE
+  stateid BIGSERIAL UNIQUE
 );
 CREATE INDEX i_pubsub_state_jid ON pubsub_state USING btree (jid);
 CREATE UNIQUE INDEX i_pubsub_state_tuple ON pubsub_state USING btree (nodeid, jid);
@@ -441,6 +457,7 @@ CREATE TABLE muc_room (
 );
 
 CREATE UNIQUE INDEX i_muc_room_name_host ON muc_room USING btree (name, host);
+CREATE INDEX i_muc_room_host_created_at ON muc_room USING btree (host, created_at);
 
 CREATE TABLE muc_registered (
     jid text NOT NULL,
@@ -474,7 +491,6 @@ CREATE TABLE muc_online_users (
 );
 
 CREATE UNIQUE INDEX i_muc_online_users ON muc_online_users USING btree (username, server, resource, name, host);
-CREATE INDEX i_muc_online_users_us ON muc_online_users USING btree (username, server);
 
 CREATE TABLE muc_room_subscribers (
    room text NOT NULL,
@@ -486,6 +502,7 @@ CREATE TABLE muc_room_subscribers (
 );
 
 CREATE INDEX i_muc_room_subscribers_host_jid ON muc_room_subscribers USING btree (host, jid);
+CREATE INDEX i_muc_room_subscribers_jid ON muc_room_subscribers USING btree (jid);
 CREATE UNIQUE INDEX i_muc_room_subscribers_host_room_jid ON muc_room_subscribers USING btree (host, room, jid);
 
 CREATE TABLE motd (
@@ -529,6 +546,13 @@ CREATE TABLE oauth_token (
 
 CREATE UNIQUE INDEX i_oauth_token_token ON oauth_token USING btree (token);
 
+CREATE TABLE oauth_client (
+    client_id text PRIMARY KEY,
+    client_name text NOT NULL,
+    grant_type text NOT NULL,
+    options text NOT NULL
+);
+
 CREATE TABLE route (
     domain text NOT NULL,
     server_host text NOT NULL,
@@ -538,7 +562,6 @@ CREATE TABLE route (
 );
 
 CREATE UNIQUE INDEX i_route ON route USING btree (domain, server_host, node, pid);
-CREATE INDEX i_route_domain ON route USING btree (domain);
 
 CREATE TABLE bosh (
     sid text NOT NULL,
@@ -571,6 +594,7 @@ CREATE TABLE push_session (
 );
 
 CREATE UNIQUE INDEX i_push_session_susn ON push_session USING btree (server_host, username, service, node);
+CREATE INDEX i_push_session_sh_username_timestamp ON push_session USING btree (server_host, username, timestamp);
 
 CREATE TABLE mix_channel (
     channel text NOT NULL,
@@ -598,7 +622,6 @@ CREATE TABLE mix_participant (
 );
 
 CREATE UNIQUE INDEX i_mix_participant ON mix_participant (channel, service, username, domain);
-CREATE INDEX i_mix_participant_chan_serv ON mix_participant (channel, service);
 
 CREATE TABLE mix_subscription (
     channel text NOT NULL,
@@ -610,9 +633,7 @@ CREATE TABLE mix_subscription (
 );
 
 CREATE UNIQUE INDEX i_mix_subscription ON mix_subscription (channel, service, username, domain, node);
-CREATE INDEX i_mix_subscription_chan_serv_ud ON mix_subscription (channel, service, username, domain);
 CREATE INDEX i_mix_subscription_chan_serv_node ON mix_subscription (channel, service, node);
-CREATE INDEX i_mix_subscription_chan_serv ON mix_subscription (channel, service);
 
 CREATE TABLE mix_pam (
     username text NOT NULL,
@@ -624,4 +645,33 @@ CREATE TABLE mix_pam (
 );
 
 CREATE UNIQUE INDEX i_mix_pam ON mix_pam (username, server_host, channel, service);
-CREATE INDEX i_mix_pam_us ON mix_pam (username, server_host);
+
+CREATE TABLE mqtt_pub (
+    username text NOT NULL,
+    server_host text NOT NULL,
+    resource text NOT NULL,
+    topic text NOT NULL,
+    qos smallint NOT NULL,
+    payload bytea NOT NULL,
+    payload_format smallint NOT NULL,
+    content_type text NOT NULL,
+    response_topic text NOT NULL,
+    correlation_data bytea NOT NULL,
+    user_properties bytea NOT NULL,
+    expiry bigint NOT NULL
+);
+
+CREATE UNIQUE INDEX i_mqtt_topic_server ON mqtt_pub (topic, server_host);
+
+CREATE TABLE invite_token (
+    token text NOT NULL,
+    username text NOT NULL,
+    server_host text NOT NULL,
+    invitee text NOT NULL DEFAULT '',
+    created_at timestamp NOT NULL DEFAULT now(),
+    expires timestamp NOT NULL DEFAULT now(),
+    "type" character(1) NOT NULL,
+    account_name text NOT NULL,
+    PRIMARY KEY (token)
+);
+CREATE INDEX i_invite_token_username_server_host ON invite_token USING btree (username, server_host);

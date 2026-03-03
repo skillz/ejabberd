@@ -2,7 +2,7 @@
 %%% Created : 7 May 2018 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,7 @@
 %% API
 -export([start/1, stop/1, reload/1, start_link/2]).
 -export([check_password/3, set_password/3, try_register/3, remove_user/2,
-	 remove_user/3, user_exists/2]).
+	 remove_user/3, user_exists/2, check_certificate/3]).
 -export([prog_name/1, pool_name/1, worker_name/2, pool_size/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
@@ -61,6 +61,9 @@ start_link(Name, Prog) ->
 check_password(User, Server, Password) ->
     call_port(Server, [<<"auth">>, User, Server, Password]).
 
+check_certificate(User, Server, Certificate) ->
+    call_port(Server, [<<"certauth">>, User, Server, Certificate]).
+
 user_exists(User, Server) ->
     call_port(Server, [<<"isuser">>, User, Server]).
 
@@ -78,11 +81,11 @@ remove_user(User, Server, Password) ->
 
 -spec prog_name(binary()) -> string() | undefined.
 prog_name(Host) ->
-    ejabberd_config:get_option({extauth_program, Host}).
+    ejabberd_option:extauth_program(Host).
 
 -spec pool_name(binary()) -> atom().
 pool_name(Host) ->
-    case ejabberd_config:get_option({extauth_pool_name, Host}) of
+    case ejabberd_option:extauth_pool_name(Host) of
 	undefined ->
 	    list_to_atom("extauth_pool_" ++ binary_to_list(Host));
 	Name ->
@@ -95,11 +98,8 @@ worker_name(Pool, N) ->
 
 -spec pool_size(binary()) -> pos_integer().
 pool_size(Host) ->
-    case ejabberd_config:get_option({extauth_pool_size, Host}) of
-	undefined ->
-	    try erlang:system_info(logical_processors)
-	    catch _:_ -> 1
-	    end;
+    case ejabberd_option:extauth_pool_size(Host) of
+	undefined -> misc:logical_processors();
 	Size ->
 	    Size
     end.
@@ -126,7 +126,7 @@ handle_call({cmd, Cmd, EndTime}, _From, State) ->
 		    {reply, decode_bool(N), State};
 		{Port, Data} ->
 		    ?ERROR_MSG("Received unexpected response from external "
-			       "authentication program '~s': ~p "
+			       "authentication program '~ts': ~p "
 			       "(port = ~p, pid = ~w)",
 			       [State#state.prog, Data, Port, State#state.os_pid]),
 		    {reply, {error, unexpected_response}, State};
@@ -146,11 +146,11 @@ handle_info({'EXIT', Port, _Reason}, #state{port = Port,
 					    start_time = Time} = State) ->
     case curr_time() - Time of
 	Diff when Diff < 1000 ->
-	    ?ERROR_MSG("Failed to start external authentication program '~s'",
+	    ?ERROR_MSG("Failed to start external authentication program '~ts'",
 		       [State#state.prog]),
 	    {stop, normal, State};
 	_ ->
-	    ?ERROR_MSG("External authentication program '~s' has terminated "
+	    ?ERROR_MSG("External authentication program '~ts' has terminated "
 		       "unexpectedly (pid=~w), restarting via supervisor...",
 		       [State#state.prog, State#state.os_pid]),
 	    {stop, normal, State}
@@ -171,7 +171,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 -spec curr_time() -> non_neg_integer().
 curr_time() ->
-    p1_time_compat:monotonic_time(milli_seconds).
+    erlang:monotonic_time(millisecond).
 
 -spec start_port(string()) -> {port(), integer() | undefined}.
 start_port(Path) ->
@@ -188,7 +188,7 @@ call_port(Server, Args) ->
     call_port(Server, Args, ?CALL_TIMEOUT).
 
 call_port(Server, Args, Timeout) ->
-    StartTime = p1_time_compat:monotonic_time(milli_seconds),
+    StartTime = erlang:monotonic_time(millisecond),
     Pool = pool_name(Server),
     PoolSize = pool_size(Server),
     I = p1_rand:round_robin(PoolSize),

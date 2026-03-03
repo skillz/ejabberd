@@ -5,7 +5,7 @@
 %%% Created : 24 Oct 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,24 +27,25 @@
 
 -author('alexey@process-one.net').
 
--protocol({xep, 12, '2.0'}).
+-protocol({xep, 12, '2.0', '0.5.0', "complete", ""}).
 
 -behaviour(gen_mod).
 
 -export([start/2, stop/1, reload/3, process_local_iq/1, export/1,
 	 process_sm_iq/1, on_presence_update/4, import_info/0,
 	 import/5, import_start/2, store_last_info/4, get_last_info/2,
-	 remove_user/2, mod_opt_type/1, mod_options/1,
+	 remove_user/2, mod_opt_type/1, mod_options/1, mod_doc/0,
 	 register_user/2, depends/2, privacy_check_packet/4]).
 
 -include("logger.hrl").
-
--include("xmpp.hrl").
-
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_privacy.hrl").
 -include("mod_last.hrl").
+-include("translate.hrl").
 
 -define(LAST_CACHE, last_activity_cache).
+
+-type c2s_state() :: ejabberd_c2s:state().
 
 -callback init(binary(), gen_mod:opts()) -> any().
 -callback import(binary(), #last_activity{}) -> ok | pass.
@@ -58,39 +59,22 @@
 -optional_callbacks([use_cache/1, cache_nodes/1]).
 
 start(Host, Opts) ->
-    Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
+    Mod = gen_mod:db_mod(Opts, ?MODULE),
     Mod:init(Host, Opts),
     init_cache(Mod, Host, Opts),
-    gen_iq_handler:add_iq_handler(ejabberd_local, Host,
-				  ?NS_LAST, ?MODULE, process_local_iq),
-    gen_iq_handler:add_iq_handler(ejabberd_sm, Host,
-				  ?NS_LAST, ?MODULE, process_sm_iq),
-    ejabberd_hooks:add(privacy_check_packet, Host, ?MODULE,
-		       privacy_check_packet, 30),
-    ejabberd_hooks:add(register_user, Host, ?MODULE,
-		       register_user, 50),
-    ejabberd_hooks:add(remove_user, Host, ?MODULE,
-		       remove_user, 50),
-    ejabberd_hooks:add(unset_presence_hook, Host, ?MODULE,
-		       on_presence_update, 50).
+    {ok, [{iq_handler, ejabberd_local, ?NS_LAST, process_local_iq},
+          {iq_handler, ejabberd_sm, ?NS_LAST, process_sm_iq},
+          {hook, privacy_check_packet, privacy_check_packet, 30},
+          {hook, register_user, register_user, 50},
+          {hook, remove_user, remove_user, 50},
+          {hook, unset_presence_hook, on_presence_update, 50}]}.
 
-stop(Host) ->
-    ejabberd_hooks:delete(register_user, Host, ?MODULE,
-			  register_user, 50),
-    ejabberd_hooks:delete(remove_user, Host, ?MODULE,
-			  remove_user, 50),
-    ejabberd_hooks:delete(unset_presence_hook, Host,
-			  ?MODULE, on_presence_update, 50),
-    ejabberd_hooks:delete(privacy_check_packet, Host, ?MODULE,
-			  privacy_check_packet, 30),
-    gen_iq_handler:remove_iq_handler(ejabberd_local, Host,
-				     ?NS_LAST),
-    gen_iq_handler:remove_iq_handler(ejabberd_sm, Host,
-				     ?NS_LAST).
+stop(_Host) ->
+    ok.
 
 reload(Host, NewOpts, OldOpts) ->
-    NewMod = gen_mod:db_mod(Host, NewOpts, ?MODULE),
-    OldMod = gen_mod:db_mod(Host, OldOpts, ?MODULE),
+    NewMod = gen_mod:db_mod(NewOpts, ?MODULE),
+    OldMod = gen_mod:db_mod(OldOpts, ?MODULE),
     if NewMod /= OldMod ->
 	    NewMod:init(Host, NewOpts);
        true ->
@@ -104,7 +88,7 @@ reload(Host, NewOpts, OldOpts) ->
 
 -spec process_local_iq(iq()) -> iq().
 process_local_iq(#iq{type = set, lang = Lang} = IQ) ->
-    Txt = <<"Value 'set' of 'type' attribute is not allowed">>,
+    Txt = ?T("Value 'set' of 'type' attribute is not allowed"),
     xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
 process_local_iq(#iq{type = get} = IQ) ->
     xmpp:make_iq_result(IQ, #last{seconds = get_node_uptime()}).
@@ -113,12 +97,8 @@ process_local_iq(#iq{type = get} = IQ) ->
 %% @doc Get the uptime of the ejabberd node, expressed in seconds.
 %% When ejabberd is starting, ejabberd_config:start/0 stores the datetime.
 get_node_uptime() ->
-    case ejabberd_config:get_option(node_start) of
-        undefined ->
-            trunc(element(1, erlang:statistics(wall_clock)) / 1000);
-        Now ->
-            p1_time_compat:system_time(seconds) - Now
-    end.
+    NodeStart = ejabberd_config:get_node_start(),
+    erlang:monotonic_time(second) - NodeStart.
 
 %%%
 %%% Serve queries about user last online
@@ -126,7 +106,7 @@ get_node_uptime() ->
 
 -spec process_sm_iq(iq()) -> iq().
 process_sm_iq(#iq{type = set, lang = Lang} = IQ) ->
-    Txt = <<"Value 'set' of 'type' attribute is not allowed">>,
+    Txt = ?T("Value 'set' of 'type' attribute is not allowed"),
     xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
 process_sm_iq(#iq{from = From, to = To, lang = Lang} = IQ) ->
     User = To#jid.luser,
@@ -145,10 +125,11 @@ process_sm_iq(#iq{from = From, to = To, lang = Lang} = IQ) ->
 		deny -> xmpp:make_error(IQ, xmpp:err_forbidden())
 	    end;
        true ->
-	    Txt = <<"Not subscribed">>,
+	    Txt = ?T("Not subscribed"),
 	    xmpp:make_error(IQ, xmpp:err_subscription_required(Txt, Lang))
     end.
 
+-spec privacy_check_packet(allow | deny, c2s_state(), stanza(), in | out) -> allow | deny | {stop, deny}.
 privacy_check_packet(allow, C2SState,
 		     #iq{from = From, to = To, type = T} = IQ, in)
   when T == get; T == set ->
@@ -187,9 +168,7 @@ get_last(LUser, LServer) ->
 		    ?LAST_CACHE, {LUser, LServer},
 		    fun() -> Mod:get_last(LUser, LServer) end);
 	      false ->
-		  Mod:get_last(LUser, LServer);
-	      undefined ->
-		  error
+		  Mod:get_last(LUser, LServer)
 	  end,
     case Res of
 	{ok, {TimeStamp, Status}} -> {ok, TimeStamp, Status};
@@ -203,13 +182,13 @@ get_last_iq(#iq{lang = Lang} = IQ, LUser, LServer) ->
       [] ->
 	  case get_last(LUser, LServer) of
 	    {error, _Reason} ->
-		Txt = <<"Database failure">>,
+		Txt = ?T("Database failure"),
 		xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang));
 	    not_found ->
-		Txt = <<"No info about last activity found">>,
+		Txt = ?T("No info about last activity found"),
 		xmpp:make_error(IQ, xmpp:err_service_unavailable(Txt, Lang));
 	    {ok, TimeStamp, Status} ->
-		TimeStamp2 = p1_time_compat:system_time(seconds),
+		TimeStamp2 = erlang:system_time(second),
 		Sec = TimeStamp2 - TimeStamp,
 		xmpp:make_iq_result(IQ, #last{seconds = Sec, status = Status})
 	  end;
@@ -227,7 +206,7 @@ register_user(User, Server) ->
 
 -spec on_presence_update(binary(), binary(), binary(), binary()) -> any().
 on_presence_update(User, Server, _Resource, Status) ->
-    TimeStamp = p1_time_compat:system_time(seconds),
+    TimeStamp = erlang:system_time(second),
     store_last_info(User, Server, TimeStamp, Status).
 
 -spec store_last_info(binary(), binary(), non_neg_integer(), binary()) -> any().
@@ -274,19 +253,16 @@ init_cache(Mod, Host, Opts) ->
 
 -spec cache_opts(gen_mod:opts()) -> [proplists:property()].
 cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_last_opt:cache_size(Opts),
+    CacheMissed = mod_last_opt:cache_missed(Opts),
+    LifeTime = mod_last_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
 -spec use_cache(module(), binary()) -> boolean().
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false -> mod_last_opt:use_cache(Host)
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].
@@ -321,17 +297,50 @@ export(LServer) ->
 depends(_Host, _Opts) ->
     [].
 
-mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun (I) when is_integer(I), I > 0 -> I;
-        (infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
+mod_opt_type(db_type) ->
+    econf:db_type(?MODULE);
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
 mod_options(Host) ->
     [{db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+     {use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
+
+mod_doc() ->
+    #{desc =>
+          ?T("This module adds support for "
+             "https://xmpp.org/extensions/xep-0012.html"
+             "[XEP-0012: Last Activity]. It can be used "
+             "to discover when a disconnected user last accessed "
+             "the server, to know when a connected user was last "
+             "active on the server, or to query the uptime of the ejabberd server."),
+      opts =>
+          [{db_type,
+            #{value => "mnesia | sql",
+              desc =>
+                  ?T("Same as top-level _`default_db`_ option, but applied to this module only.")}},
+           {use_cache,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`use_cache`_ option, but applied to this module only.")}},
+           {cache_size,
+            #{value => "pos_integer() | infinity",
+              desc =>
+                  ?T("Same as top-level _`cache_size`_ option, but applied to this module only.")}},
+           {cache_missed,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`cache_missed`_ option, but applied to this module only.")}},
+           {cache_life_time,
+            #{value => "timeout()",
+              desc =>
+                  ?T("Same as top-level _`cache_life_time`_ option, but applied to this module only.")}}]}.

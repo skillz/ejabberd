@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
-%%% @author Evgeny Khramtsov <ekhramtsov@process-one.net>
+%%% Author  : Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%% Created : 28 Mar 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -23,21 +23,24 @@
 -module(ejabberd_router_sql).
 -behaviour(ejabberd_router).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 %% API
 -export([init/0, register_route/5, unregister_route/3, find_routes/1,
 	 get_all_routes/0]).
+-export([sql_schemas/0]).
 
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
 -include("ejabberd_router.hrl").
--include("ejabberd_stacktrace.hrl").
+
+
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 init() ->
+    ejabberd_sql_schema:update_schema(
+      ejabberd_config:get_myname(), ?MODULE, sql_schemas()),
     Node = erlang:atom_to_binary(node(), latin1),
     ?DEBUG("Cleaning SQL 'route' table...", []),
     case ejabberd_sql:sql_query(
@@ -45,9 +48,26 @@ init() ->
 	{updated, _} ->
 	    ok;
 	Err ->
-	    ?ERROR_MSG("failed to clean 'route' table: ~p", [Err]),
+	    ?ERROR_MSG("Failed to clean 'route' table: ~p", [Err]),
 	    Err
     end.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"route">>,
+                columns =
+                    [#sql_column{name = <<"domain">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"node">>, type = text},
+                     #sql_column{name = <<"pid">>, type = text},
+                     #sql_column{name = <<"local_hint">>, type = text}],
+                indices = [#sql_index{
+                              columns = [<<"domain">>, <<"server_host">>,
+                                         <<"node">>, <<"pid">>],
+                              unique = true}]}]}].
 
 register_route(Domain, ServerHost, LocalHint, _, Pid) ->
     PidS = misc:encode_pid(Pid),
@@ -122,11 +142,13 @@ row_to_route(Domain, {ServerHost, NodeS, PidS, LocalHintS} = Row) ->
 		local_hint = dec_local_hint(LocalHintS)}]
     catch _:{bad_node, _} ->
 	    [];
-	  ?EX_RULE(E, R, St) ->
-	    ?ERROR_MSG("failed to decode row from 'route' table:~n"
-		       "Row = ~p~n"
-		       "Domain = ~s~n"
-		       "Reason = ~p",
-		       [Row, Domain, {E, {R, ?EX_STACK(St)}}]),
-	    []
+        Class:Reason:StackTrace ->
+            ?ERROR_MSG("Failed to decode row from 'route' table:~n"
+                       "** Row = ~p~n"
+                       "** Domain = ~ts~n"
+                       "** ~ts",
+                       [Row,
+                        Domain,
+                        misc:format_exception(2, Class, Reason, StackTrace)]),
+            []
     end.

@@ -5,7 +5,7 @@
 %%% Created :
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -41,13 +41,18 @@
 -export([process/2]).
 
 %% utility for other http modules
--export([content_type/3]).
+-export([content_type/3, build_list_content_types/1]).
 
--export([reopen_log/0, mod_opt_type/1, mod_options/1, depends/2]).
+-export([reopen_log/0, mod_opt_type/1, mod_options/1, depends/2, mod_doc/0]).
 
+-export([web_menu_system/3]).
+
+-include_lib("xmpp/include/xmpp.hrl").
 -include("logger.hrl").
 -include("ejabberd_http.hrl").
+-include("ejabberd_web_admin.hrl").
 -include_lib("kernel/include/file.hrl").
+-include("translate.hrl").
 
 -record(state,
 	{host, docroot, accesslog, accesslogfd,
@@ -69,28 +74,53 @@
 	{-1, 410, [], <<"Host unknown">>}).
 
 -define(DEFAULT_CONTENT_TYPES,
-	[{<<".css">>, <<"text/css">>},
+	[{<<".avi">>, <<"video/avi">>},
+	 {<<".bmp">>, <<"image/bmp">>},
+	 {<<".bz2">>, <<"application/x-bzip2">>},
+	 {<<".css">>, <<"text/css">>},
 	 {<<".gif">>, <<"image/gif">>},
+	 {<<".gz">>, <<"application/x-gzip">>},
 	 {<<".html">>, <<"text/html">>},
+	 {<<".ico">>, <<"image/vnd.microsoft.icon">>},
 	 {<<".jar">>, <<"application/java-archive">>},
 	 {<<".jpeg">>, <<"image/jpeg">>},
 	 {<<".jpg">>, <<"image/jpeg">>},
 	 {<<".js">>, <<"text/javascript">>},
+	 {<<".json">>, <<"application/json">>},
+	 {<<".m4a">>, <<"audio/mp4">>},
+	 {<<".map">>, <<"application/json">>},
+	 {<<".mp3">>, <<"audio/mpeg">>},
+	 {<<".mp4">>, <<"video/mp4">>},
+	 {<<".mpeg">>, <<"video/mpeg">>},
+	 {<<".mpg">>, <<"video/mpeg">>},
+	 {<<".ogg">>, <<"application/ogg">>},
+	 {<<".pdf">>, <<"application/pdf">>},
 	 {<<".png">>, <<"image/png">>},
+	 {<<".rtf">>, <<"application/rtf">>},
 	 {<<".svg">>, <<"image/svg+xml">>},
+	 {<<".tiff">>, <<"image/tiff">>},
+	 {<<".ttf">>, <<"font/ttf">>},
 	 {<<".txt">>, <<"text/plain">>},
+	 {<<".wav">>, <<"audio/wav">>},
+	 {<<".webp">>, <<"image/webp">>},
+	 {<<".woff">>, <<"font/woff">>},
+	 {<<".woff2">>, <<"font/woff2">>},
 	 {<<".xml">>, <<"application/xml">>},
 	 {<<".xpi">>, <<"application/x-xpinstall">>},
-	 {<<".xul">>, <<"application/vnd.mozilla.xul+xml">>}]).
+	 {<<".xul">>, <<"application/vnd.mozilla.xul+xml">>},
+	 {<<".xz">>, <<"application/x-xz">>},
+	 {<<".zip">>, <<"application/zip">>}]).
 
 %%====================================================================
 %% gen_mod callbacks
 %%====================================================================
 
 start(Host, Opts) ->
+    ejabberd_hooks:add(webadmin_menu_system_post, global, ?MODULE, web_menu_system, 1000-$f),
     gen_mod:start_child(?MODULE, Host, Opts).
 
 stop(Host) ->
+    ejabberd_hooks:delete(webadmin_menu_system_post, global, ?MODULE, web_menu_system, 1000-$f),
     gen_mod:stop_child(?MODULE, Host).
 
 reload(Host, NewOpts, OldOpts) ->
@@ -110,7 +140,8 @@ depends(_Host, _Opts) ->
 %%                         {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init([Host, Opts]) ->
+init([Host|_]) ->
+    Opts = gen_mod:get_module_opts(Host, ?MODULE),
     try initialize(Host, Opts) of
 	State ->
 	    process_flag(trap_exit, true),
@@ -121,22 +152,21 @@ init([Host, Opts]) ->
     end.
 
 initialize(Host, Opts) ->
-    DocRoot = gen_mod:get_opt(docroot, Opts),
-    AccessLog = gen_mod:get_opt(accesslog, Opts),
+    DocRoot = mod_http_fileserver_opt:docroot(Opts),
+    AccessLog = mod_http_fileserver_opt:accesslog(Opts),
     AccessLogFD = try_open_log(AccessLog, Host),
-    DirectoryIndices = gen_mod:get_opt(directory_indices, Opts),
-    CustomHeaders = gen_mod:get_opt(custom_headers, Opts),
-    DefaultContentType = gen_mod:get_opt(default_content_type, Opts),
-    UserAccess0 = gen_mod:get_opt(must_authenticate_with, Opts),
+    DirectoryIndices = mod_http_fileserver_opt:directory_indices(Opts),
+    CustomHeaders = mod_http_fileserver_opt:custom_headers(Opts),
+    DefaultContentType = mod_http_fileserver_opt:default_content_type(Opts),
+    UserAccess0 = mod_http_fileserver_opt:must_authenticate_with(Opts),
     UserAccess = case UserAccess0 of
 		     [] -> none;
 		     _ ->
-			 dict:from_list(UserAccess0)
+			 maps:from_list(UserAccess0)
 		 end,
     ContentTypes = build_list_content_types(
-                     gen_mod:get_opt(content_types, Opts),
-                     ?DEFAULT_CONTENT_TYPES),
-    ?DEBUG("known content types: ~s",
+                     mod_http_fileserver_opt:content_types(Opts)),
+    ?DEBUG("Known content types: ~ts",
 	   [str:join([[$*, K, " -> ", V] || {K, V} <- ContentTypes],
 		     <<", ">>)]),
     #state{host = Host,
@@ -149,7 +179,12 @@ initialize(Host, Opts) ->
 	   content_types = ContentTypes,
 	   user_access = UserAccess}.
 
-%% @spec (AdminCTs::[CT], Default::[CT]) -> [CT]
+build_list_content_types(AdminCTs) ->
+    build_list_content_types(AdminCTs, ?DEFAULT_CONTENT_TYPES).
+
+-spec build_list_content_types(AdminCTs::[{binary(), binary()|undefined}],
+                               Default::[{binary(), binary()|undefined}]) ->
+    [{string(), string()|undefined}].
 %% where CT = {Extension::string(), Value}
 %%       Value = string() | undefined
 %% @doc Return a unified list without duplicates.
@@ -186,20 +221,31 @@ try_open_log(FN, _Host) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({serve, LocalPath, Auth, RHeaders}, _From, State) ->
+handle_call({serve, RawPath, LocalPath, Auth, RHeaders}, _From, State) ->
     IfModifiedSince = case find_header('If-Modified-Since', RHeaders, bad_date) of
 			  bad_date ->
 			      bad_date;
 			  Val ->
 			      httpd_util:convert_request_date(binary_to_list(Val))
 		      end,
-    Reply = serve(LocalPath, Auth, State#state.docroot, State#state.directory_indices,
+    DocRootBased = pick_docroot_based(RawPath, State#state.docroot),
+    Reply = serve(LocalPath, Auth, DocRootBased, State#state.directory_indices,
 		  State#state.custom_headers,
 		  State#state.default_content_type, State#state.content_types,
 		  State#state.user_access, IfModifiedSince),
     {reply, Reply, State};
-handle_call(_Request, _From, State) ->
-    {reply, ok, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
+
+pick_docroot_based(RawPath, DocRootList) when is_list(DocRootList) ->
+    [{_, PathDir} | _] = lists:dropwhile(fun({Dr, _PathDir}) ->
+                                     nomatch == binary:match(RawPath, Dr)
+                             end,
+                             DocRootList),
+    PathDir;
+pick_docroot_based(_RawPath, DocRoot) ->
+    DocRoot.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -222,7 +268,7 @@ handle_cast({reload, Host, NewOpts, _OldOpts}, OldState) ->
 	    {noreply, OldState}
     end;
 handle_cast(Msg, State) ->
-    ?WARNING_MSG("unexpected cast: ~p", [Msg]),
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -231,7 +277,8 @@ handle_cast(Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -241,11 +288,14 @@ handle_info(_Info, State) ->
 %% cleaning up. When it returns, the gen_server terminates with Reason.
 %% The return value is ignored.
 %%--------------------------------------------------------------------
-terminate(_Reason, State) ->
+terminate(_Reason, #state{host = Host} = State) ->
     close_log(State#state.accesslogfd),
-    %% TODO: unregister the hook gracefully
-    %% ejabberd_hooks:delete(reopen_log_hook, State#state.host, ?MODULE, reopen_log, 50),
-    ok.
+    case gen_mod:is_loaded_elsewhere(Host, ?MODULE) of
+	false ->
+	    ejabberd_hooks:delete(reopen_log_hook, ?MODULE, reopen_log, 50);
+	true ->
+	    ok
+    end.
 
 %%--------------------------------------------------------------------
 %% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}
@@ -258,21 +308,22 @@ code_change(_OldVsn, State, _Extra) ->
 %% request_handlers callbacks
 %%====================================================================
 
-%% @spec (LocalPath, Request) -> {HTTPCode::integer(), [Header], Page::string()}
+-spec process(LocalPath::[binary()], #request{}) ->
+    {HTTPCode::integer(), [{binary(), binary()}], Page::string()}.
 %% @doc Handle an HTTP request.
 %% LocalPath is the part of the requested URL path that is "local to the module".
 %% Returns the page to be sent back to the client and/or HTTP status code.
-process(LocalPath, #request{host = Host, auth = Auth, headers = RHeaders} = Request) ->
+process(LocalPath, #request{host = Host, auth = Auth, headers = RHeaders, raw_path = RawPath} = Request) ->
     ?DEBUG("Requested ~p", [LocalPath]),
     try
 	VHost = ejabberd_router:host_of_route(Host),
 	{FileSize, Code, Headers, Contents} =
 	    gen_server:call(get_proc_name(VHost),
-			    {serve, LocalPath, Auth, RHeaders}),
+			    {serve, RawPath, LocalPath, Auth, RHeaders}),
 	add_to_log(FileSize, Code, Request#request{host = VHost}),
 	{Code, Headers, Contents}
     catch _:{Why, _} when Why == noproc; Why == invalid_domain; Why == unregistered_route ->
-	    ?DEBUG("Received an HTTP request with Host: ~s, "
+	    ?DEBUG("Received an HTTP request with Host: ~ts, "
 		   "but couldn't find the related "
 		   "ejabberd virtual host", [Host]),
 	    {FileSize1, Code1, Headers1, Contents1} = ?HTTP_ERR_HOST_UNKNOWN,
@@ -285,7 +336,7 @@ serve(LocalPath, Auth, DocRoot, DirectoryIndices, CustomHeaders, DefaultContentT
     CanProceed = case {UserAccess, Auth} of
 		     {none, _} -> true;
 		     {_, {User, Pass}} ->
-			 case dict:find(User, UserAccess) of
+			 case maps:find(User, UserAccess) of
 			     {ok, Pass} -> true;
 			     _ -> false
 			 end;
@@ -320,9 +371,7 @@ serve(LocalPath, Auth, DocRoot, DirectoryIndices, CustomHeaders, DefaultContentT
 				       DefaultContentType,
 				       ContentTypes)
 		    end
-	    end;
-	_ ->
-	    ?HTTP_ERR_FORBIDDEN
+	    end
     end.
 
 %% Troll through the directory indices attempting to find one which
@@ -338,23 +387,25 @@ serve_index(FileName, [Index | T], CH, DefaultContentType, ContentTypes) ->
     end.
 
 serve_not_modified(FileInfo, FileName, CustomHeaders) ->
-    ?DEBUG("Delivering not modified: ~s", [FileName]),
+    ?DEBUG("Delivering not modified: ~ts", [FileName]),
     {0, 304,
-     [{<<"Server">>, <<"ejabberd">>},
-      {<<"Last-Modified">>, last_modified(FileInfo)}
-      | CustomHeaders], <<>>}.
+     ejabberd_http:apply_custom_headers(
+	 [{<<"Server">>, <<"ejabberd">>},
+	  {<<"Last-Modified">>, last_modified(FileInfo)}],
+	 CustomHeaders), <<>>}.
 
 %% Assume the file exists if we got this far and attempt to read it in
 %% and serve it up.
 serve_file(FileInfo, FileName, CustomHeaders, DefaultContentType, ContentTypes) ->
-    ?DEBUG("Delivering: ~s", [FileName]),
+    ?DEBUG("Delivering: ~ts", [FileName]),
     ContentType = content_type(FileName, DefaultContentType,
 			       ContentTypes),
     {FileInfo#file_info.size, 200,
-     [{<<"Server">>, <<"ejabberd">>},
-      {<<"Last-Modified">>, last_modified(FileInfo)},
-      {<<"Content-Type">>, ContentType}
-      | CustomHeaders],
+     ejabberd_http:apply_custom_headers(
+	 [{<<"Server">>, <<"ejabberd">>},
+	  {<<"Last-Modified">>, last_modified(FileInfo)},
+	  {<<"Content-Type">>, ContentType}],
+	 CustomHeaders),
      {file, FileName}}.
 
 %%----------------------------------------------------------------------
@@ -382,7 +433,7 @@ reopen_log() ->
     lists:foreach(
       fun(Host) ->
 	      gen_server:cast(get_proc_name(Host), reopen_log)
-      end, ejabberd_config:get_myhosts()).
+      end, ejabberd_option:hosts()).
 
 add_to_log(FileSize, Code, Request) ->
     gen_server:cast(get_proc_name(Request#request.host),
@@ -404,13 +455,13 @@ add_to_log(File, FileSize, Code, Request) ->
     Referer = find_header('Referer', Request#request.headers, "-"),
     %% Pseudo Combined Apache log format:
     %% 127.0.0.1 - - [28/Mar/2007:18:41:55 +0200] "GET / HTTP/1.1" 302 303 "-" "tsung"
-    %% TODO some fields are harcoded/missing:
+    %% TODO some fields are hardcoded/missing:
     %%   The date/time integers should have always 2 digits. For example day "7" should be "07"
     %%   Month should be 3*letter, not integer 1..12
     %%   Missing time zone = (`+' | `-') 4*digit
     %%   Missing protocol version: HTTP/1.1
     %% For reference: http://httpd.apache.org/docs/2.2/logs.html
-    io:format(File, "~s - - [~p/~p/~p:~p:~p:~p] \"~s /~s~s\" ~p ~p ~p ~p~n",
+    io:format(File, "~ts - - [~p/~p/~p:~p:~p:~p] \"~ts /~ts~ts\" ~p ~p ~p ~p~n",
 	      [IP, Day, Month, Year, Hour, Minute, Second, Request#request.method, Path, Query, Code,
                FileSize, Referer, UserAgent]).
 
@@ -463,44 +514,41 @@ ip_to_string(Address) when size(Address) == 8 ->
     Parts = lists:map(fun (Int) -> io_lib:format("~.16B", [Int]) end, tuple_to_list(Address)),
     string:to_lower(lists:flatten(join(Parts, ":"))).
 
-mod_opt_type(accesslog) ->
-    fun(undefined) -> undefined;
-       (File) -> iolist_to_binary(File)
-    end;
-mod_opt_type(content_types) ->
-    fun(L) when is_list(L) ->
-	    lists:map(
-	      fun({K, V}) ->
-		      {iolist_to_binary(K),
-		       iolist_to_binary(V)}
-	      end, L)
-    end;
-mod_opt_type(custom_headers) ->
-    fun (L) when is_list(L) -> L end;
-mod_opt_type(default_content_type) ->
-    fun iolist_to_binary/1;
-mod_opt_type(directory_indices) ->
-    fun (L) when is_list(L) -> L end;
-mod_opt_type(docroot) ->
-    fun(S) ->
-	    Path = iolist_to_binary(S),
-	    case filelib:ensure_dir(filename:join(Path, "foo")) of
-		ok ->
-		    Path;
-		{error, Why} ->
-		    ?ERROR_MSG("Failed to create directory ~s: ~s",
-			       [Path, file:format_error(Why)]),
-		    erlang:error(badarg)
-	    end
-    end;
-mod_opt_type(must_authenticate_with) ->
-    fun (L) when is_list(L) ->
-	    lists:map(fun(UP) when is_binary(UP) ->
-			      [K, V] = binary:split(UP, <<":">>),
-			      {K, V}
-		      end, L)
-    end.
+%%----------------------------------------------------------------------
+%% WebAdmin
+%%----------------------------------------------------------------------
 
+web_menu_system(Result, _Request, _Level) ->
+    Els = ejabberd_web_admin:make_menu_system(?MODULE, "📁", "Fileserver: {URLPATH}", ""),
+    Els ++ Result.
+
+%%----------------------------------------------------------------------
+
+mod_opt_type(accesslog) ->
+    econf:file(write);
+mod_opt_type(content_types) ->
+    econf:map(econf:binary(), econf:binary());
+mod_opt_type(custom_headers) ->
+    econf:map(econf:binary(), econf:binary());
+mod_opt_type(default_content_type) ->
+    econf:binary();
+mod_opt_type(directory_indices) ->
+    econf:list(econf:binary());
+mod_opt_type(docroot) ->
+    econf:either(
+      econf:directory(write),
+      econf:map(econf:binary(), econf:binary())
+    );
+mod_opt_type(must_authenticate_with) ->
+    econf:list(
+      econf:and_then(
+	econf:and_then(
+	  econf:binary("^[^:]+:[^:]+$"),
+	  econf:binary_sep(":")),
+	fun([K, V]) -> {K, V} end)).
+
+-spec mod_options(binary()) -> [{must_authenticate_with, [{binary(), binary()}]} |
+				{atom(), any()}].
 mod_options(_) ->
     [{accesslog, undefined},
      {content_types, []},
@@ -510,3 +558,100 @@ mod_options(_) ->
      {must_authenticate_with, []},
      %% Required option
      docroot].
+
+mod_doc() ->
+    #{desc =>
+          ?T("This simple module serves files from the local disk over HTTP."),
+      note => "improved 'docroot' in 26.01",
+      opts =>
+          [{accesslog,
+            #{value => ?T("Path"),
+              desc =>
+                  ?T("File to log accesses using an Apache-like format. "
+                     "No log will be recorded if this option is not specified.")}},
+           {docroot,
+            #{value => ?T("PathDir | {PathURL, PathDir}"),
+              note => "improved in 26.01",
+              desc =>
+                  ?T("Directory to serve the files from, "
+                     "or a map with several URL path "
+                     "(as specified in _`listen-options.md#request_handlers|request_handlers`_) "
+                     "and their corresponding directory. "
+                     "This is a mandatory option."),
+              example =>
+                   ["listen:",
+                   "  -",
+                   "    port: 5280",
+                   "    module: ejabberd_http",
+                   "    request_handlers:",
+                   "      /pub/content: mod_http_fileserver",
+                   "      /share: mod_http_fileserver",
+                   "      /: mod_http_fileserver",
+                   "modules:",
+                   "  mod_http_fileserver:",
+                   "    docroot:",
+                   "      /pub/content: /var/service/www",
+                   "      /share: /usr/share/javascript",
+                   "      /: /var/www"]}},
+           {content_types,
+            #{value => "{Extension: Type}",
+              desc =>
+                  ?T("Specify mappings of extension to content type. "
+                     "There are several content types already defined. "
+                     "With this option you can add new definitions "
+                     "or modify existing ones. The default values are:"),
+              example =>
+                  ["content_types:"|
+                     ["  " ++ binary_to_list(E) ++ ": " ++ binary_to_list(T)
+                      || {E, T} <- ?DEFAULT_CONTENT_TYPES]]}},
+           {default_content_type,
+            #{value => ?T("Type"),
+              desc =>
+                  ?T("Specify the content type to use for unknown extensions. "
+                     "The default value is 'application/octet-stream'.")}},
+           {custom_headers,
+            #{value => "{Name: Value}",
+              desc =>
+                  ?T("Indicate custom HTTP headers to be included in all responses. "
+                     "There are no custom headers by default.")}},
+           {directory_indices,
+            #{value => "[Index, ...]",
+              desc =>
+                  ?T("Indicate one or more directory index files, "
+                     "similarly to Apache's 'DirectoryIndex' variable. "
+                     "When an HTTP request hits a directory instead of a "
+                     "regular file, those directory indices are looked in order, "
+                     "and the first one found is returned. "
+                     "The default value is an empty list.")}},
+           {must_authenticate_with,
+            #{value => ?T("[{Username, Hostname}, ...]"),
+              desc =>
+                  ?T("List of accounts that are allowed to use this service. "
+		     "Default value: '[]'.")}}],
+      example =>
+          [{?T("This example configuration will serve the files from the "
+	       "local directory '/var/www' in the address "
+	       "'http://example.org:5280/pub/content/'. In this example a new "
+	       "content type 'ogg' is defined, 'png' is redefined, and 'jpg' "
+	       "definition is deleted:"),
+	   ["listen:",
+           "  -",
+           "    port: 5280",
+           "    module: ejabberd_http",
+           "    request_handlers:",
+           "      /pub/content: mod_http_fileserver",
+           "",
+           "modules:",
+           "  mod_http_fileserver:",
+           "    docroot: /var/www",
+           "    accesslog: /var/log/ejabberd/access.log",
+           "    directory_indices:",
+           "      - index.html",
+           "      - main.htm",
+           "    custom_headers:",
+           "      X-Powered-By: Erlang/OTP",
+           "      X-Fry: \"It's a widely-believed fact!\"",
+           "    content_types:",
+           "      .ogg: audio/ogg",
+           "      .png: image/png",
+           "    default_content_type: text/html"]}]}.

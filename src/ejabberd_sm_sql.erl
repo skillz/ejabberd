@@ -4,7 +4,7 @@
 %%% Created :  9 Mar 2015 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,7 +24,6 @@
 
 -module(ejabberd_sm_sql).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -behaviour(ejabberd_sm).
 
@@ -35,6 +34,7 @@
 	 get_sessions/0,
 	 get_sessions/1,
 	 get_sessions/2]).
+-export([sql_schemas/0]).
 
 -include("ejabberd_sm.hrl").
 -include("logger.hrl").
@@ -49,17 +49,41 @@ init() ->
     ?DEBUG("Cleaning SQL SM table...", []),
     lists:foldl(
       fun(Host, ok) ->
+              ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
 	      case ejabberd_sql:sql_query(
 		     Host, ?SQL("delete from sm where node=%(Node)s")) of
 		  {updated, _} ->
 		      ok;
 		  Err ->
-		      ?ERROR_MSG("failed to clean 'sm' table: ~p", [Err]),
+		      ?ERROR_MSG("Failed to clean 'sm' table: ~p", [Err]),
 		      {error, db_failure}
 	      end;
 	 (_, Err) ->
 	      Err
       end, ok, ejabberd_sm:get_vh_by_backend(?MODULE)).
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"sm">>,
+                columns =
+                    [#sql_column{name = <<"usec">>, type = bigint},
+                     #sql_column{name = <<"pid">>, type = text},
+                     #sql_column{name = <<"node">>, type = text},
+                     #sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"resource">>, type = text},
+                     #sql_column{name = <<"priority">>, type = text},
+                     #sql_column{name = <<"info">>, type = text}],
+                indices = [#sql_index{
+                              columns = [<<"usec">>, <<"pid">>],
+                              unique = true},
+                           #sql_index{
+                              columns = [<<"node">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"username">>]}]}]}].
 
 set_session(#session{sid = {Now, Pid}, usr = {U, LServer, R},
 		     priority = Priority, info = Info}) ->
@@ -85,7 +109,7 @@ set_session(#session{sid = {Now, Pid}, usr = {U, LServer, R},
 
 delete_session(#session{usr = {_, LServer, _}, sid = {Now, Pid}}) ->
     TS = now_to_timestamp(Now),
-    PidS = list_to_binary(erlang:pid_to_list(Pid)),
+    PidS = misc:encode_pid(Pid),
     case ejabberd_sql:sql_query(
 	   LServer,
 	   ?SQL("delete from sm where usec=%(TS)d and pid=%(PidS)s")) of

@@ -6,7 +6,7 @@
 %%% Created :  2 Nov 2007 by Mickael Remond <mremond@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -33,7 +33,7 @@
 %% Get first c2s configuration limitations to apply it to other c2s
 %% connectors.
 get_c2s_limits() ->
-    C2SFirstListen = ejabberd_config:get_option(listen, []),
+    C2SFirstListen = ejabberd_option:listen(),
     case lists:keysearch(ejabberd_c2s, 2, C2SFirstListen) of
 	false -> [];
 	{value, {_Port, ejabberd_c2s, Opts}} ->
@@ -41,23 +41,12 @@ get_c2s_limits() ->
     end.
 
 %% Only get access, shaper and max_stanza_size values
-
 select_opts_values(Opts) ->
-    select_opts_values(Opts, []).
-
-select_opts_values([], SelectedValues) ->
-    SelectedValues;
-select_opts_values([{access, Value} | Opts],
-		   SelectedValues) ->
-    select_opts_values(Opts,
-		       [{access, Value} | SelectedValues]);
-select_opts_values([{shaper, Value} | Opts],
-		   SelectedValues) ->
-    select_opts_values(Opts,
-		       [{shaper, Value} | SelectedValues]);
-select_opts_values([{max_stanza_size, Value} | Opts],
-		   SelectedValues) ->
-    select_opts_values(Opts,
-		       [{max_stanza_size, Value} | SelectedValues]);
-select_opts_values([_Opt | Opts], SelectedValues) ->
-    select_opts_values(Opts, SelectedValues).
+    maps:fold(
+      fun(Opt, Val, Acc) when Opt == access;
+			      Opt == shaper;
+			      Opt == max_stanza_size ->
+	      [{Opt, Val}|Acc];
+	 (_, _, Acc) ->
+	      Acc
+      end, [], Opts).

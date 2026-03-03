@@ -5,7 +5,7 @@
 %%% Created :  1 Dec 2007 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -25,7 +25,7 @@
 
 -module(gen_pubsub_node).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 -type(host() :: mod_pubsub:host()).
 -type(nodeId() :: mod_pubsub:nodeId()).
@@ -123,10 +123,19 @@
     {error, stanza_error()}.
 
 -callback remove_extra_items(NodeIdx :: nodeIdx(),
+	Max_Items :: unlimited | non_neg_integer()) ->
+    {result, {[itemId()], [itemId()]}
+	}.
+
+-callback remove_extra_items(NodeIdx :: nodeIdx(),
 	Max_Items :: unlimited | non_neg_integer(),
 	ItemIds :: [itemId()]) ->
     {result, {[itemId()], [itemId()]}
 	}.
+
+-callback remove_expired_items(NodeIdx :: nodeIdx(),
+	Seconds :: infinity | non_neg_integer()) ->
+    {result, [itemId()]}.
 
 -callback get_node_affiliations(NodeIdx :: nodeIdx()) ->
     {result, [{ljid(), affiliation()}]}.
@@ -142,7 +151,7 @@
 -callback set_affiliation(NodeIdx :: nodeIdx(),
 	Owner :: jid(),
 	Affiliation :: affiliation()) ->
-    ok |
+    {result, ok} |
     {error, stanza_error()}.
 
 -callback get_node_subscriptions(NodeIdx :: nodeIdx()) ->
@@ -184,7 +193,10 @@
     {result, {[pubsubItem()], undefined | rsm_set()}}.
 
 -callback get_last_items(nodeIdx(), jid(), undefined | rsm_set()) ->
-    {result, {[pubsubItem()], undefined | rsm_set()}}.
+    {result, [pubsubItem()]}.
+
+-callback get_only_item(nodeIdx(), jid()) ->
+    {result, [pubsubItem()]}.
 
 -callback get_item(NodeIdx :: nodeIdx(),
 	ItemId :: itemId(),
@@ -208,10 +220,10 @@
 -callback get_item_name(Host :: host(),
 	ServerHost :: binary(),
 	Node :: nodeId()) ->
-    itemId().
+    {result, itemId()}.
 
 -callback node_to_path(Node :: nodeId()) ->
-    [nodeId()].
+    {result, [nodeId()]}.
 
 -callback path_to_node(Node :: [nodeId()]) ->
-    nodeId().
+    {result, nodeId()}.
