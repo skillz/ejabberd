@@ -528,7 +528,7 @@ set_default_list(LUser, LServer, Name) ->
 	    Err
     end.
 
--spec check_packet(allow | deny, c2s_state() | jid(), stanza(), in | out) -> allow | deny.
+-spec check_packet(allow | deny | respect_mute, c2s_state() | jid(), stanza(), in | out) -> allow | deny.
 check_packet(Acc, #{jid := JID} = State, Packet, Dir) ->
     case maps:get(privacy_active_list, State, none) of
 	none ->
@@ -537,18 +537,18 @@ check_packet(Acc, #{jid := JID} = State, Packet, Dir) ->
 	    #jid{luser = LUser, lserver = LServer} = JID,
 	    case get_user_list(LUser, LServer, ListName) of
 		{ok, {_, List}} ->
-		    do_check_packet(JID, List, Packet, Dir);
+		    do_check_packet(JID, List, Packet, Dir, Acc);
 		_ ->
 		    ?DEBUG("Non-existing active list '~ts' is set "
 			   "for user '~ts'", [ListName, jid:encode(JID)]),
 		    check_packet(Acc, JID, Packet, Dir)
 	    end
     end;
-check_packet(_, JID, Packet, Dir) ->
+check_packet(Acc, JID, Packet, Dir) ->
     #jid{luser = LUser, lserver = LServer} = JID,
     case get_user_list(LUser, LServer, default) of
 	{ok, {_, List}} ->
-	    do_check_packet(JID, List, Packet, Dir);
+	    do_check_packet(JID, List, Packet, Dir, Acc);
 	_ ->
 	    allow
     end.
@@ -556,28 +556,24 @@ check_packet(_, JID, Packet, Dir) ->
 %% From is the sender, To is the destination.
 %% If Dir = out, User@Server is the sender account (From).
 %% If Dir = in, User@Server is the destination account (To).
--spec do_check_packet(jid(), [listitem()], stanza(), in | out) -> allow | deny.
-do_check_packet(_, [], _, _) ->
+-spec do_check_packet(jid(), [listitem()], stanza(), in | out, allow | deny | respect_mute) -> allow | deny.
+do_check_packet(_, [], _, _, _) ->
     allow;
-do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
+do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir, Mode) ->
     From = xmpp:get_from(Packet),
     To = xmpp:get_to(Packet),
     case {From, To} of
 	{#jid{luser = <<"">>, lserver = LServer},
 	 #jid{lserver = LServer}} when Dir == in ->
-	    %% Allow any packets from local server
 	    allow;
 	{#jid{lserver = LServer},
 	 #jid{luser = <<"">>, lserver = LServer}} when Dir == out ->
-	    %% Allow any packets to local server
     allow;
 	{#jid{luser = LUser, lserver = LServer, lresource = <<"">>},
 	 #jid{luser = LUser, lserver = LServer}} when Dir == in ->
-	    %% Allow incoming packets from user's bare jid to his full jid
     allow;
 	{#jid{luser = LUser, lserver = LServer},
 	 #jid{luser = LUser, lserver = LServer, lresource = <<"">>}} when Dir == out ->
-	    %% Allow outgoing packets from user's full jid to his bare JID
 	    allow;
       _ ->
 	  PType = case Packet of
@@ -598,34 +594,53 @@ do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
 		   in -> jid:tolower(From);
 		   out -> jid:tolower(To)
 		 end,
-	  check_packet_aux(List, PType2, LJID, [LUser, LServer])
+	  check_packet_aux(List, PType2, LJID, [LUser, LServer], Mode)
     end.
 
 -spec check_packet_aux([listitem()],
 		       message | iq | presence_in | presence_out | other,
-		       ljid(), [binary()] | {none | both | from | to, [binary()]}) ->
+		       ljid(), [binary()] | {none | both | from | to, [binary()]},
+		       allow | deny | respect_mute) ->
 			      allow | deny.
-%% Ptype = message | iq | presence_in | presence_out | other
-check_packet_aux([], _PType, _JID, _RosterInfo) ->
+check_packet_aux([], _PType, _JID, _RosterInfo, _Mode) ->
     allow;
-check_packet_aux([Item | List], PType, JID, RosterInfo) ->
+check_packet_aux([Item | List], PType, JID, RosterInfo, Mode) ->
     #listitem{type = Type, value = Value, action = Action} =
 	Item,
-    case is_ptype_match(Item, PType) of
+    case is_ptype_match(Item, PType, Mode) of
       true ->
 	    case is_type_match(Type, Value, JID, RosterInfo) of
 		{true, _} -> Action;
 		{false, RI} ->
-		    check_packet_aux(List, PType, JID, RI)
+		    check_packet_aux(List, PType, JID, RI, Mode)
 	    end;
       false ->
-	  check_packet_aux(List, PType, JID, RosterInfo)
+	  check_packet_aux(List, PType, JID, RosterInfo, Mode)
     end.
 
 -spec is_ptype_match(listitem(),
-		     message | iq | presence_in | presence_out | other) ->
+		     message | iq | presence_in | presence_out | other,
+		     allow | deny | respect_mute) ->
 			    boolean().
-is_ptype_match(Item, PType) ->
+is_ptype_match(Item, PType, respect_mute) ->
+    %% In respect_mute mode, only match "mute" blocks: message-only deny
+    %% items that do NOT also block presence (i.e., not full blocks).
+    case Item#listitem.action of
+	deny ->
+	    IgnoreMessageFlag = Item#listitem.match_message
+		andalso not Item#listitem.match_presence_in
+		andalso not Item#listitem.match_presence_out,
+	    BlockedMessageFlag = Item#listitem.match_message
+		andalso Item#listitem.match_presence_in
+		andalso Item#listitem.match_presence_out,
+	    case PType of
+		message -> IgnoreMessageFlag orelse BlockedMessageFlag;
+		_ -> false
+	    end;
+	_ ->
+	    false
+    end;
+is_ptype_match(Item, PType, _Mode) ->
     case Item#listitem.match_all of
       true -> true;
       false ->

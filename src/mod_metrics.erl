@@ -79,7 +79,10 @@ offline_message_hook({_Action, #message{to = #jid{lserver = LServer}}} = Acc) ->
 
 -spec sm_register_connection_hook(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> any().
 sm_register_connection_hook(_SID, #jid{lserver=LServer}, _Info) ->
-    push(LServer, sm_register_connection).
+    push(LServer, sm_register_connection),
+    push(LServer, {open_tcp_ports, length(erlang:ports())}),
+    push(LServer, {erlang_processes, erlang:system_info(process_count)}),
+    push(LServer, {connected_users, ejabberd_sm:connected_users_number()}).
 
 -spec sm_remove_connection_hook(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> any().
 sm_remove_connection_hook(_SID, #jid{lserver=LServer}, _Info) ->
@@ -137,17 +140,17 @@ send_metrics(Host, Probe, Peer, Port) ->
     [Node|_] = binary:split(FQDN, <<".">>),
     BaseId = <<Host/binary, "/", Node/binary, ".">>,
     TS = integer_to_binary(erlang:system_time(second)),
-    case get_socket(?SOCKET_REGISTER_RETRIES) of
+	case get_socket(?SOCKET_REGISTER_RETRIES) of
 	{ok, Socket} ->
 	    case Probe of
 		{Key, Val} ->
 		    BVal = integer_to_binary(Val),
 		    Data = <<BaseId/binary, (misc:atom_to_binary(Key))/binary,
-			    ":g/", TS/binary, ":", BVal/binary>>,
+			    ":", BVal/binary, "|g">>,
 		    gen_udp:send(Socket, Peer, Port, Data);
 		Key ->
 		    Data = <<BaseId/binary, (misc:atom_to_binary(Key))/binary,
-			    ":c/", TS/binary, ":1">>,
+			    ":1|c">>,
 		    gen_udp:send(Socket, Peer, Port, Data)
 	    end;
 	Err ->

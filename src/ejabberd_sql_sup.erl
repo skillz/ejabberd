@@ -30,6 +30,7 @@
 -export([start/1, stop/1, stop/0]).
 -export([start_link/0, start_link/1]).
 -export([init/1, reload/1, config_reloaded/0, is_started/1]).
+-export([get_secondary_host/1, start_secondary_pools/1]).
 
 -include("logger.hrl").
 
@@ -165,6 +166,30 @@ child_spec(Host, I) ->
 -spec child_specs(binary(), pos_integer()) -> [supervisor:child_spec()].
 child_specs(Host, PoolSize) ->
     [child_spec(Host, I) || I <- lists:seq(1, PoolSize)].
+
+-spec get_secondary_host(binary()) -> {ok, binary()} | error.
+get_secondary_host(Host) ->
+    case ejabberd_config:get_option({sql_secondary_servers, Host}, []) of
+	[] -> error;
+	Servers ->
+	    Index = rand:uniform(length(Servers)),
+	    SecondaryHost = lists:nth(Index, Servers),
+	    case is_started(SecondaryHost) of
+		true -> {ok, SecondaryHost};
+		false -> error
+	    end
+    end.
+
+-spec start_secondary_pools(binary()) -> ok.
+start_secondary_pools(Host) ->
+    SecondaryServers = ejabberd_config:get_option({sql_secondary_servers, Host}, []),
+    lists:foreach(
+      fun(SecHost) ->
+	      case start(SecHost) of
+		  ok -> ?INFO_MSG("Started secondary SQL pool for ~ts", [SecHost]);
+		  {error, Why} -> ?ERROR_MSG("Failed to start secondary SQL pool for ~ts: ~p", [SecHost, Why])
+	      end
+      end, SecondaryServers).
 
 check_sqlite_db(Host) ->
     DB = ejabberd_sql:sqlite_db(Host),

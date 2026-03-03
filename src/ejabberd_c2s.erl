@@ -835,8 +835,13 @@ process_presence_out(#{lserver := LServer, jid := JID,
 			AccessErr = xmpp:err_forbidden(AccessErrTxt, Lang),
 			send_error(State0, Pres, AccessErr);
 		    allow ->
-			ejabberd_hooks:run(roster_out_subscription, LServer, [Pres]),
-			State0
+			case is_privacy_allow(Pres, To) of
+			    true ->
+				ejabberd_hooks:run(roster_out_subscription, LServer, [Pres]),
+				State0;
+			    false ->
+				State0
+			end
 		end;
 	   true ->
 		State0
@@ -1009,6 +1014,11 @@ check_privacy_then_route(#{lang := Lang} = State, Pkt) ->
 -spec privacy_check_packet(state(), stanza(), in | out) -> allow | deny.
 privacy_check_packet(#{lserver := LServer} = State, Pkt, Dir) ->
     ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [State, Pkt, Dir]).
+
+-spec is_privacy_allow(stanza(), jid()) -> boolean().
+is_privacy_allow(Packet, To) ->
+    LServer = To#jid.server,
+    allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
 
 -spec get_priority_from_presence(presence()) -> integer().
 get_priority_from_presence(#presence{priority = Prio}) ->

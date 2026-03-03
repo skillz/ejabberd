@@ -33,6 +33,7 @@
 -export([start_link/2,
 	 sql_query/2,
 	 sql_query/3,
+	 sql_query_replica/2,
 	 sql_query_t/1,
 	 sql_transaction/2,
 	 sql_transaction/4,
@@ -146,6 +147,15 @@ sql_query(Host, Query, Timeout) ->
 -spec sql_query(binary(), sql_query(T)) -> sql_query_result(T).
 sql_query(Host, Query) ->
     sql_query(Host, Query, query_timeout(Host)).
+
+-spec sql_query_replica(binary(), sql_query(T)) -> sql_query_result(T).
+sql_query_replica(Host, Query) ->
+    case ejabberd_sql_sup:get_secondary_host(Host) of
+	{ok, SecondaryHost} ->
+	    sql_query(SecondaryHost, Query);
+	error ->
+	    sql_query(Host, Query)
+    end.
 
 %% SQL transaction based on a list of queries
 %% This function automatically

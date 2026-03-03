@@ -1,0 +1,4582 @@
+diff --git a/src/ejabberd_auth.erl b/src/ejabberd_auth.erl
+index c27930140..0e73e007b 100644
+--- a/src/ejabberd_auth.erl
++++ b/src/ejabberd_auth.erl
+@@ -52,7 +52,6 @@
+ -include("scram.hrl").
+ -include("logger.hrl").
+ 
+--define(AUTH_CACHE, auth_cache).
+ -define(SALT_LENGTH, 16).
+ 
+ -record(state, {host_modules = #{} :: map()}).
+@@ -378,6 +377,7 @@ get_password_with_authmodule(User, Server) ->
+ 
+ -spec user_exists(binary(), binary()) -> boolean().
+ user_exists(_User, <<"">>) ->
++	?ERROR_MSG("Server is empty in user_exists auth call.", []),
+     false;
+ user_exists(User, Server) ->
+     case validate_credentials(User, Server) of
+@@ -546,14 +546,14 @@ db_try_register(User, Server, Password, Mod) ->
+ 	    case use_cache(Mod, Server) of
+ 		true ->
+ 		    case ets_cache:update(
+-			   ?AUTH_CACHE, {User, Server}, {ok, Password},
++			   cache_tab(Mod), {User, Server}, {ok, Password},
+ 			   fun() -> Mod:try_register(User, Server, Password1) end,
+ 			   cache_nodes(Mod, Server)) of
+ 			{ok, _} -> ok;
+ 			{error, _} = Err -> Err
+ 		    end;
+ 		false ->
+-		    Mod:try_register(User, Server, Password1)
++		    ets_cache:untag(Mod:try_register(User, Server, Password1))
+ 	    end;
+ 	false ->
+ 	    {error, not_allowed}
+@@ -569,14 +569,14 @@ db_set_password(User, Server, Password, Mod) ->
+ 	    case use_cache(Mod, Server) of
+ 		true ->
+ 		    case ets_cache:update(
+-			   ?AUTH_CACHE, {User, Server}, {ok, Password},
++			   cache_tab(Mod), {User, Server}, {ok, Password},
+ 			   fun() -> Mod:set_password(User, Server, Password1) end,
+ 			   cache_nodes(Mod, Server)) of
+ 			{ok, _} -> ok;
+ 			{error, _} = Err -> Err
+ 		    end;
+ 		false ->
+-		    Mod:set_password(User, Server, Password1)
++		    ets_cache:untag(Mod:set_password(User, Server, Password1))
+ 	    end;
+ 	false ->
+ 	    {error, not_allowed}
+@@ -586,7 +586,7 @@ db_get_password(User, Server, Mod) ->
+     UseCache = use_cache(Mod, Server),
+     case erlang:function_exported(Mod, get_password, 2) of
+ 	false when UseCache ->
+-	    case ets_cache:lookup(?AUTH_CACHE, {User, Server}) of
++	    case ets_cache:lookup(cache_tab(Mod), {User, Server}) of
+ 		{ok, exists} -> error;
+ 		Other -> Other
+ 	    end;
+@@ -594,10 +594,10 @@ db_get_password(User, Server, Mod) ->
+ 	    error;
+ 	true when UseCache ->
+ 	    ets_cache:lookup(
+-	      ?AUTH_CACHE, {User, Server},
++	      cache_tab(Mod), {User, Server},
+ 	      fun() -> Mod:get_password(User, Server) end);
+ 	true ->
+-	    Mod:get_password(User, Server)
++	    ets_cache:untag(Mod:get_password(User, Server))
+     end.
+ 
+ db_user_exists(User, Server, Mod) ->
+@@ -608,23 +608,41 @@ db_user_exists(User, Server, Mod) ->
+ 	    case {Mod:store_type(Server), use_cache(Mod, Server)} of
+ 		{external, true} ->
+ 		    case ets_cache:lookup(
+-			   ?AUTH_CACHE, {User, Server},
++			   cache_tab(Mod), {User, Server},
+ 			   fun() ->
+ 				   case Mod:user_exists(User, Server) of
+-				       true -> {ok, exists};
+-				       false -> error;
+-				       {error, _} = Err -> Err
++				       true -> 
++				           ?DEBUG("User exists in external module, user: ~s", [User]),
++				           {ok, exists};
++				       false -> 
++				           ?ERROR_MSG("User does not exist in external module, false returned, user: ~s", [User]),
++				           error;
++				       {error, Error} = Err ->
++				           ?ERROR_MSG("User does not exist in external module error is: ~s, user: ~s", [Error, User]),
++				           Err;
++				       {CacheTag, true} -> 
++				           ?DEBUG("User exists in cache tag block, user: ~s", [User]),
++				           {CacheTag, {ok, exists}};
++				       {CacheTag, false} -> 
++				           ?ERROR_MSG("User does not exist in cache tag block: ~s, user: ~s", [CacheTag, User]),
++				           {CacheTag, error};
++				       {_, {error, _}} = Err ->
++				           ?ERROR_MSG("General auth cache/backend error, user: ~s", [User]),
++                           Err
+ 				   end
+ 			   end) of
+ 			{ok, _} ->
++				?DEBUG("User exists in cache or external", []),
+ 			    true;
+ 			error ->
++				?DEBUG("User does not exist exists in cache or external, user: ~s", [User]),
+ 			    false;
+-			{error, _} = Err ->
++			{error, Error} = Err ->
++				?DEBUG("User does not exist exists in cache or external, error is ~s", [Error]),
+ 			    Err
+ 		    end;
+ 		{external, false} ->
+-		    Mod:user_exists(User, Server);
++		    ets_cache:untag(Mod:user_exists(User, Server));
+ 		_ ->
+ 		    false
+ 	    end
+@@ -639,14 +657,14 @@ db_check_password(User, AuthzId, Server, ProvidedPassword,
+ 	    case {Mod:store_type(Server), use_cache(Mod, Server)} of
+ 		{external, true} ->
+ 		    case ets_cache:update(
+-			   ?AUTH_CACHE, {User, Server}, {ok, ProvidedPassword},
++			   cache_tab(Mod), {User, Server}, {ok, ProvidedPassword},
+ 			   fun() ->
+ 				   case Mod:check_password(
+ 					  User, AuthzId, Server, ProvidedPassword) of
+-				       true ->
+-					   {ok, ProvidedPassword};
+-				       false ->
+-					   error
++				       true -> {ok, ProvidedPassword};
++				       false -> error;
++				       {CacheTag, true} -> {CacheTag, {ok, ProvidedPassword}};
++				       {CacheTag, false} -> {CacheTag, error}
+ 				   end
+ 			   end) of
+ 			{ok, _} ->
+@@ -655,7 +673,8 @@ db_check_password(User, AuthzId, Server, ProvidedPassword,
+ 			    false
+ 		    end;
+ 		{external, false} ->
+-		    Mod:check_password(User, AuthzId, Server, ProvidedPassword);
++		    ets_cache:untag(
++		      Mod:check_password(User, AuthzId, Server, ProvidedPassword));
+ 		_ ->
+ 		    false
+ 	    end
+@@ -664,11 +683,11 @@ db_check_password(User, AuthzId, Server, ProvidedPassword,
+ db_remove_user(User, Server, Mod) ->
+     case erlang:function_exported(Mod, remove_user, 2) of
+ 	true ->
+-	    case Mod:remove_user(User, Server) of
++	    case ets_cache:untag(Mod:remove_user(User, Server)) of
+ 		ok ->
+ 		    case use_cache(Mod, Server) of
+ 			true ->
+-			    ets_cache:delete(?AUTH_CACHE, {User, Server},
++			    ets_cache:delete(cache_tab(Mod), {User, Server},
+ 					     cache_nodes(Mod, Server));
+ 			false ->
+ 			    ok
+@@ -683,7 +702,7 @@ db_remove_user(User, Server, Mod) ->
+ db_get_users(Server, Opts, Mod) ->
+     case erlang:function_exported(Mod, get_users, 2) of
+ 	true ->
+-	    Mod:get_users(Server, Opts);
++	    ets_cache:untag(Mod:get_users(Server, Opts));
+ 	false ->
+ 	    case use_cache(Mod, Server) of
+ 		true ->
+@@ -692,7 +711,7 @@ db_get_users(Server, Opts, Mod) ->
+ 			      [{User, Server}|Users];
+ 			 (_, _, Users) ->
+ 			      Users
+-		      end, [], ?AUTH_CACHE);
++		      end, [], cache_tab(Mod));
+ 		false ->
+ 		    []
+ 	    end
+@@ -701,7 +720,7 @@ db_get_users(Server, Opts, Mod) ->
+ db_count_users(Server, Opts, Mod) ->
+     case erlang:function_exported(Mod, count_users, 2) of
+ 	true ->
+-	    Mod:count_users(Server, Opts);
++	    ets_cache:untag(Mod:count_users(Server, Opts));
+ 	false ->
+ 	    case use_cache(Mod, Server) of
+ 		true ->
+@@ -710,7 +729,7 @@ db_count_users(Server, Opts, Mod) ->
+ 			      Num + 1;
+ 			 (_, _, Num) ->
+ 			      Num
+-		      end, 0, ?AUTH_CACHE);
++		      end, 0, cache_tab(Mod));
+ 		false ->
+ 		    0
+ 	    end
+@@ -751,12 +770,16 @@ password_to_scram(Password, IterationCount) ->
+ %%%----------------------------------------------------------------------
+ -spec init_cache(map()) -> ok.
+ init_cache(HostModules) ->
+-    case use_cache(HostModules) of
+-	true ->
+-	    ets_cache:new(?AUTH_CACHE, cache_opts());
+-	false ->
+-	    ets_cache:delete(?AUTH_CACHE)
+-    end.
++    CacheOpts = cache_opts(),
++    {True, False} = use_cache(HostModules),
++    lists:foreach(
++      fun(Module) ->
++	      ets_cache:new(cache_tab(Module), CacheOpts)
++      end, True),
++    lists:foreach(
++      fun(Module) ->
++	      ets_cache:delete(cache_tab(Module))
++      end, False).
+ 
+ -spec cache_opts() -> [proplists:property()].
+ cache_opts() ->
+@@ -774,14 +797,22 @@ cache_opts() ->
+ 	       end,
+     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
+ 
+--spec use_cache(map()) -> boolean().
++-spec use_cache(map()) -> {True :: [module()], False :: [module()]}.
+ use_cache(HostModules) ->
+-    lists:any(
+-      fun({Host, Modules}) ->
+-	      lists:any(fun(Module) ->
+-				use_cache(Module, Host)
+-			end, Modules)
+-      end, maps:to_list(HostModules)).
++    {Enabled, Disabled} =
++	maps:fold(
++	  fun(Host, Modules, Acc) ->
++		  lists:foldl(
++		    fun(Module, {True, False}) ->
++			    case use_cache(Module, Host) of
++				true ->
++				    {sets:add_element(Module, True), False};
++				false ->
++				    {True, sets:add_element(Module, False)}
++			    end
++		    end, Acc, Modules)
++	  end, {sets:new(), sets:new()}, HostModules),
++    {sets:to_list(Enabled), sets:to_list(sets:subtract(Disabled, Enabled))}.
+ 
+ -spec use_cache(module(), binary()) -> boolean().
+ use_cache(Mod, LServer) ->
+@@ -800,6 +831,10 @@ cache_nodes(Mod, LServer) ->
+ 	false -> ejabberd_cluster:get_nodes()
+     end.
+ 
++-spec cache_tab(module()) -> atom().
++cache_tab(Mod) ->
++    list_to_atom(atom_to_list(Mod) ++ "_cache").
++
+ %%%----------------------------------------------------------------------
+ %%% Internal functions
+ %%%----------------------------------------------------------------------
+diff --git a/src/ejabberd_c2s.erl b/src/ejabberd_c2s.erl
+index 61284e3e6..45716d812 100644
+--- a/src/ejabberd_c2s.erl
++++ b/src/ejabberd_c2s.erl
+@@ -669,7 +669,13 @@ process_presence_out(#{lserver := LServer, jid := JID,
+ 		    AccessErr = xmpp:err_forbidden(AccessErrTxt, Lang),
+ 		    send_error(State, Pres, AccessErr);
+ 		allow ->
+-		    ejabberd_hooks:run(roster_out_subscription, LServer, [Pres])
++		    case is_privacy_allow(Pres, To) of
++			true ->
++			    ?DEBUG("Packet was allowed due to privacy list for roster out sub: ~p and To ~p", [Pres, To]),
++			    ejabberd_hooks:run(roster_out_subscription, LServer, [Pres]);
++			false ->
++			    ?DEBUG("Packet wasnt allowed due to privacy list for roster out sub: ~p", [Pres])
++		    end
+ 	    end;
+ 	true -> ok
+     end,
+@@ -833,6 +839,14 @@ check_privacy_then_route(#{lang := Lang} = State, Pkt) ->
+ privacy_check_packet(#{lserver := LServer} = State, Pkt, Dir) ->
+     ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [State, Pkt, Dir]).
+ 
++
++-spec is_privacy_allow(stanza(), jid()) -> boolean().
++is_privacy_allow(Packet, To) ->
++    ?DEBUG("Privacy check To ~p", [To]),
++    LServer = To#jid.server,
++    ?DEBUG("Privacy check LServer ~p", [To#jid.server]),
++    allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
++
+ -spec get_priority_from_presence(presence()) -> integer().
+ get_priority_from_presence(#presence{priority = Prio}) ->
+     case Prio of
+diff --git a/src/ejabberd_sm.erl b/src/ejabberd_sm.erl
+index 165a750db..36252dea8 100644
+--- a/src/ejabberd_sm.erl
++++ b/src/ejabberd_sm.erl
+@@ -186,8 +186,12 @@ close_session(SID, User, Server, Resource) ->
+ check_in_subscription(Acc, #presence{to = To}) ->
+     #jid{user = User, server = Server} = To,
+     case ejabberd_auth:user_exists(User, Server) of
+-      true -> Acc;
+-      false -> {stop, false}
++      true -> 
++            ?DEBUG("user exists in check_in_sub", []),
++            Acc;
++      false -> 
++            ?DEBUG("user does not exist check_in_sub", []),
++            {stop, false}
+     end.
+ 
+ -spec bounce_offline_message({bounce, message()} | any()) -> any().
+@@ -735,6 +739,15 @@ is_privacy_allow(Packet) ->
+ 	       privacy_check_packet, LServer, allow,
+ 	       [To, Packet, in]).
+ 
++-spec is_offline_privacy_allow(stanza()) -> boolean().
++is_offline_privacy_allow(Packet) ->
++    To = xmpp:get_to(Packet),
++    LServer = To#jid.server,
++    ?DEBUG("checking is_offline_privacy_allow in ejabberd_sm", []),
++    allow == ejabberd_hooks:run_fold(
++	       privacy_check_packet, LServer, respect_mute,
++	       [To, Packet, in]).
++
+ -spec route_message(message()) -> any().
+ route_message(#message{to = To, type = Type} = Packet) ->
+     LUser = To#jid.luser,
+@@ -768,7 +781,7 @@ route_message(#message{to = To, type = Type} = Packet) ->
+ 			PrioRes);
+       _ ->
+ 	    case ejabberd_auth:user_exists(LUser, LServer) andalso
+-		is_privacy_allow(Packet) of
++		is_offline_privacy_allow(Packet) of
+ 		true ->
+ 		    ejabberd_hooks:run_fold(offline_message_hook,
+ 					    LServer, {bounce, Packet}, []);
+diff --git a/src/ejabberd_sql.erl b/src/ejabberd_sql.erl
+index 2d9c64187..484103703 100644
+--- a/src/ejabberd_sql.erl
++++ b/src/ejabberd_sql.erl
+@@ -33,51 +33,52 @@
+ 
+ %% External exports
+ -export([start/1, start_link/2,
+-	 sql_query/2,
+-	 sql_query_t/1,
+-	 sql_transaction/2,
+-	 sql_bloc/2,
+-	 abort/1,
+-	 restart/1,
+-	 use_new_schema/0,
+-	 sql_query_to_iolist/1,
+-	 escape/1,
+-	 standard_escape/1,
+-	 escape_like/1,
+-	 escape_like_arg/1,
+-	 escape_like_arg_circumflex/1,
+-	 to_bool/1,
+-	 sqlite_db/1,
+-	 sqlite_file/1,
+-	 encode_term/1,
+-	 decode_term/1,
+-	 odbc_config/0,
+-	 freetds_config/0,
+-	 odbcinst_config/0,
+-	 init_mssql/1,
+-	 keep_alive/2,
+-	 to_list/2]).
++   sql_query/2,
++   sql_query/3,
++   sql_query_t/1,
++   sql_transaction/2,
++   sql_bloc/2,
++   abort/1,
++   restart/1,
++   use_new_schema/0,
++   sql_query_to_iolist/1,
++   escape/1,
++   standard_escape/1,
++   escape_like/1,
++   escape_like_arg/1,
++   escape_like_arg_circumflex/1,
++   to_bool/1,
++   sqlite_db/1,
++   sqlite_file/1,
++   encode_term/1,
++   decode_term/1,
++   odbc_config/0,
++   freetds_config/0,
++   odbcinst_config/0,
++   init_mssql/1,
++   keep_alive/2,
++   to_list/2]).
+ 
+ %% gen_fsm callbacks
+ -export([init/1, handle_event/3, handle_sync_event/4,
+-	 handle_info/3, terminate/3, print_state/1,
+-	 code_change/4]).
++   handle_info/3, terminate/3, print_state/1,
++   code_change/4]).
+ 
+ -export([connecting/2, connecting/3,
+-	 session_established/2, session_established/3,
+-	 opt_type/1]).
++   session_established/2, session_established/3,
++   opt_type/1]).
+ 
+ -include("logger.hrl").
+ -include("ejabberd_sql_pt.hrl").
+ -include("ejabberd_stacktrace.hrl").
+ 
+ -record(state,
+-	{db_ref = self()                     :: pid(),
+-	 db_type = odbc                      :: pgsql | mysql | sqlite | odbc | mssql,
+-	 db_version = undefined              :: undefined | non_neg_integer(),
+-	 start_interval = 0                  :: non_neg_integer(),
+-	 host = <<"">>                       :: binary(),
+-	 pending_requests                    :: p1_queue:queue()}).
++  {db_ref = self()                     :: pid(),
++   db_type = odbc                      :: pgsql | mysql | sqlite | odbc | mssql,
++   db_version = undefined              :: undefined | non_neg_integer(),
++   start_interval = 0                  :: non_neg_integer(),
++   host = <<"">>                       :: binary(),
++   pending_requests                    :: p1_queue:queue()}).
+ 
+ -define(STATE_KEY, ejabberd_sql_state).
+ 
+@@ -120,12 +121,12 @@
+ %%%----------------------------------------------------------------------
+ start(Host) ->
+     p1_fsm:start(ejabberd_sql, [Host],
+-		     fsm_limit_opts() ++ (?FSMOPTS)).
++         fsm_limit_opts() ++ (?FSMOPTS)).
+ 
+ start_link(Host, StartInterval) ->
+     p1_fsm:start_link(ejabberd_sql,
+-			  [Host, StartInterval],
+-			  fsm_limit_opts() ++ (?FSMOPTS)).
++        [Host, StartInterval],
++        fsm_limit_opts() ++ (?FSMOPTS)).
+ 
+ -type sql_query() :: [sql_query() | binary()] | #sql_query{} |
+                      fun(() -> any()) | fun((atom(), _) -> any()).
+@@ -136,9 +137,12 @@ start_link(Host, StartInterval) ->
+                             {selected, [any()]}.
+ 
+ -spec sql_query(binary(), sql_query()) -> sql_query_result().
+-
+ sql_query(Host, Query) ->
+-    sql_call(Host, {sql_query, Query}).
++  sql_query(Host, Query, primary).
++
++-spec sql_query(binary(), sql_query(), atom()) -> sql_query_result().
++sql_query(Host, Query, NodeType) ->
++  sql_call(Host, {sql_query, Query}, NodeType).
+ 
+ %% SQL transaction based on a list of queries
+ %% This function automatically
+@@ -149,9 +153,9 @@ sql_query(Host, Query) ->
+ sql_transaction(Host, Queries)
+     when is_list(Queries) ->
+     F = fun () ->
+-		lists:foreach(fun (Query) -> sql_query_t(Query) end,
+-			      Queries)
+-	end,
++    lists:foreach(fun (Query) -> sql_query_t(Query) end,
++            Queries)
++  end,
+     sql_transaction(Host, F);
+ %% SQL transaction, based on a erlang anonymous function (F = fun)
+ sql_transaction(Host, F) when is_function(F) ->
+@@ -160,35 +164,43 @@ sql_transaction(Host, F) when is_function(F) ->
+ %% SQL bloc, based on a erlang anonymous function (F = fun)
+ sql_bloc(Host, F) -> sql_call(Host, {sql_bloc, F}).
+ 
++%% backwards compatible sql_call
+ sql_call(Host, Msg) ->
++  sql_call(Host, Msg, primary).
++
++%% sql_call that accepts primary or secondary NodeType
++sql_call(Host, Msg, NodeType) ->
+     case get(?STATE_KEY) of
++      %% new sql_call
+       undefined ->
+-        case ejabberd_sql_sup:get_random_pid(Host) of
++        %% get random pid of ejabberd_sql instance that matches the NodeType
++        %% so if NodeType is secondary, then it will run the sql cmd on an ejabberd_sql instance
++        %% that has a secondary database context (eg, the Host for that ejabberd_sql is one of the secondary ones)
++        case ejabberd_sql_sup:get_random_pid(Host, NodeType) of
+           none -> {error, <<"Unknown Host">>};
+           Pid ->
+-		sync_send_event(Pid,{sql_cmd, Msg,
+-				     p1_time_compat:monotonic_time(milli_seconds)},
+-				query_timeout(Host))
+-          end;
++            sync_send_event(Pid, {sql_cmd, Msg, p1_time_compat:monotonic_time(milli_seconds)}, query_timeout(Host))
++        end;
++      %% nested sql call where the state is already in context from a parent's call to sql_call
+       _State -> nested_op(Msg)
+     end.
+ 
+ keep_alive(Host, PID) ->
+     case sync_send_event(PID,
+-		    {sql_cmd, {sql_query, ?KEEPALIVE_QUERY},
+-		     p1_time_compat:monotonic_time(milli_seconds)},
+-		    query_timeout(Host)) of
+-	{selected,_,[[<<"1">>]]} ->
+-	    ok;
+-	_Err ->
+-	    ?ERROR_MSG("keep alive query failed, closing connection: ~p", [_Err]),
+-	    sync_send_event(PID, force_timeout, query_timeout(Host))
++        {sql_cmd, {sql_query, ?KEEPALIVE_QUERY},
++         p1_time_compat:monotonic_time(milli_seconds)},
++        query_timeout(Host)) of
++  {selected,_,[[<<"1">>]]} ->
++      ok;
++  _Err ->
++      ?ERROR_MSG("keep alive query failed, closing connection: ~p", [_Err]),
++      sync_send_event(PID, force_timeout, query_timeout(Host))
+     end.
+ 
+ sync_send_event(Pid, Msg, Timeout) ->
+     try p1_fsm:sync_send_event(Pid, Msg, Timeout)
+     catch _:{Reason, {p1_fsm, _, _}} ->
+-	    {error, Reason}
++      {error, Reason}
+     end.
+ 
+ -spec sql_query_t(sql_query()) -> sql_query_result().
+@@ -199,10 +211,10 @@ sql_query_t(Query) ->
+     case QRes of
+       {error, Reason} -> throw({aborted, Reason});
+       Rs when is_list(Rs) ->
+-	  case lists:keysearch(error, 1, Rs) of
+-	    {value, {error, Reason}} -> throw({aborted, Reason});
+-	    _ -> QRes
+-	  end;
++    case lists:keysearch(error, 1, Rs) of
++      {value, {error, Reason}} -> throw({aborted, Reason});
++      _ -> QRes
++    end;
+       _ -> QRes
+     end.
+ 
+@@ -225,7 +237,7 @@ escape_char(C) -> <<C>>.
+ 
+ -spec escape(binary()) -> binary().
+ escape(S) ->
+-	<<  <<(escape_char(Char))/binary>> || <<Char>> <= S >>.
++  <<  <<(escape_char(Char))/binary>> || <<Char>> <= S >>.
+ 
+ %% Escape character that will confuse an SQL engine
+ %% Percent and underscore only need to be escaped for pattern matching like
+@@ -282,12 +294,12 @@ sqlite_db(Host) ->
+ -spec sqlite_file(binary()) -> string().
+ sqlite_file(Host) ->
+     case ejabberd_config:get_option({sql_database, Host}) of
+-	undefined ->
+-	    {ok, Cwd} = file:get_cwd(),
+-	    filename:join([Cwd, "sqlite", atom_to_list(node()),
+-			   binary_to_list(Host), "ejabberd.db"]);
+-	File ->
+-	    binary_to_list(File)
++  undefined ->
++      {ok, Cwd} = file:get_cwd(),
++      filename:join([Cwd, "sqlite", atom_to_list(node()),
++         binary_to_list(Host), "ejabberd.db"]);
++  File ->
++      binary_to_list(File)
+     end.
+ 
+ use_new_schema() ->
+@@ -309,24 +321,24 @@ init([Host, StartInterval]) ->
+     p1_fsm:send_event(self(), connect),
+     ejabberd_sql_sup:add_pid(Host, self()),
+     QueueType = case ejabberd_config:get_option({sql_queue_type, Host}) of
+-		    undefined ->
+-			ejabberd_config:default_queue_type(Host);
+-		    Type ->
+-			Type
+-		end,
++        undefined ->
++      ejabberd_config:default_queue_type(Host);
++        Type ->
++      Type
++    end,
+     {ok, connecting,
+      #state{db_type = DBType, host = Host,
+-	    pending_requests = p1_queue:new(QueueType, max_fsm_queue()),
+-	    start_interval = StartInterval}}.
++      pending_requests = p1_queue:new(QueueType, max_fsm_queue()),
++      start_interval = StartInterval}}.
+ 
+ connecting(connect, #state{host = Host} = State) ->
+     ConnectRes = case db_opts(Host) of
+-		   [mysql | Args] -> apply(fun mysql_connect/8, Args);
++       [mysql | Args] -> apply(fun mysql_connect/8, Args);
+            [pgsql | Args] -> apply(fun pgsql_connect/8, Args);
+            [sqlite | Args] -> apply(fun sqlite_connect/1, Args);
+-		   [mssql | Args] -> apply(fun odbc_connect/2, Args);
+-		   [odbc | Args] -> apply(fun odbc_connect/2, Args)
+-		 end,
++       [mssql | Args] -> apply(fun odbc_connect/2, Args);
++       [odbc | Args] -> apply(fun odbc_connect/2, Args)
++     end,
+     case ConnectRes of
+         {ok, Ref} ->
+             erlang:monitor(process, Ref),
+@@ -336,76 +348,76 @@ connecting(connect, #state{host = Host} = State) ->
+                  (_) ->
+                       ok
+               end, get()),
+-	    PendingRequests =
+-		p1_queue:dropwhile(
+-		  fun(Req) ->
+-			  p1_fsm:send_event(self(), Req),
+-			  true
+-		  end, State#state.pending_requests),
++      PendingRequests =
++    p1_queue:dropwhile(
++      fun(Req) ->
++        p1_fsm:send_event(self(), Req),
++        true
++      end, State#state.pending_requests),
+             State1 = State#state{db_ref = Ref,
+                                  pending_requests = PendingRequests},
+             State2 = get_db_version(State1),
+             {next_state, session_established, State2};
+       {error, Reason} ->
+-	  ?WARNING_MSG("~p connection failed:~n** Reason: ~p~n** "
+-		       "Retry after: ~p seconds",
+-		       [State#state.db_type, Reason,
+-			State#state.start_interval div 1000]),
+-	  p1_fsm:send_event_after(State#state.start_interval,
+-				      connect),
+-	  {next_state, connecting, State}
++    ?WARNING_MSG("~p connection failed:~n** Reason: ~p~n** "
++           "Retry after: ~p seconds",
++           [State#state.db_type, Reason,
++      State#state.start_interval div 1000]),
++    p1_fsm:send_event_after(State#state.start_interval,
++              connect),
++    {next_state, connecting, State}
+     end;
+ connecting(Event, State) ->
+     ?WARNING_MSG("unexpected event in 'connecting': ~p",
+-		 [Event]),
++     [Event]),
+     {next_state, connecting, State}.
+ 
+ connecting({sql_cmd, {sql_query, ?KEEPALIVE_QUERY},
+-	    _Timestamp},
+-	   From, State) ->
++      _Timestamp},
++     From, State) ->
+     p1_fsm:reply(From,
+-		     {error, <<"SQL connection failed">>}),
++         {error, <<"SQL connection failed">>}),
+     {next_state, connecting, State};
+ connecting({sql_cmd, Command, Timestamp} = Req, From,
+-	   State) ->
++     State) ->
+     ?DEBUG("queuing pending request while connecting:~n\t~p",
+-	   [Req]),
++     [Req]),
+     PendingRequests =
+-	try p1_queue:in({sql_cmd, Command, From, Timestamp},
+-			State#state.pending_requests)
+-	catch error:full ->
+-		Q = p1_queue:dropwhile(
+-		      fun({sql_cmd, _, To, _Timestamp}) ->
+-			      p1_fsm:reply(
+-				To, {error, <<"SQL connection failed">>}),
+-			      true
+-		      end, State#state.pending_requests),
+-		p1_queue:in({sql_cmd, Command, From, Timestamp}, Q)
+-	end,
++  try p1_queue:in({sql_cmd, Command, From, Timestamp},
++      State#state.pending_requests)
++  catch error:full ->
++    Q = p1_queue:dropwhile(
++          fun({sql_cmd, _, To, _Timestamp}) ->
++            p1_fsm:reply(
++        To, {error, <<"SQL connection failed">>}),
++            true
++          end, State#state.pending_requests),
++    p1_queue:in({sql_cmd, Command, From, Timestamp}, Q)
++  end,
+     {next_state, connecting,
+      State#state{pending_requests = PendingRequests}};
+ connecting(Request, {Who, _Ref}, State) ->
+     ?WARNING_MSG("unexpected call ~p from ~p in 'connecting'",
+-		 [Request, Who]),
++     [Request, Who]),
+     {reply, {error, badarg}, connecting, State}.
+ 
+ session_established({sql_cmd, Command, Timestamp}, From,
+-		    State) ->
++        State) ->
+     run_sql_cmd(Command, From, State, Timestamp);
+ session_established(Request, {Who, _Ref}, State) ->
+     ?WARNING_MSG("unexpected call ~p from ~p in 'session_establ"
+-		 "ished'",
+-		 [Request, Who]),
++     "ished'",
++     [Request, Who]),
+     {reply, {error, badarg}, session_established, State}.
+ 
+ session_established({sql_cmd, Command, From, Timestamp},
+-		    State) ->
++        State) ->
+     run_sql_cmd(Command, From, State, Timestamp);
+ session_established(force_timeout, State) ->
+     {stop, timeout, State};
+ session_established(Event, State) ->
+     ?WARNING_MSG("unexpected event in 'session_established': ~p",
+-		 [Event]),
++     [Event]),
+     {next_state, session_established, State}.
+ 
+ handle_event(_Event, StateName, State) ->
+@@ -420,12 +432,12 @@ code_change(_OldVsn, StateName, State, _Extra) ->
+ %% We receive the down signal when we loose the MySQL connection (we are
+ %% monitoring the connection)
+ handle_info({'DOWN', _MonitorRef, process, _Pid, _Info},
+-	    _StateName, State) ->
++      _StateName, State) ->
+     p1_fsm:send_event(self(), connect),
+     {next_state, connecting, State};
+ handle_info(Info, StateName, State) ->
+     ?WARNING_MSG("unexpected info in ~p: ~p",
+-		 [StateName, Info]),
++     [StateName, Info]),
+     {next_state, StateName, State}.
+ 
+ terminate(_Reason, _StateName, State) ->
+@@ -452,14 +464,14 @@ run_sql_cmd(Command, From, State, Timestamp) ->
+     QueryTimeout = query_timeout(State#state.host),
+     case p1_time_compat:monotonic_time(milli_seconds) - Timestamp of
+       Age when Age < QueryTimeout ->
+-	  put(?NESTING_KEY, ?TOP_LEVEL_TXN),
+-	  put(?STATE_KEY, State),
+-	  abort_on_driver_error(outer_op(Command), From);
++    put(?NESTING_KEY, ?TOP_LEVEL_TXN),
++    put(?STATE_KEY, State),
++    abort_on_driver_error(outer_op(Command), From);
+       Age ->
+-	  ?ERROR_MSG("Database was not available or too slow, "
+-		     "discarding ~p milliseconds old request~n~p~n",
+-		     [Age, Command]),
+-	  {next_state, session_established, State}
++    ?ERROR_MSG("Database was not available or too slow, "
++         "discarding ~p milliseconds old request~n~p~n",
++         [Age, Command]),
++    {next_state, session_established, State}
+     end.
+ 
+ %% Only called by handle_call, only handles top level operations.
+@@ -477,7 +489,7 @@ nested_op({sql_query, Query}) ->
+ nested_op({sql_transaction, F}) ->
+     NestingLevel = get(?NESTING_KEY),
+     if NestingLevel =:= (?TOP_LEVEL_TXN) ->
+-	   outer_transaction(F, ?MAX_TRANSACTION_RESTARTS, <<"">>);
++     outer_transaction(F, ?MAX_TRANSACTION_RESTARTS, <<"">>);
+        true -> inner_transaction(F)
+     end;
+ nested_op({sql_bloc, F}) -> execute_bloc(F).
+@@ -487,11 +499,11 @@ inner_transaction(F) ->
+     PreviousNestingLevel = get(?NESTING_KEY),
+     case get(?NESTING_KEY) of
+       ?TOP_LEVEL_TXN ->
+-	  {backtrace, T} = process_info(self(), backtrace),
+-	  ?ERROR_MSG("inner transaction called at outer txn "
+-		     "level. Trace: ~s",
+-		     [T]),
+-	  erlang:exit(implementation_faulty);
++    {backtrace, T} = process_info(self(), backtrace),
++    ?ERROR_MSG("inner transaction called at outer txn "
++         "level. Trace: ~s",
++         [T]),
++    erlang:exit(implementation_faulty);
+       _N -> ok
+     end,
+     put(?NESTING_KEY, PreviousNestingLevel + 1),
+@@ -509,34 +521,34 @@ outer_transaction(F, NRestarts, _Reason) ->
+     case get(?NESTING_KEY) of
+       ?TOP_LEVEL_TXN -> ok;
+       _N ->
+-	  {backtrace, T} = process_info(self(), backtrace),
+-	  ?ERROR_MSG("outer transaction called at inner txn "
+-		     "level. Trace: ~s",
+-		     [T]),
+-	  erlang:exit(implementation_faulty)
++    {backtrace, T} = process_info(self(), backtrace),
++    ?ERROR_MSG("outer transaction called at inner txn "
++         "level. Trace: ~s",
++         [T]),
++    erlang:exit(implementation_faulty)
+     end,
+     sql_query_internal([<<"begin;">>]),
+     put(?NESTING_KEY, PreviousNestingLevel + 1),
+     try F() of
+-	Res ->
+-	    sql_query_internal([<<"commit;">>]),
+-	    {atomic, Res}
++  Res ->
++      sql_query_internal([<<"commit;">>]),
++      {atomic, Res}
+     catch
+-	?EX_RULE(throw, {aborted, Reason}, _) when NRestarts > 0 ->
+-	    sql_query_internal([<<"rollback;">>]),
+-	    outer_transaction(F, NRestarts - 1, Reason);
+-	?EX_RULE(throw, {aborted, Reason}, Stack) when NRestarts =:= 0 ->
+-	    ?ERROR_MSG("SQL transaction restarts exceeded~n** "
+-		       "Restarts: ~p~n** Last abort reason: "
+-		       "~p~n** Stacktrace: ~p~n** When State "
+-		       "== ~p",
+-		       [?MAX_TRANSACTION_RESTARTS, Reason,
+-			?EX_STACK(Stack), get(?STATE_KEY)]),
+-	    sql_query_internal([<<"rollback;">>]),
+-	    {aborted, Reason};
+-	?EX_RULE(exit, Reason, _) ->
+-	    sql_query_internal([<<"rollback;">>]),
+-	    {aborted, Reason}
++  ?EX_RULE(throw, {aborted, Reason}, _) when NRestarts > 0 ->
++      sql_query_internal([<<"rollback;">>]),
++      outer_transaction(F, NRestarts - 1, Reason);
++  ?EX_RULE(throw, {aborted, Reason}, Stack) when NRestarts =:= 0 ->
++      ?ERROR_MSG("SQL transaction restarts exceeded~n** "
++           "Restarts: ~p~n** Last abort reason: "
++           "~p~n** Stacktrace: ~p~n** When State "
++           "== ~p",
++           [?MAX_TRANSACTION_RESTARTS, Reason,
++      ?EX_STACK(Stack), get(?STATE_KEY)]),
++      sql_query_internal([<<"rollback;">>]),
++      {aborted, Reason};
++  ?EX_RULE(exit, Reason, _) ->
++      sql_query_internal([<<"rollback;">>]),
++      {aborted, Reason}
+     end.
+ 
+ execute_bloc(F) ->
+@@ -567,8 +579,8 @@ sql_query_internal(#sql_query{} = Query) ->
+             case State#state.db_type of
+                 odbc ->
+                     generic_sql_query(Query);
+-		mssql ->
+-		    mssql_sql_query(Query);
++    mssql ->
++        mssql_sql_query(Query);
+                 pgsql ->
+                     Key = {?PREPARE_KEY, Query#sql_query.hash},
+                     case get(Key) of
+@@ -597,12 +609,12 @@ sql_query_internal(#sql_query{} = Query) ->
+                     sqlite_sql_query(Query)
+             end
+         catch exit:{timeout, _} ->
+-		{error, <<"timed out">>};
+-	      exit:{killed, _} ->
+-		{error, <<"killed">>};
+-	      exit:{normal, _} ->
+-		{error, <<"terminated unexpectedly">>};
+-	      ?EX_RULE(Class, Reason, Stack) ->
++    {error, <<"timed out">>};
++        exit:{killed, _} ->
++    {error, <<"killed">>};
++        exit:{normal, _} ->
++    {error, <<"terminated unexpectedly">>};
++        ?EX_RULE(Class, Reason, Stack) ->
+                 ?ERROR_MSG("Internal error while processing SQL query: ~p",
+                            [{Class, Reason, ?EX_STACK(Stack)}]),
+                 {error, <<"internal error">>}
+@@ -618,25 +630,25 @@ sql_query_internal(Query) ->
+     ?DEBUG("SQL: \"~s\"", [Query]),
+     QueryTimeout = query_timeout(State#state.host),
+     Res = case State#state.db_type of
+-	    odbc ->
+-		to_odbc(odbc:sql_query(State#state.db_ref, [Query],
++      odbc ->
++    to_odbc(odbc:sql_query(State#state.db_ref, [Query],
+                                        QueryTimeout - 1000));
+-	    mssql ->
+-		to_odbc(odbc:sql_query(State#state.db_ref, [Query],
++      mssql ->
++    to_odbc(odbc:sql_query(State#state.db_ref, [Query],
+                                        QueryTimeout - 1000));
+-	    pgsql ->
+-		pgsql_to_odbc(pgsql:squery(State#state.db_ref, Query,
+-					   QueryTimeout - 1000));
+-	    mysql ->
+-		R = mysql_to_odbc(p1_mysql_conn:squery(State#state.db_ref,
+-						   [Query], self(),
+-						   [{timeout, QueryTimeout - 1000},
+-						    {result_type, binary}])),
+-		  R;
+-	      sqlite ->
+-		  Host = State#state.host,
+-		  sqlite_to_odbc(Host, sqlite3:sql_exec(sqlite_db(Host), Query))
+-	  end,
++      pgsql ->
++    pgsql_to_odbc(pgsql:squery(State#state.db_ref, Query,
++             QueryTimeout - 1000));
++      mysql ->
++    R = mysql_to_odbc(p1_mysql_conn:squery(State#state.db_ref,
++               [Query], self(),
++               [{timeout, QueryTimeout - 1000},
++                {result_type, binary}])),
++      R;
++        sqlite ->
++      Host = State#state.host,
++      sqlite_to_odbc(Host, sqlite3:sql_exec(sqlite_db(Host), Query))
++    end,
+     check_error(Res, Query).
+ 
+ select_sql_query(Queries, State) ->
+@@ -739,7 +751,7 @@ sql_query_format_res({selected, _, Rows}, SQLQuery) ->
+                   try
+                       [(SQLQuery#sql_query.format_res)(Row)]
+                   catch
+-		      ?EX_RULE(Class, Reason, Stack) ->
++          ?EX_RULE(Class, Reason, Stack) ->
+                           ?ERROR_MSG("Error while processing "
+                                      "SQL query result: ~p~n"
+                                      "row: ~p",
+@@ -756,23 +768,23 @@ sql_query_to_iolist(SQLQuery) ->
+ 
+ %% Generate the OTP callback return tuple depending on the driver result.
+ abort_on_driver_error({error,
+-		       <<"query timed out">>} = Reply,
+-		      From) ->
++           <<"query timed out">>} = Reply,
++          From) ->
+     p1_fsm:reply(From, Reply),
+     {stop, timeout, get(?STATE_KEY)};
+ abort_on_driver_error({error,
+-		       <<"Failed sending data on socket", _/binary>>} = Reply,
+-		      From) ->
++           <<"Failed sending data on socket", _/binary>>} = Reply,
++          From) ->
+     p1_fsm:reply(From, Reply),
+     {stop, closed, get(?STATE_KEY)};
+ abort_on_driver_error({error,
+-		       <<"SQL connection failed">>} = Reply,
+-		      From) ->
++           <<"SQL connection failed">>} = Reply,
++          From) ->
+     p1_fsm:reply(From, Reply),
+     {stop, timeout, get(?STATE_KEY)};
+ abort_on_driver_error({error,
+-		       <<"Communication link failure">>} = Reply,
+-		      From) ->
++           <<"Communication link failure">>} = Reply,
++          From) ->
+     p1_fsm:reply(From, Reply),
+     {stop, closed, get(?STATE_KEY)};
+ abort_on_driver_error(Reply, From) ->
+@@ -786,11 +798,11 @@ abort_on_driver_error(Reply, From) ->
+ odbc_connect(SQLServer, Timeout) ->
+     ejabberd:start_app(odbc),
+     odbc:connect(binary_to_list(SQLServer),
+-		 [{scrollable_cursors, off},
+-		  {extended_errors, on},
+-		  {tuple_row, off},
+-		  {timeout, Timeout},
+-		  {binary_strings, on}]).
++     [{scrollable_cursors, off},
++      {extended_errors, on},
++      {tuple_row, off},
++      {timeout, Timeout},
++      {binary_strings, on}]).
+ 
+ %% == Native SQLite code
+ 
+@@ -800,19 +812,19 @@ odbc_connect(SQLServer, Timeout) ->
+ sqlite_connect(Host) ->
+     File = sqlite_file(Host),
+     case filelib:ensure_dir(File) of
+-	ok ->
+-	    case sqlite3:open(sqlite_db(Host), [{file, File}]) of
+-		{ok, Ref} ->
+-		    sqlite3:sql_exec(
+-		      sqlite_db(Host), "pragma foreign_keys = on"),
+-		    {ok, Ref};
+-		{error, {already_started, Ref}} ->
+-		    {ok, Ref};
+-		{error, Reason} ->
+-		    {error, Reason}
+-	    end;
+-	Err ->
+-	    Err
++  ok ->
++      case sqlite3:open(sqlite_db(Host), [{file, File}]) of
++    {ok, Ref} ->
++        sqlite3:sql_exec(
++          sqlite_db(Host), "pragma foreign_keys = on"),
++        {ok, Ref};
++    {error, {already_started, Ref}} ->
++        {ok, Ref};
++    {error, Reason} ->
++        {error, Reason}
++      end;
++  Err ->
++      Err
+     end.
+ 
+ %% Convert SQLite query result to Erlang ODBC result formalism
+@@ -822,11 +834,11 @@ sqlite_to_odbc(Host, {rowid, _}) ->
+     {updated, sqlite3:changes(sqlite_db(Host))};
+ sqlite_to_odbc(_Host, [{columns, Columns}, {rows, TRows}]) ->
+     Rows = [lists:map(
+-	      fun(I) when is_integer(I) ->
+-		      integer_to_binary(I);
+-		 (B) ->
+-		      B
+-	      end, tuple_to_list(Row)) || Row <- TRows],
++        fun(I) when is_integer(I) ->
++          integer_to_binary(I);
++     (B) ->
++          B
++        end, tuple_to_list(Row)) || Row <- TRows],
+     {selected, [list_to_binary(C) || C <- Columns], Rows};
+ sqlite_to_odbc(_Host, {error, _Code, Reason}) ->
+     {error, Reason};
+@@ -838,14 +850,14 @@ sqlite_to_odbc(_Host, _) ->
+ %% part of init/1
+ %% Open a database connection to PostgreSQL
+ pgsql_connect(Server, Port, DB, Username, Password, ConnectTimeout,
+-	      Transport, SSLOpts) ->
++        Transport, SSLOpts) ->
+     case pgsql:connect([{host, Server},
+                         {database, DB},
+                         {user, Username},
+                         {password, Password},
+                         {port, Port},
+-			{transport, Transport},
+-			{connect_timeout, ConnectTimeout},
++      {transport, Transport},
++      {connect_timeout, ConnectTimeout},
+                         {as_binary, true}|SSLOpts]) of
+         {ok, Ref} ->
+             pgsql:squery(Ref, [<<"alter database \"">>, DB, <<"\" set ">>,
+@@ -864,10 +876,10 @@ pgsql_to_odbc({ok, PGSQLResult}) ->
+     end.
+ 
+ pgsql_item_to_odbc({<<"SELECT", _/binary>>, Rows,
+-		    Recs}) ->
++        Recs}) ->
+     {selected, [element(1, Row) || Row <- Rows], Recs};
+ pgsql_item_to_odbc({<<"FETCH", _/binary>>, Rows,
+-		    Recs}) ->
++        Recs}) ->
+     {selected, [element(1, Row) || Row <- Rows], Recs};
+ pgsql_item_to_odbc(<<"INSERT ", OIDN/binary>>) ->
+     [_OID, N] = str:tokens(OIDN, <<" ">>),
+@@ -893,20 +905,20 @@ pgsql_execute_to_odbc(_) -> {updated, undefined}.
+ 
+ %% == Native MySQL code
+ 
+-%% part of init/1
++%% part of init/1 
+ %% Open a database connection to MySQL
+ mysql_connect(Server, Port, DB, Username, Password, ConnectTimeout,  _, _) ->
+     case p1_mysql_conn:start(binary_to_list(Server), Port,
+-			     binary_to_list(Username),
+-			     binary_to_list(Password),
+-			     binary_to_list(DB),
+-			     ConnectTimeout, fun log/3)
+-	of
+-	{ok, Ref} ->
+-	    p1_mysql_conn:fetch(
+-		Ref, [<<"set names 'utf8mb4' collate 'utf8mb4_bin';">>], self()),
+-	    {ok, Ref};
+-	Err -> Err
++           binary_to_list(Username),
++           binary_to_list(Password),
++           binary_to_list(DB),
++           ConnectTimeout, fun log/3)
++  of
++  {ok, Ref} ->
++      p1_mysql_conn:fetch(
++    Ref, [<<"set names 'utf8mb4' collate 'utf8mb4_bin';">>], self()),
++      {ok, Ref};
++  Err -> Err
+     end.
+ 
+ %% Convert MySQL query result to Erlang ODBC result formalism
+@@ -914,7 +926,7 @@ mysql_to_odbc({updated, MySQLRes}) ->
+     {updated, p1_mysql:get_result_affected_rows(MySQLRes)};
+ mysql_to_odbc({data, MySQLRes}) ->
+     mysql_item_to_odbc(p1_mysql:get_result_field_info(MySQLRes),
+-		       p1_mysql:get_result_rows(MySQLRes));
++           p1_mysql:get_result_rows(MySQLRes));
+ mysql_to_odbc({error, MySQLRes})
+   when is_binary(MySQLRes) ->
+     {error, MySQLRes};
+@@ -933,11 +945,11 @@ mysql_item_to_odbc(Columns, Recs) ->
+ 
+ to_odbc({selected, Columns, Recs}) ->
+     Rows = [lists:map(
+-	      fun(I) when is_integer(I) ->
+-		      integer_to_binary(I);
+-		 (B) ->
+-		      B
+-	      end, Row) || Row <- Recs],
++        fun(I) when is_integer(I) ->
++          integer_to_binary(I);
++     (B) ->
++          B
++        end, Row) || Row <- Recs],
+     {selected, [list_to_binary(C) || C <- Columns], Rows};
+ to_odbc({error, Reason}) when is_list(Reason) ->
+     {error, list_to_binary(Reason)};
+@@ -966,18 +978,19 @@ log(Level, Format, Args) ->
+     case Level of
+       debug -> ?DEBUG(Format, Args);
+       normal -> ?INFO_MSG(Format, Args);
+-      error -> ?ERROR_MSG(Format, Args)
++      error -> ?ERROR_MSG(Format, Args);
++      info -> ?INFO_MSG(Format, Args)
+     end.
+ 
+ db_opts(Host) ->
+     Type = ejabberd_config:get_option({sql_type, Host}, odbc),
+     Server = ejabberd_config:get_option({sql_server, Host}, <<"localhost">>),
+     Timeout = timer:seconds(
+-		ejabberd_config:get_option({sql_connect_timeout, Host}, 5)),
++    ejabberd_config:get_option({sql_connect_timeout, Host}, 5)),
+     Transport = case ejabberd_config:get_option({sql_ssl, Host}, false) of
+-		    false -> tcp;
+-		    true -> ssl
+-		end,
++        false -> tcp;
++        true -> ssl
++    end,
+     warn_if_ssl_unsupported(Transport, Type),
+     case Type of
+         odbc ->
+@@ -988,7 +1001,7 @@ db_opts(Host) ->
+             Port = ejabberd_config:get_option(
+                      {sql_port, Host},
+                      case Type of
+-			 mssql -> ?MSSQL_PORT;
++       mssql -> ?MSSQL_PORT;
+                          mysql -> ?MYSQL_PORT;
+                          pgsql -> ?PGSQL_PORT
+                      end),
+@@ -998,14 +1011,14 @@ db_opts(Host) ->
+                                               <<"ejabberd">>),
+             Pass = ejabberd_config:get_option({sql_password, Host},
+                                               <<"">>),
+-	    SSLOpts = get_ssl_opts(Transport, Host),
+-	    case Type of
+-		mssql ->
+-		    [mssql, <<"DSN=", Host/binary, ";UID=", User/binary,
+-			      ";PWD=", Pass/binary>>, Timeout];
+-		_ ->
+-		    [Type, Server, Port, DB, User, Pass, Timeout, Transport, SSLOpts]
+-	    end
++      SSLOpts = get_ssl_opts(Transport, Host),
++      case Type of
++    mssql ->
++        [mssql, <<"DSN=", Host/binary, ";UID=", User/binary,
++            ";PWD=", Pass/binary>>, Timeout];
++    _ ->
++        [Type, Server, Port, DB, User, Pass, Timeout, Transport, SSLOpts]
++      end
+     end.
+ 
+ warn_if_ssl_unsupported(tcp, _) ->
+@@ -1017,27 +1030,27 @@ warn_if_ssl_unsupported(ssl, Type) ->
+ 
+ get_ssl_opts(ssl, Host) ->
+     Opts1 = case ejabberd_config:get_option({sql_ssl_certfile, Host}) of
+-		undefined -> [];
+-		CertFile -> [{certfile, CertFile}]
+-	    end,
++    undefined -> [];
++    CertFile -> [{certfile, CertFile}]
++      end,
+     Opts2 = case ejabberd_config:get_option({sql_ssl_cafile, Host}) of
+-		undefined -> Opts1;
+-		CAFile -> [{cacertfile, CAFile}|Opts1]
+-	    end,
++    undefined -> Opts1;
++    CAFile -> [{cacertfile, CAFile}|Opts1]
++      end,
+     case ejabberd_config:get_option({sql_ssl_verify, Host}, false) of
+-	true ->
+-	    case lists:keymember(cacertfile, 1, Opts2) of
+-		true ->
+-		    [{verify, verify_peer}|Opts2];
+-		false ->
+-		    ?WARNING_MSG("SSL verification is enabled for "
+-				 "SQL connection, but option "
+-				 "'sql_ssl_cafile' is not set; "
+-				 "verification will be disabled", []),
+-		    Opts2
+-	    end;
+-	false ->
+-	    Opts2
++  true ->
++      case lists:keymember(cacertfile, 1, Opts2) of
++    true ->
++        [{verify, verify_peer}|Opts2];
++    false ->
++        ?WARNING_MSG("SSL verification is enabled for "
++         "SQL connection, but option "
++         "'sql_ssl_cafile' is not set; "
++         "verification will be disabled", []),
++        Opts2
++      end;
++  false ->
++      Opts2
+     end;
+ get_ssl_opts(tcp, _) ->
+     [].
+@@ -1047,58 +1060,58 @@ init_mssql(Host) ->
+     Port = ejabberd_config:get_option({sql_port, Host}, ?MSSQL_PORT),
+     DB = ejabberd_config:get_option({sql_database, Host}, <<"ejabberd">>),
+     FreeTDS = io_lib:fwrite("[~s]~n"
+-			    "\thost = ~s~n"
+-			    "\tport = ~p~n"
+-			    "\tclient charset = UTF-8~n"
+-			    "\ttds version = 7.1~n",
+-			    [Host, Server, Port]),
++          "\thost = ~s~n"
++          "\tport = ~p~n"
++          "\tclient charset = UTF-8~n"
++          "\ttds version = 7.1~n",
++          [Host, Server, Port]),
+     ODBCINST = io_lib:fwrite("[freetds]~n"
+-			     "Description = MSSQL connection~n"
+-			     "Driver = libtdsodbc.so~n"
+-			     "Setup = libtdsS.so~n"
+-			     "UsageCount = 1~n"
+-			     "FileUsage = 1~n", []),
++           "Description = MSSQL connection~n"
++           "Driver = libtdsodbc.so~n"
++           "Setup = libtdsS.so~n"
++           "UsageCount = 1~n"
++           "FileUsage = 1~n", []),
+     ODBCINI = io_lib:fwrite("[~s]~n"
+-			    "Description = MS SQL~n"
+-			    "Driver = freetds~n"
+-			    "Servername = ~s~n"
+-			    "Database = ~s~n"
+-			    "Port = ~p~n",
+-			    [Host, Host, DB, Port]),
++          "Description = MS SQL~n"
++          "Driver = freetds~n"
++          "Servername = ~s~n"
++          "Database = ~s~n"
++          "Port = ~p~n",
++          [Host, Host, DB, Port]),
+     ?DEBUG("~s:~n~s", [freetds_config(), FreeTDS]),
+     ?DEBUG("~s:~n~s", [odbcinst_config(), ODBCINST]),
+     ?DEBUG("~s:~n~s", [odbc_config(), ODBCINI]),
+     case filelib:ensure_dir(freetds_config()) of
+-	ok ->
+-	    try
+-		ok = write_file_if_new(freetds_config(), FreeTDS),
+-		ok = write_file_if_new(odbcinst_config(), ODBCINST),
+-		ok = write_file_if_new(odbc_config(), ODBCINI),
+-		os:putenv("ODBCSYSINI", tmp_dir()),
+-		os:putenv("FREETDS", freetds_config()),
+-		os:putenv("FREETDSCONF", freetds_config()),
+-		ok
+-	    catch error:{badmatch, {error, Reason} = Err} ->
+-		    ?ERROR_MSG("failed to create temporary files in ~s: ~s",
+-			       [tmp_dir(), file:format_error(Reason)]),
+-		    Err
+-	    end;
+-	{error, Reason} = Err ->
+-	    ?ERROR_MSG("failed to create temporary directory ~s: ~s",
+-		       [tmp_dir(), file:format_error(Reason)]),
+-	    Err
++  ok ->
++      try
++    ok = write_file_if_new(freetds_config(), FreeTDS),
++    ok = write_file_if_new(odbcinst_config(), ODBCINST),
++    ok = write_file_if_new(odbc_config(), ODBCINI),
++    os:putenv("ODBCSYSINI", tmp_dir()),
++    os:putenv("FREETDS", freetds_config()),
++    os:putenv("FREETDSCONF", freetds_config()),
++    ok
++      catch error:{badmatch, {error, Reason} = Err} ->
++        ?ERROR_MSG("failed to create temporary files in ~s: ~s",
++             [tmp_dir(), file:format_error(Reason)]),
++        Err
++      end;
++  {error, Reason} = Err ->
++      ?ERROR_MSG("failed to create temporary directory ~s: ~s",
++           [tmp_dir(), file:format_error(Reason)]),
++      Err
+     end.
+ 
+ write_file_if_new(File, Payload) ->
+     case filelib:is_file(File) of
+-	true -> ok;
+-	false -> file:write_file(File, Payload)
++  true -> ok;
++  false -> file:write_file(File, Payload)
+     end.
+ 
+ tmp_dir() ->
+     case os:type() of
+-	{win32, _} -> filename:join([os:getenv("HOME"), "conf"]);
+-	_ -> filename:join(["/tmp", "ejabberd"])
++  {win32, _} -> filename:join([os:getenv("HOME"), "conf"]);
++  _ -> filename:join(["/tmp", "ejabberd"])
+     end.
+ 
+ odbc_config() ->
+@@ -1182,10 +1195,12 @@ opt_type(sql_connect_timeout) ->
+ opt_type(sql_queue_type) ->
+     fun(ram) -> ram; (file) -> file end;
+ opt_type(new_sql_schema) -> fun(B) when is_boolean(B) -> B end;
++opt_type(sql_secondary_servers) ->
++  fun(I) when is_list(I) -> I end;
+ opt_type(_) ->
+     [sql_database, sql_keepalive_interval,
+      sql_password, sql_port, sql_server,
+      sql_username, sql_ssl, sql_ssl_verify, sql_ssl_certfile,
+      sql_ssl_cafile, sql_queue_type, sql_query_timeout,
+      sql_connect_timeout,
+-     new_sql_schema].
++     new_sql_schema, sql_secondary_servers].
+diff --git a/src/ejabberd_sql_sup.erl b/src/ejabberd_sql_sup.erl
+index f16c23a00..7256b1cec 100644
+--- a/src/ejabberd_sql_sup.erl
++++ b/src/ejabberd_sql_sup.erl
+@@ -30,8 +30,9 @@
+ -author('alexey@process-one.net').
+ 
+ -export([start_link/1, init/1, add_pid/2, remove_pid/2,
+-	 get_pids/1, get_random_pid/1, transform_options/1,
+-	 reload/1, opt_type/1]).
++  get_pids/1, get_random_pid/1, get_pids/2, get_random_pid/2, transform_options/1,
++  reload/1, opt_type/1
++]).
+ 
+ -include("logger.hrl").
+ -include_lib("stdlib/include/ms_transform.hrl").
+@@ -43,18 +44,19 @@
+ -define(CONNECT_TIMEOUT, 500).
+ 
+ -record(sql_pool, {host :: binary(),
+-		   pid  :: pid()}).
++       pid  :: pid()}).
+ 
+ start_link(Host) ->
+     ejabberd_mnesia:create(?MODULE, sql_pool,
+-			[{ram_copies, [node()]}, {type, bag},
+-			 {local_content, true},
+-			 {attributes, record_info(fields, sql_pool)}]),
+-    F = fun () -> mnesia:delete({sql_pool, Host}) end,
++      [{ram_copies, [node()]}, {type, bag},
++       {local_content, true},
++       {attributes, record_info(fields, sql_pool)}]),
++    F = fun() -> mnesia:delete({sql_pool, Host}) end,
+     mnesia:ets(F),
++
+     supervisor:start_link({local,
+-			   gen_mod:get_module_proc(Host, ?MODULE)},
+-			  ?MODULE, [Host]).
++         gen_mod:get_module_proc(Host, ?MODULE)},
++        ?MODULE, [Host]).
+ 
+ init([Host]) ->
+     Type = ejabberd_config:get_option({sql_type, Host}, odbc),
+@@ -62,80 +64,175 @@ init([Host]) ->
+     case Type of
+         sqlite ->
+             check_sqlite_db(Host);
+-	mssql ->
+-	    ejabberd_sql:init_mssql(Host);
++  mssql ->
++      ejabberd_sql:init_mssql(Host);
+         _ ->
+             ok
+     end,
+-    {ok, {{one_for_one, PoolSize * 10, 1},
+-	  [child_spec(I, Host) || I <- lists:seq(1, PoolSize)]}}.
++    AllHosts = [Host] ++ ejabberd_config:get_option({sql_secondary_servers, Host}, []),
++    {ok,
++      {
++        {one_for_one, PoolSize * 10 * length(AllHosts), 1},
++        %% list of ejabberd_sql specs; the total count would be number of hosts * pool size
++        lists:foldl(
++          fun(H, Acc) ->
++            %% first iter: length(Acc) is 0, so HostIndex bc (0 / PoolSize) + 1 = 1
++            %% next iter : Acc length will be exactly PoolSize, so we have (PoolSize  / PoolSize) + 1 = 2
++            %% next iter : Acc length is now PoolSize * 2,      so we have (2PoolSize / PoolSize) + 1 = 3
++            %% and so on...
++            HostIndex = (length(Acc) div PoolSize) + 1,
++
++            %% if secondary server
++            if HostIndex > 1 ->
++              %% save configs for each secondary using the configs for the primary
++              %% except for of course the sql_server address, which matches the secondary host address provided
++              SqlType = ejabberd_config:get_option({sql_type, Host}, odbc),
++              ejabberd_config:add_option({sql_type, H}, SqlType),
++              ejabberd_config:add_option({sql_server, H}, H),
++              ejabberd_config:add_option({sql_port, H}, ejabberd_config:get_option({sql_port, Host})),
++              ejabberd_config:add_option({sql_database, H}, ejabberd_config:get_option({sql_database, Host}, <<"ejabberd">>)),
++              ejabberd_config:add_option({sql_username, H}, ejabberd_config:get_option({sql_username, Host}, <<"ejabberd">>)),
++              ejabberd_config:add_option({sql_password, H}, ejabberd_config:get_option({sql_password, Host}, <<"">>)),
++              ejabberd_config:add_option({sql_start_interval, H}, ejabberd_config:get_option({sql_start_interval, Host}, ?DEFAULT_SQL_START_INTERVAL)),
++              ejabberd_config:add_option({sql_keepalive_interval, H}, ejabberd_config:get_option({sql_keepalive_interval, Host})),
++              ejabberd_config:add_option({sql_connect_timeout, H}, ejabberd_config:get_option({sql_connect_timeout, Host}, 5)),
++              ejabberd_config:add_option({sql_query_timeout, H}, ejabberd_config:get_option({sql_query_timeout, Host}, 60)),
++              ejabberd_config:add_option({sql_queue_type, H}, ejabberd_config:get_option({sql_queue_type, Host})),
++              ejabberd_config:add_option({sql_pool_size, H}, get_pool_size(SqlType, Host)),
++              ejabberd_config:add_option({sql_ssl, H}, ejabberd_config:get_option({sql_ssl, Host}, false)),
++              ejabberd_config:add_option({sql_ssl_verify, H}, ejabberd_config:get_option({sql_ssl_verify, Host}, false)),
++              ejabberd_config:add_option({sql_ssl_certfile, H}, ejabberd_config:get_option({sql_ssl_certfile, Host})),
++              ejabberd_config:add_option({sql_ssl_cafile, H}, ejabberd_config:get_option({sql_ssl_cafile, Host}));
++            true -> ""
++            end,
++
++            %% accumulate the ejabberd_sql specs for this host (PoolSize number of specs per host).
++            %% since we saved configs for secondary H above and secondary H points to a secondary server,
++            %% the ejabberd_sql instance will always have the database context of a
++            %% secondary: its DB reference, any queries it runs, etc, will all be against that secondary
++            Acc ++ [
++              child_spec(
++                %% name the child using the host index and the pool index
++                integer_to_list(HostIndex) ++ "-" ++ integer_to_list(I),
++                H
++              ) || I <- lists:seq(1, PoolSize)
++            ]
++          end,
++          [],
++          AllHosts
++        )
++      }
++    }.
+ 
+ reload(Host) ->
+     Type = ejabberd_config:get_option({sql_type, Host}, odbc),
+     NewPoolSize = get_pool_size(Type, Host),
+     OldPoolSize = ets:select_count(
+-		    sql_pool,
+-		    ets:fun2ms(
+-		      fun(#sql_pool{host = H}) when H == Host ->
+-			      true
+-		      end)),
++        sql_pool,
++        ets:fun2ms(
++          fun(#sql_pool{host = H}) when H == Host ->
++            true
++          end)),
+     reload(Host, NewPoolSize, OldPoolSize).
+ 
+ reload(Host, NewPoolSize, OldPoolSize) ->
+     Sup = gen_mod:get_module_proc(Host, ?MODULE),
++    AllHosts = [Host] ++ ejabberd_config:get_option({sql_secondary_servers, Host}, []),
+     if NewPoolSize == OldPoolSize ->
+-	    ok;
+-       NewPoolSize > OldPoolSize ->
+-	    lists:foreach(
+-	      fun(I) ->
+-		      Spec = child_spec(I, Host),
+-		      supervisor:start_child(Sup, Spec)
+-	      end, lists:seq(OldPoolSize+1, NewPoolSize));
+-       OldPoolSize > NewPoolSize ->
+-	    lists:foreach(
+-	      fun(I) ->
+-		      supervisor:terminate_child(Sup, I),
+-		      supervisor:delete_child(Sup, I)
+-	      end, lists:seq(NewPoolSize+1, OldPoolSize))
++      ok;
++    %% add more sql connections
++    NewPoolSize > OldPoolSize ->
++      %% for each host, get the host and make the extra ejabberd_sql specs needed
++      lists:foreach(
++        fun(HostIndex) ->
++          H = lists:nth(HostIndex, AllHosts),
++          lists:foreach(
++            fun(I) ->
++              supervisor:start_child(Sup, child_spec(integer_to_list(HostIndex) ++ "-" ++ integer_to_list(I), H))
++            end,
++            lists:seq(OldPoolSize + 1, NewPoolSize)
++          )
++        end,
++        lists:seq(1, length(AllHosts))
++      );
++    %% remove sql connections
++    OldPoolSize > NewPoolSize ->
++      %% for each host, get the host and remove the necessary ejabberd_sql specs
++      lists:foreach(
++        fun(HostIndex) ->
++          lists:foreach(
++            fun(I) ->
++              supervisor:terminate_child(Sup, integer_to_list(HostIndex) ++ "-" ++ integer_to_list(I)),
++              supervisor:delete_child(Sup, integer_to_list(HostIndex) ++ "-" ++ integer_to_list(I))
++            end, lists:seq(NewPoolSize + 1, OldPoolSize)
++          )
++        end,
++        lists:seq(1, length(AllHosts))
++      )
+     end.
+ 
++%% backwards compatible get_pids
+ get_pids(Host) ->
+-    Rs = mnesia:dirty_read(sql_pool, Host),
+-    [R#sql_pool.pid || R <- Rs, is_process_alive(R#sql_pool.pid)].
++  get_pids(Host, primary).
++
++%% get_pids that can accept primary or secondary NodeType
++get_pids(Host, NodeType) ->
++  %% if secondary, pick a random secondary host and get its list of pids (ejabberd_sql instances)
++  %% else default to primary
++  SearchHost = if NodeType == secondary orelse NodeType == any ->
++    %% make list of secondary servers and optionally include primary if NodeType is 'any' (meaning primary or secondary)
++    HostList = ejabberd_config:get_option({sql_secondary_servers, Host}, []) ++ (if NodeType == any -> [Host]; true -> [] end),
++    %% only use host list if there actually are some
++    if length(HostList) > 0 ->
++      I = rand:uniform(length(HostList)),
++      lists:nth(I, HostList);
++    true ->
++      Host
++    end;
++  true ->
++    Host
++  end,
++  Rs = mnesia:dirty_read(sql_pool, SearchHost),
++  [R#sql_pool.pid || R <- Rs, is_process_alive(R#sql_pool.pid)].
+ 
++%% backwards compatible get_random_pid
+ get_random_pid(Host) ->
+-    case get_pids(Host) of
++  get_random_pid(Host, primary).
++
++%% get_random_pid that can accept primary or secondary NodeType
++get_random_pid(Host, NodeType) ->
++    case get_pids(Host, NodeType) of
+       [] -> none;
+       Pids ->
+-	    I = p1_rand:round_robin(length(Pids)) + 1,
+-	    lists:nth(I, Pids)
++      I = p1_rand:round_robin(length(Pids)) + 1,
++      lists:nth(I, Pids)
+     end.
+ 
+ add_pid(Host, Pid) ->
+     F = fun () ->
+-		mnesia:write(#sql_pool{host = Host, pid = Pid})
+-	end,
++      mnesia:write(#sql_pool{host = Host, pid = Pid})
++    end,
+     mnesia:ets(F).
+ 
+ remove_pid(Host, Pid) ->
+     F = fun () ->
+-		mnesia:delete_object(#sql_pool{host = Host, pid = Pid})
+-	end,
++    mnesia:delete_object(#sql_pool{host = Host, pid = Pid})
++  end,
+     mnesia:ets(F).
+ 
+ -spec get_pool_size(atom(), binary()) -> pos_integer().
+ get_pool_size(SQLType, Host) ->
+     PoolSize = ejabberd_config:get_option(
+                  {sql_pool_size, Host},
+-		 case SQLType of
+-		     sqlite -> 1;
+-		     _ -> ?DEFAULT_POOL_SIZE
+-		 end),
++     case SQLType of
++         sqlite -> 1;
++         _ -> ?DEFAULT_POOL_SIZE
++     end),
+     if PoolSize > 1 andalso SQLType == sqlite ->
+-	    ?WARNING_MSG("it's not recommended to set sql_pool_size > 1 for "
+-			 "sqlite, because it may cause race conditions", []);
++      ?WARNING_MSG("it's not recommended to set sql_pool_size > 1 for "
++       "sqlite, because it may cause race conditions", []);
+        true ->
+-	    ok
++      ok
+     end,
+     PoolSize.
+ 
+@@ -169,18 +266,18 @@ check_sqlite_db(Host) ->
+     DB = ejabberd_sql:sqlite_db(Host),
+     File = ejabberd_sql:sqlite_file(Host),
+     Ret = case filelib:ensure_dir(File) of
+-	      ok ->
+-		  case sqlite3:open(DB, [{file, File}]) of
+-		      {ok, _Ref} -> ok;
+-		      {error, {already_started, _Ref}} -> ok;
+-		      {error, R} -> {error, R}
+-		  end;
+-	      Err ->
+-		  Err
+-	  end,
++        ok ->
++      case sqlite3:open(DB, [{file, File}]) of
++          {ok, _Ref} -> ok;
++          {error, {already_started, _Ref}} -> ok;
++          {error, R} -> {error, R}
++      end;
++        Err ->
++      Err
++    end,
+     case Ret of
+         ok ->
+-	    sqlite3:sql_exec(DB, "pragma foreign_keys = on"),
++      sqlite3:sql_exec(DB, "pragma foreign_keys = on"),
+             case sqlite3:list_tables(DB) of
+                 [] ->
+                     create_sqlite_tables(DB),
+@@ -204,7 +301,7 @@ create_sqlite_tables(DB) ->
+             ok = sqlite3:sql_exec(DB, "commit");
+         {error, Reason} ->
+             ?WARNING_MSG("Failed to read SQLite schema file: ~s",
+-			 [file:format_error(Reason)])
++       [file:format_error(Reason)])
+     end.
+ 
+ read_lines(Fd, File, Acc) ->
+diff --git a/src/mod_admin_extra.erl b/src/mod_admin_extra.erl
+index 4655ac226..bb84fea24 100644
+--- a/src/mod_admin_extra.erl
++++ b/src/mod_admin_extra.erl
+@@ -41,7 +41,7 @@
+ 
+ 	 % Sessions
+ 	 num_resources/2, resource_num/3,
+-	 kick_session/4, status_num/2, status_num/1,
++	 kick_session/4, kick_sessions/3, status_num/2, status_num/1,
+ 	 status_list/2, status_list/1, connected_users_info/0,
+ 	 connected_users_vhost/1, set_presence/7,
+ 	 get_presence/2, user_sessions_info/2, get_last/2, set_last/4,
+@@ -85,6 +85,8 @@
+ -include("mod_privacy.hrl").
+ -include("ejabberd_sm.hrl").
+ -include("xmpp.hrl").
++-include("mod_muc_room.hrl").
++-include("mod_mam.hrl").
+ 
+ %%%
+ %%% gen_mod
+@@ -264,12 +266,12 @@ get_commands_spec() ->
+ 			result_example = <<"Psi">>,
+ 			result_desc = "Name of user resource"},
+      #ejabberd_commands{name = kick_session, tags = [session],
+-			desc = "Kick a user session",
+-			module = ?MODULE, function = kick_session,
+-			args = [{user, binary}, {host, binary}, {resource, binary}, {reason, binary}],
+-			args_example = [<<"peter">>, <<"myserver.com">>, <<"Psi">>,
++			desc = "Kick all user sessions",
++			module = ?MODULE, function = kick_sessions,
++			args = [{user, binary}, {host, binary}, {reason, binary}],
++			args_example = [<<"peter">>, <<"myserver.com">>,
+ 					<<"Stuck connection">>],
+-			args_desc = ["User name", "Server name", "User's resource",
++			args_desc = ["User name", "Server name",
+ 				     "Reason for closing session"],
+ 			result = {res, rescode},
+ 			result_example = ok,
+@@ -896,11 +898,17 @@ ban_account(User, Host, ReasonText) ->
+     ok.
+ 
+ kick_sessions(User, Server, Reason) ->
+-    lists:map(
++    Results = lists:map(
+       fun(Resource) ->
+ 	      kick_this_session(User, Server, Resource, Reason)
+       end,
+-      ejabberd_sm:get_user_resources(User, Server)).
++      ejabberd_sm:get_user_resources(User, Server)),
++
++    FilteredResults = lists:filter(fun(X) -> X /= ok end, Results),
++    case FilteredResults of
++        [] -> ok;
++        _ -> error
++    end.
+ 
+ set_random_password(User, Server, Reason) ->
+     NewPass = build_random_password(Reason),
+@@ -1475,14 +1483,61 @@ build_packet(Type, Subject, Body, FromJID, ToJID) ->
+ 	     id = p1_rand:get_string(),
+ 	     subject = xmpp:mk_text(Subject)}.
+ 
++%% Taken from mod_muc_room
++-spec wrap(jid(), jid(), stanza(), binary()) -> message().
++wrap(From, To, Packet, Node) ->
++    El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
++    #message{
++       sub_els = [#ps_event{
++		     items = #ps_items{
++				node = Node,
++				items = [#ps_item{
++					    id = p1_rand:get_string(),
++					    sub_els = [El]}]}}]}.
++
++%% Kind of a bad hack.  We might want to add a funciton in mod_mam in the future
++%% to handle this case.
++spoof_muc_state(LServer, RoomJID) ->
++	#state{
++	   server_host = LServer,
++	   jid = RoomJID,
++	   config = #config{
++			mam = true}}.
++
++get_offline_user(To, From) ->
++	FromUser      = From#jid.user,
++	Room          = To#jid.user,
++	Users         = string:lexemes(Room, "-" ++ [[$\r,$\n]]),
++	[User1|User2] = Users,
++	NewUser       = case User1 of
++		FromUser -> hd(User2);
++		_        -> User1
++	end,
++	From#jid{user = NewUser, luser = NewUser}.
++
+ send_stanza(FromString, ToString, Stanza) ->
+     try
+ 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
+-	From = jid:decode(FromString),
+-	To = jid:decode(ToString),
+-	CodecOpts = ejabberd_config:codec_options(From#jid.lserver),
+-	Pkt = xmpp:decode(El, ?NS_CLIENT, CodecOpts),
+-	ejabberd_router:route(xmpp:set_from_to(Pkt, From, To))
++	To            = jid:decode(ToString),
++	case mod_muc:find_online_room(To#jid.user, To#jid.server) of
++	{ok, _} ->
++		From = jid:decode(FromString),
++		CodecOpts     = ejabberd_config:codec_options(From#jid.lserver),
++		Packet        = xmpp:decode(El, ?NS_CLIENT, CodecOpts),
++		ejabberd_router:route(xmpp:set_from_to(Packet, From, To));
++	error ->
++		From          = get_offline_user(To, jid:decode(FromString)),
++		CodecOpts     = ejabberd_config:codec_options(From#jid.lserver),
++		Packet        = xmpp:decode(El, ?NS_CLIENT, CodecOpts),
++		LServer       = From#jid.lserver,
++		ArchivePacket = ejabberd_hooks:run_fold(muc_filter_message, LServer, Packet, 
++			                                    [spoof_muc_state(LServer, To), From#jid.user]),
++		Wrapped       = wrap(To, From, ArchivePacket, ?NS_MUCSUB_NODES_MESSAGES),
++		PacketToSend  = xmpp:set_from_to(Wrapped, To, From),
++		?DEBUG("Running offline_message_hook via send_stanza to an offline room", []),
++		ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, PacketToSend}, []),
++		ok
++	end
+     catch _:{xmpp_codec, Why} ->
+ 	    io:format("incorrect stanza: ~s~n", [xmpp:format_error(Why)]),
+ 	    {error, Why};
+diff --git a/src/mod_blocking.erl b/src/mod_blocking.erl
+index b1856c937..0bd5e50aa 100644
+--- a/src/mod_blocking.erl
++++ b/src/mod_blocking.erl
+@@ -30,7 +30,7 @@
+ -protocol({xep, 191, '1.2'}).
+ 
+ -export([start/2, stop/1, reload/3, process_iq/1, depends/2,
+-	 disco_features/5, mod_options/1]).
++	 disco_features/5, mod_options/1, is_blocking/3]).
+ 
+ -include("logger.hrl").
+ 
+@@ -127,6 +127,24 @@ listitems_to_jids([#listitem{type = jid,
+ listitems_to_jids([_ | Items], JIDs) ->
+     listitems_to_jids(Items, JIDs).
+ 
++%% is source-user blocking target-user on server
++is_blocking(SourceLUser, TargetLUser, Server) ->
++	try
++		case mod_privacy:get_user_list(SourceLUser, Server, default) of
++			{ok, { _Name, List } }  when is_list(List) ->
++				%% from all privacy entries for from-user (List), get all deny (blocked) ones using listitems_to_jids
++				lists:filter(fun({LUser, _LServer, _LResource}) ->
++					%% if the to-user is in the deny list for the from-user, then
++					%% from-user is blocking to-user
++					LUser == TargetLUser
++			 end, listitems_to_jids(List, [])) /= [];
++			_ -> false
++		end
++	catch _:_ ->
++		false
++	end
++.
++
+ -spec process_block(iq(), [ljid()]) -> iq().
+ process_block(#iq{from = From} = IQ, LJIDs) ->
+     #jid{luser = LUser, lserver = LServer} = From,
+diff --git a/src/mod_mam.erl b/src/mod_mam.erl
+index ee38f5011..af8f6d689 100644
+--- a/src/mod_mam.erl
++++ b/src/mod_mam.erl
+@@ -44,6 +44,8 @@
+ 	 is_empty_for_user/2, is_empty_for_room/3, check_create_room/4,
+ 	 process_iq/3, store_mam_message/7, make_id/0]).
+ 
++-export([get_room_history/4]).
++
+ -include("xmpp.hrl").
+ -include("logger.hrl").
+ -include("mod_muc_room.hrl").
+@@ -1164,6 +1166,12 @@ send(Msgs, Count, IsComplete,
+ 	    ignore
+     end.
+ 
++get_room_history(ServerHost, Room, Host, HistorySize) ->
++    LServer = jid:nameprep(ServerHost),
++    Mod = gen_mod:db_mod(LServer, ?MODULE),
++    Mod:get_room_history(LServer, Room, Host, HistorySize)
++.
++
+ -spec make_rsm_out([{binary(), integer(), xmlel()}], count()) -> rsm_set().
+ make_rsm_out([], Count) ->
+     #rsm_set{count = Count};
+diff --git a/src/mod_mam_mnesia.erl b/src/mod_mam_mnesia.erl
+index dff10ef96..64f8d1963 100644
+--- a/src/mod_mam_mnesia.erl
++++ b/src/mod_mam_mnesia.erl
+@@ -31,6 +31,8 @@
+ 	 extended_fields/0, store/8, write_prefs/4, get_prefs/2, select/6, remove_from_archive/3,
+ 	 is_empty_for_user/2, is_empty_for_room/3]).
+ 
++-export([get_room_history/4]).
++
+ -include_lib("stdlib/include/ms_transform.hrl").
+ -include("xmpp.hrl").
+ -include("logger.hrl").
+@@ -272,3 +274,6 @@ filter_by_max(Msgs, Len) when is_integer(Len), Len >= 0 ->
+     {lists:sublist(Msgs, Len), length(Msgs) =< Len};
+ filter_by_max(_Msgs, _Junk) ->
+     {[], true}.
++
++get_room_history(_LServer, _Host, _Room, _HistorySize) ->
++	{error, not_implemented}.
+diff --git a/src/mod_mam_sql.erl b/src/mod_mam_sql.erl
+index dee2cd7c7..d1c90ca5c 100644
+--- a/src/mod_mam_sql.erl
++++ b/src/mod_mam_sql.erl
+@@ -30,8 +30,10 @@
+ 
+ %% API
+ -export([init/2, remove_user/2, remove_room/3, delete_old_messages/3,
+-	 extended_fields/0, store/8, write_prefs/4, get_prefs/2, select/6, export/1, remove_from_archive/3,
+-	 is_empty_for_user/2, is_empty_for_room/3]).
++   extended_fields/0, store/8, write_prefs/4, get_prefs/2, select/6, export/1, remove_from_archive/3,
++   is_empty_for_user/2, is_empty_for_room/3]).
++
++-export([get_room_history/4]).
+ 
+ -include_lib("stdlib/include/ms_transform.hrl").
+ -include("xmpp.hrl").
+@@ -59,16 +61,16 @@ remove_room(LServer, LName, LHost) ->
+ 
+ remove_from_archive(LUser, LServer, none) ->
+     case ejabberd_sql:sql_query(LServer,
+-				?SQL("delete from archive where username=%(LUser)s and %(LServer)H")) of
+-	{error, Reason} -> {error, Reason};
+-	_ -> ok
++        ?SQL("delete from archive where username=%(LUser)s and %(LServer)H")) of
++  {error, Reason} -> {error, Reason};
++  _ -> ok
+     end;
+ remove_from_archive(LUser, LServer, WithJid) ->
+     Peer = jid:encode(jid:remove_resource(WithJid)),
+     case ejabberd_sql:sql_query(LServer,
+-				?SQL("delete from archive where username=%(LUser)s and %(LServer)H and bare_peer=%(Peer)s")) of
+-	{error, Reason} -> {error, Reason};
+-	_ -> ok
++        ?SQL("delete from archive where username=%(LUser)s and %(LServer)H and bare_peer=%(Peer)s")) of
++  {error, Reason} -> {error, Reason};
++  _ -> ok
+     end.
+ 
+ delete_old_messages(ServerHost, TimeStamp, Type) ->
+@@ -95,26 +97,23 @@ extended_fields() ->
+ 
+ store(Pkt, LServer, {LUser, LHost}, Type, Peer, Nick, _Dir, TS) ->
+     SUser = case Type of
+-		chat -> LUser;
+-		groupchat -> jid:encode({LUser, LHost, <<>>})
+-	    end,
+-    BarePeer = jid:encode(
+-		 jid:tolower(
+-		   jid:remove_resource(Peer))),
+-    LPeer = jid:encode(
+-	      jid:tolower(Peer)),
++      chat -> LUser;
++      groupchat -> jid:encode({LUser, LHost, <<>>})
++    end,
++    BarePeer = jid:encode(jid:tolower(jid:remove_resource(Peer))),
++    LPeer = jid:encode(jid:tolower(Peer)),
+     Body = fxml:get_subtag_cdata(Pkt, <<"body">>),
+     SType = misc:atom_to_binary(Type),
+     XML = case gen_mod:get_module_opt(LServer, mod_mam, compress_xml) of
+-	      true ->
+-		  J1 = case Type of
+-			      chat -> jid:encode({LUser, LHost, <<>>});
+-			      groupchat -> SUser
+-			  end,
+-		  xml_compress:encode(Pkt, J1, LPeer);
+-	      _ ->
+-		  fxml:element_to_binary(Pkt)
+-	  end,
++        true ->
++      J1 = case Type of
++            chat -> jid:encode({LUser, LHost, <<>>});
++            groupchat -> SUser
++        end,
++      xml_compress:encode(Pkt, J1, LPeer);
++        _ ->
++      fxml:element_to_binary(Pkt)
++    end,
+     case ejabberd_sql:sql_query(
+            LServer,
+            ?SQL_INSERT(
+@@ -128,16 +127,16 @@ store(Pkt, LServer, {LUser, LHost}, Type, Peer, Nick, _Dir, TS) ->
+                "txt=%(Body)s",
+                "kind=%(SType)s",
+                "nick=%(Nick)s"])) of
+-	{updated, _} ->
+-	    ok;
+-	Err ->
+-	    Err
++  {updated, _} ->
++      ok;
++  Err ->
++      Err
+     end.
+ 
+ write_prefs(LUser, _LServer, #archive_prefs{default = Default,
+-					   never = Never,
+-					   always = Always},
+-	    ServerHost) ->
++             never = Never,
++             always = Always},
++      ServerHost) ->
+     SDefault = erlang:atom_to_binary(Default, utf8),
+     SAlways = misc:term_to_expr(Always),
+     SNever = misc:term_to_expr(Never),
+@@ -149,35 +148,35 @@ write_prefs(LUser, _LServer, #archive_prefs{default = Default,
+              "def=%(SDefault)s",
+              "always=%(SAlways)s",
+              "never=%(SNever)s"]) of
+-	ok ->
+-	    ok;
+-	Err ->
+-	    Err
++  ok ->
++      ok;
++  Err ->
++      Err
+     end.
+ 
+ get_prefs(LUser, LServer) ->
+     case ejabberd_sql:sql_query(
+-	   LServer,
+-	   ?SQL("select @(def)s, @(always)s, @(never)s from archive_prefs"
++     LServer,
++     ?SQL("select @(def)s, @(always)s, @(never)s from archive_prefs"
+                 " where username=%(LUser)s and %(LServer)H")) of
+-	{selected, [{SDefault, SAlways, SNever}]} ->
+-	    Default = erlang:binary_to_existing_atom(SDefault, utf8),
+-	    Always = ejabberd_sql:decode_term(SAlways),
+-	    Never = ejabberd_sql:decode_term(SNever),
+-	    {ok, #archive_prefs{us = {LUser, LServer},
+-		    default = Default,
+-		    always = Always,
+-		    never = Never}};
+-	_ ->
+-	    error
++  {selected, [{SDefault, SAlways, SNever}]} ->
++      Default = erlang:binary_to_existing_atom(SDefault, utf8),
++      Always = ejabberd_sql:decode_term(SAlways),
++      Never = ejabberd_sql:decode_term(SNever),
++      {ok, #archive_prefs{us = {LUser, LServer},
++        default = Default,
++        always = Always,
++        never = Never}};
++  _ ->
++      error
+     end.
+ 
+ select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
+        MAMQuery, RSM, MsgType) ->
+     User = case MsgType of
+-	       chat -> LUser;
+-	       _ -> jid:encode(JidArchive)
+-	   end,
++         chat -> LUser;
++         _ -> jid:encode(JidArchive)
++     end,
+     {Query, CountQuery} = make_sql_query(User, LServer, MAMQuery, RSM),
+     % TODO from XEP-0313 v0.2: "To conserve resources, a server MAY place a
+     % reasonable limit on how many stanzas may be pushed to a client in one
+@@ -185,33 +184,32 @@ select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
+     % and the client did not specify a limit using RSM then the server should
+     % return a policy-violation error to the client." We currently don't do this
+     % for v0.2 requests, but we do limit #rsm_in.max for v0.3 and newer.
+-    case {ejabberd_sql:sql_query(LServer, Query),
+-	  ejabberd_sql:sql_query(LServer, CountQuery)} of
+-	{{selected, _, Res}, {selected, _, [[Count]]}} ->
+-	    {Max, Direction, _} = get_max_direction_id(RSM),
+-	    {Res1, IsComplete} =
+-		if Max >= 0 andalso Max /= undefined andalso length(Res) > Max ->
+-			if Direction == before ->
+-				{lists:nthtail(1, Res), false};
+-			   true ->
+-				{lists:sublist(Res, Max), false}
+-			end;
+-		   true ->
+-			{Res, true}
+-		end,
+-	    {lists:flatmap(
+-	       fun([TS, XML, PeerBin, Kind, Nick]) ->
+-		       case make_archive_el(
+-			   jid:encode(JidArchive), TS, XML, PeerBin, Kind, Nick,
+-			   MsgType, JidRequestor, JidArchive) of
+-			   {ok, El} ->
+-			       [{TS, binary_to_integer(TS), El}];
+-			   {error, _} ->
+-			       []
+-		       end
+-	       end, Res1), IsComplete, binary_to_integer(Count)};
+-	_ ->
+-	    {[], false, 0}
++    case {ejabberd_sql:sql_query(LServer, Query, secondary), CountQuery} of
++  {{selected, _, Res}, _} ->
++      {Max, Direction, _} = get_max_direction_id(RSM),
++      {Res1, IsComplete} =
++    if Max >= 0 andalso Max /= undefined andalso length(Res) > Max ->
++      if Direction == before ->
++        {lists:nthtail(1, Res), false};
++         true ->
++        {lists:sublist(Res, Max), false}
++      end;
++       true ->
++      {Res, true}
++    end,
++      {lists:flatmap(
++         fun([TS, XML, PeerBin, Kind, Nick]) ->
++           case make_archive_el(
++         jid:encode(JidArchive), TS, XML, PeerBin, Kind, Nick,
++         MsgType, JidRequestor, JidArchive) of
++         {ok, El} ->
++             [{TS, binary_to_integer(TS), El}];
++         {error, _} ->
++             []
++           end
++         end, Res1), IsComplete, 50};
++  _ ->
++      {[], false, 0}
+     end.
+ 
+ export(_Server) ->
+@@ -267,13 +265,13 @@ export(_Server) ->
+ 
+ is_empty_for_user(LUser, LServer) ->
+     case ejabberd_sql:sql_query(
+-	   LServer,
+-	   ?SQL("select @(1)d from archive"
+-		" where username=%(LUser)s and %(LServer)H limit 1")) of
+-	{selected, [{1}]} ->
+-	    false;
+-	_ ->
+-	    true
++     LServer,
++     ?SQL("select @(1)d from archive"
++    " where username=%(LUser)s and %(LServer)H limit 1")) of
++  {selected, [{1}]} ->
++      false;
++  _ ->
++      true
+     end.
+ 
+ is_empty_for_room(LServer, LName, LHost) ->
+@@ -307,60 +305,60 @@ make_sql_query(User, LServer, MAMQuery, RSM) ->
+             _ -> fun ejabberd_sql:escape/1
+         end,
+     LimitClause = if is_integer(Max), Max >= 0, ODBCType /= mssql ->
+-			  [<<" limit ">>, integer_to_binary(Max+1)];
+-		     true ->
+-			  []
+-		  end,
++        [<<" limit ">>, integer_to_binary(Max+1)];
++         true ->
++        []
++      end,
+     TopClause = if is_integer(Max), Max >= 0, ODBCType == mssql ->
+-			  [<<" TOP ">>, integer_to_binary(Max+1)];
+-		     true ->
+-			  []
+-		  end,
++        [<<" TOP ">>, integer_to_binary(Max+1)];
++         true ->
++        []
++      end,
+     WithTextClause = if is_binary(WithText), WithText /= <<>> ->
+-			     [<<" and match (txt) against ('">>,
+-			      Escape(WithText), <<"')">>];
+-			true ->
+-			     []
+-		     end,
++           [<<" and match (txt) against ('">>,
++            Escape(WithText), <<"')">>];
++      true ->
++           []
++         end,
+     WithClause = case catch jid:tolower(With) of
+-		     {_, _, <<>>} ->
+-			 [<<" and bare_peer='">>,
+-			  Escape(jid:encode(With)),
+-			  <<"'">>];
+-		     {_, _, _} ->
+-			 [<<" and peer='">>,
+-			  Escape(jid:encode(With)),
+-			  <<"'">>];
+-		     _ ->
+-			 []
+-		 end,
++         {_, _, <<>>} ->
++       [<<" and bare_peer='">>,
++        Escape(jid:encode(With)),
++        <<"'">>];
++         {_, _, _} ->
++       [<<" and peer='">>,
++        Escape(jid:encode(With)),
++        <<"'">>];
++         _ ->
++       []
++     end,
+     PageClause = case catch binary_to_integer(ID) of
+-		     I when is_integer(I), I >= 0 ->
+-			 case Direction of
+-			     before ->
+-				 [<<" AND timestamp < ">>, ID];
+-			     'after' ->
+-				 [<<" AND timestamp > ">>, ID];
+-			     _ ->
+-				 []
+-			 end;
+-		     _ ->
+-			 []
+-		 end,
++         I when is_integer(I), I >= 0 ->
++       case Direction of
++           before ->
++         [<<" AND timestamp < ">>, ID];
++           'after' ->
++         [<<" AND timestamp > ">>, ID];
++           _ ->
++         []
++       end;
++         _ ->
++       []
++     end,
+     StartClause = case Start of
+-		      {_, _, _} ->
+-			  [<<" and timestamp >= ">>,
+-			   integer_to_binary(now_to_usec(Start))];
+-		      _ ->
+-			  []
+-		  end,
++          {_, _, _} ->
++        [<<" and timestamp >= ">>,
++         integer_to_binary(now_to_usec(Start))];
++          _ ->
++        []
++      end,
+     EndClause = case End of
+-		    {_, _, _} ->
+-			[<<" and timestamp <= ">>,
+-			 integer_to_binary(now_to_usec(End))];
+-		    _ ->
+-			[]
+-		end,
++        {_, _, _} ->
++      [<<" and timestamp <= ">>,
++       integer_to_binary(now_to_usec(End))];
++        _ ->
++      []
++    end,
+     SUser = Escape(User),
+     SServer = Escape(LServer),
+ 
+@@ -382,18 +380,18 @@ make_sql_query(User, LServer, MAMQuery, RSM) ->
+         end,
+ 
+     QueryPage =
+-	case Direction of
+-	    before ->
+-		% ID can be empty because of
+-		% XEP-0059: Result Set Management
+-		% 2.5 Requesting the Last Page in a Result Set
+-		[<<"SELECT timestamp, xml, peer, kind, nick FROM (">>, Query,
+-		 <<" ORDER BY timestamp DESC ">>,
+-		 LimitClause, <<") AS t ORDER BY timestamp ASC;">>];
+-	    _ ->
+-		[Query, <<" ORDER BY timestamp ASC ">>,
+-		 LimitClause, <<";">>]
+-	end,
++  case Direction of
++      before ->
++    % ID can be empty because of
++    % XEP-0059: Result Set Management
++    % 2.5 Requesting the Last Page in a Result Set
++    [<<"SELECT timestamp, xml, peer, kind, nick FROM (">>, Query,
++     <<" ORDER BY timestamp DESC ">>,
++     LimitClause, <<") AS t ORDER BY timestamp ASC;">>];
++      _ ->
++    [Query, <<" ORDER BY timestamp ASC ">>,
++     LimitClause, <<";">>]
++  end,
+     case ejabberd_sql:use_new_schema() of
+         true ->
+             {QueryPage,
+@@ -409,65 +407,129 @@ make_sql_query(User, LServer, MAMQuery, RSM) ->
+     end.
+ 
+ -spec get_max_direction_id(rsm_set() | undefined) ->
+-				  {integer() | undefined,
+-				   before | 'after' | undefined,
+-				   binary()}.
++          {integer() | undefined,
++           before | 'after' | undefined,
++           binary()}.
+ get_max_direction_id(RSM) ->
+     case RSM of
+-	#rsm_set{max = Max, before = Before} when is_binary(Before) ->
+-	    {Max, before, Before};
+-	#rsm_set{max = Max, 'after' = After} when is_binary(After) ->
+-	    {Max, 'after', After};
+-	#rsm_set{max = Max} ->
+-	    {Max, undefined, <<>>};
+-	_ ->
+-	    {undefined, undefined, <<>>}
++  #rsm_set{max = Max, before = Before} when is_binary(Before) ->
++      {Max, before, Before};
++  #rsm_set{max = Max, 'after' = After} when is_binary(After) ->
++      {Max, 'after', After};
++  #rsm_set{max = Max} ->
++      {Max, undefined, <<>>};
++  _ ->
++      {undefined, undefined, <<>>}
+     end.
+ 
+ -spec make_archive_el(binary(), binary(), binary(), binary(), binary(),
+-		      binary(), _, jid(), jid()) ->
+-			     {ok, xmpp_element()} | {error, invalid_jid |
+-						     invalid_timestamp |
+-						     invalid_xml}.
++          binary(), _, jid(), jid()) ->
++           {ok, xmpp_element()} | {error, invalid_jid |
++                 invalid_timestamp |
++                 invalid_xml}.
+ make_archive_el(User, TS, XML, Peer, Kind, Nick, MsgType, JidRequestor, JidArchive) ->
+     case xml_compress:decode(XML, User, Peer) of
+-	#xmlel{} = El ->
+-	    try binary_to_integer(TS) of
+-		TSInt ->
+-		    try jid:decode(Peer) of
+-			PeerJID ->
+-			    Now = usec_to_now(TSInt),
+-			    PeerLJID = jid:tolower(PeerJID),
+-			    T = case Kind of
+-				    <<"">> -> chat;
+-				    null -> chat;
+-				    _ -> misc:binary_to_atom(Kind)
+-				end,
+-			    mod_mam:msg_to_el(
+-			      #archive_msg{timestamp = Now,
+-					   id = TS,
+-					   packet = El,
+-					   type = T,
+-					   nick = Nick,
+-					   peer = PeerLJID},
+-			      MsgType, JidRequestor, JidArchive)
+-		    catch _:{bad_jid, _} ->
+-			    ?ERROR_MSG("Malformed 'peer' field with value "
+-				       "'~s' detected for user ~s in table "
+-				       "'archive': invalid JID",
+-				       [Peer, jid:encode(JidArchive)]),
+-			    {error, invalid_jid}
+-		    end
+-	    catch _:_ ->
+-		    ?ERROR_MSG("Malformed 'timestamp' field with value '~s' "
+-			       "detected for user ~s in table 'archive': "
+-			       "not an integer",
+-			       [TS, jid:encode(JidArchive)]),
+-		    {error, invalid_timestamp}
+-	    end;
+-	{error, {_, Reason}} ->
+-	    ?ERROR_MSG("Malformed 'xml' field with value '~s' detected "
+-		       "for user ~s in table 'archive': ~s",
+-		       [XML, jid:encode(JidArchive), Reason]),
+-	    {error, invalid_xml}
++  #xmlel{} = El ->
++      try binary_to_integer(TS) of
++    TSInt ->
++        try jid:decode(Peer) of
++      PeerJID ->
++          Now = usec_to_now(TSInt),
++          PeerLJID = jid:tolower(PeerJID),
++          T = case Kind of
++            <<"">> -> chat;
++            null -> chat;
++            _ -> misc:binary_to_atom(Kind)
++        end,
++          mod_mam:msg_to_el(
++            #archive_msg{timestamp = Now,
++             id = TS,
++             packet = El,
++             type = T,
++             nick = Nick,
++             peer = PeerLJID},
++            MsgType, JidRequestor, JidArchive)
++        catch _:{bad_jid, _} ->
++          ?ERROR_MSG("Malformed 'peer' field with value "
++               "'~s' detected for user ~s in table "
++               "'archive': invalid JID",
++               [Peer, jid:encode(JidArchive)]),
++          {error, invalid_jid}
++        end
++      catch _:_ ->
++        ?ERROR_MSG("Malformed 'timestamp' field with value '~s' "
++             "detected for user ~s in table 'archive': "
++             "not an integer",
++             [TS, jid:encode(JidArchive)]),
++        {error, invalid_timestamp}
++      end;
++  {error, {_, Reason}} ->
++      ?ERROR_MSG("Malformed 'xml' field with value '~s' detected "
++           "for user ~s in table 'archive': ~s",
++           [XML, jid:encode(JidArchive), Reason]),
++      {error, invalid_xml}
++    end.
++
++get_room_history(LServer, Room, Host, HistorySize) ->
++     JidArchive = jid:make(Room, Host),
++     RoomJid = jid:encode(JidArchive),
++     case catch ejabberd_sql:sql_query(
++        LServer,
++        ?SQL("select @(bare_peer)s, @(nick)s, @(xml)s, @(timestamp)d from archive "
++             "where username=%(RoomJid)s "
++             "order by timestamp desc limit %(HistorySize)d;")) of
++  {selected, Rows} ->
++     lists:map(
++        fun({FromJID, FromNick, XML, TS}) ->
++           Message = xml_to_unarchived_msg(XML),
++           [{jid:decode(FromJID), FromNick, Message, TS}]
++        end, lists:reverse(Rows));
++  Err ->
++     ?INFO_MSG("Could not retrieve messages from archive: ~p", [Err]),
++     []
++     end.
++
++%%%===================================================================
++%%% Internal functions
++%%%===================================================================
++xml_to_unarchived_msg(XML) ->
++    case fxml_stream:parse_element(XML) of
++  #xmlel{} = El ->
++     el_to_unarchived_msg(El);
++  Err ->
++     ?ERROR_MSG("got ~p when parsing XML packet ~s",
++        [Err, XML]),
++     Err
++     end.
++
++el_to_unarchived_msg(El) ->
++    ID_s = fxml:get_tag_attr_s(<<"id">>, El),
++    Type_s = fxml:get_tag_attr_s(<<"type">>, El),
++    Lang_s = fxml:get_tag_attr_s(<<"lang">>, El),
++    From_s = fxml:get_tag_attr_s(<<"from">>, El),
++    To_s = fxml:get_tag_attr_s(<<"to">>, El),
++    {_, _, _, [{_, Body_cdata}]} = fxml:get_subtag(El, <<"body">>),
++    Body = xmpp:mk_text(Body_cdata),
++    SubEls = xmpp:get_els(El),
++    try
++  Type = misc:binary_to_atom(Type_s),
++  F = jid:decode(From_s),
++  From = #jid{user = F#jid.user, server = F#jid.server, resource = F#jid.user,
++     luser = F#jid.luser, lserver = F#jid.lserver, lresource = F#jid.luser},
++  To = jid:decode(To_s),
++  {ok, #message{
++    id   = ID_s,
++    type = Type,
++    lang = Lang_s,
++    from = From,
++    to   = To,
++    body = Body,
++    sub_els = SubEls
++  }}
++    catch _:{bad_jid, To_s} ->
++      ?ERROR_MSG("failed to get 'to' JID from archived XML ~p", [El]),
++      {error, bad_jid_to};
++    _:{bad_jid, From_s} ->
++      ?ERROR_MSG("failed to 'from' JID from archived XML ~p", [El]),
++      {error, bad_jid_from}
+     end.
+diff --git a/src/mod_metrics.erl b/src/mod_metrics.erl
+index a84d92b9c..de9f8aa26 100644
+--- a/src/mod_metrics.erl
++++ b/src/mod_metrics.erl
+@@ -84,6 +84,9 @@ offline_message_hook({_Action, #message{to = #jid{lserver = LServer}}} = Acc) ->
+ 
+ -spec sm_register_connection_hook(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> any().
+ sm_register_connection_hook(_SID, #jid{lserver=LServer}, _Info) ->
++    push(LServer, {open_tcp_ports, erlang:system_info(port_count)}),
++    push(LServer, {erlang_processes, erlang:system_info(process_count)}),
++    push(LServer, {connected_users, ets:info(session,size)}),
+     push(LServer, sm_register_connection).
+ 
+ -spec sm_remove_connection_hook(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> any().
+@@ -138,18 +141,17 @@ send_metrics(Host, Probe, Peer, Port) ->
+     [_, FQDN] = binary:split(misc:atom_to_binary(node()), <<"@">>),
+     [Node|_] = binary:split(FQDN, <<".">>),
+     BaseId = <<Host/binary, "/", Node/binary, ".">>,
+-    TS = integer_to_binary(p1_time_compat:system_time(seconds)),
+     case get_socket(?SOCKET_REGISTER_RETRIES) of
+ 	{ok, Socket} ->
+ 	    case Probe of
+ 		{Key, Val} ->
+ 		    BVal = integer_to_binary(Val),
+ 		    Data = <<BaseId/binary, (misc:atom_to_binary(Key))/binary,
+-			    ":g/", TS/binary, ":", BVal/binary>>,
++			    ":", BVal/binary, "|g">>,
+ 		    gen_udp:send(Socket, Peer, Port, Data);
+ 		Key ->
+ 		    Data = <<BaseId/binary, (misc:atom_to_binary(Key))/binary,
+-			    ":c/", TS/binary, ":1">>,
++			    ":1|c">>,
+ 		    gen_udp:send(Socket, Peer, Port, Data)
+ 	    end;
+ 	Err ->
+diff --git a/src/mod_muc.erl b/src/mod_muc.erl
+index ae3c6f9f7..e9af2ed1c 100644
+--- a/src/mod_muc.erl
++++ b/src/mod_muc.erl
+@@ -42,6 +42,8 @@
+ 	 store_room/5,
+ 	 restore_room/3,
+ 	 forget_room/3,
++	 forget_rooms/3,
++	 start_new_room/4,
+ 	 create_room/5,
+ 	 shutdown_rooms/1,
+ 	 process_disco_info/1,
+@@ -155,6 +157,12 @@ room_destroyed(Host, Room, Pid, ServerHost) ->
+ 	    {room_destroyed, {Room, Host}, Pid},
+     ok.
+ 
++start_new_room(RoomBin, RoomTitleBin, HostBin, FromJid) ->
++	ServerHost = ejabberd_router:host_of_route(HostBin),
++	Proc = gen_mod:get_module_proc(ServerHost, ?MODULE),
++	gen_server:call(Proc, {start_new_room, RoomBin, RoomTitleBin, HostBin, FromJid})
++.
++
+ %% @doc Create a room.
+ %% If Opts = default, the default room options are used.
+ %% Else use the passed options as defined in mod_muc_room.
+@@ -176,9 +184,15 @@ restore_room(ServerHost, Host, Name) ->
+     Mod = gen_mod:db_mod(LServer, ?MODULE),
+     Mod:restore_room(LServer, Host, Name).
+ 
++forget_rooms(ServerHost, Host, Rooms) ->
++	LServer = jid:nameprep(ServerHost),
++	Mod = gen_mod:db_mod(LServer, ?MODULE),
++	Mod:forget_rooms(LServer, Host, Rooms).
++
+ forget_room(ServerHost, Host, Name) ->
+     LServer = jid:nameprep(ServerHost),
+-    ejabberd_hooks:run(remove_room, LServer, [LServer, Name, Host]),
++    % Removed hook which triggers archive removal
++    % ejabberd_hooks:run(remove_room, LServer, [LServer, Name, Host]),
+     Mod = gen_mod:db_mod(LServer, ?MODULE),
+     Mod:forget_room(LServer, Host, Name).
+ 
+@@ -246,9 +260,10 @@ init([Host, Opts]) ->
+     lists:foreach(
+       fun(MyHost) ->
+ 	      register_iq_handlers(MyHost),
+-	      ejabberd_router:register_route(MyHost, Host),
+-	      load_permanent_rooms(MyHost, Host, Access, HistorySize,
+-				   RoomShaper, QueueType)
++	      ejabberd_router:register_route(MyHost, Host)
++%	      Permenent rooms are not loaded into memory.
++%	      load_permanent_rooms(MyHost, Host, Access, HistorySize,
++%				   RoomShaper, QueueType)
+       end, MyHosts),
+     {ok, State}.
+ 
+@@ -272,7 +287,26 @@ handle_call({create, Room, Host, From, Nick, Opts}, _From,
+     RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
+     RMod:register_online_room(ServerHost, Room, Host, Pid),
+     ejabberd_hooks:run(create_room, ServerHost, [ServerHost, Room, Host]),
+-    {reply, ok, State}.
++    {reply, ok, State};
++handle_call({start_new_room, RoomBin, RoomTitleBin, HostBin, FromJid}, _From, #state{
++			server_host = ServerHost,
++			access = Access,
++			default_room_opts = DefOpts,
++			history_size = HistorySize,
++			queue_type = QueueType,
++			room_shaper = RoomShaper
++		} = State
++) ->
++	RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
++	case RMod:find_online_room(ServerHost, RoomBin, HostBin) of
++		error ->
++			Opts = DefOpts ++ [{persistent, true}, {title, RoomTitleBin}],
++			{ok, Pid} = start_new_room(HostBin, ServerHost, Access, RoomBin, HistorySize, RoomShaper, FromJid, RoomTitleBin, Opts, QueueType),
++			RMod:register_online_room(ServerHost, RoomBin, HostBin, Pid);
++		_ -> ok
++	end,
++	{reply, ok, State}
++.
+ 
+ handle_cast({reload, ServerHost, NewOpts, OldOpts}, #state{hosts = OldHosts}) ->
+     NewMod = gen_mod:db_mod(ServerHost, NewOpts, ?MODULE),
+@@ -443,10 +477,11 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
+     RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
+     case RMod:find_online_room(ServerHost, Room, Host) of
+ 	error ->
+-	    case is_create_request(Packet) of
+-		true ->
+-		    case check_user_can_create_room(
+-			   ServerHost, AccessCreate, From, Room) and
++% force room creation
++%	    case is_create_request(Packet) of
++%		true ->
++		    case % check_user_can_create_room(
++			 %   ServerHost, AccessCreate, From, Room) and
+ 			ejabberd_hooks:run_fold(check_create_room,
+ 					ServerHost, true,
+ 					[ServerHost, Room, Host]) of
+@@ -458,19 +493,21 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
+ 					  QueueType),
+ 			    RMod:register_online_room(ServerHost, Room, Host, Pid),
+ 			    mod_muc_room:route(Pid, Packet),
+-			    ok;
++				  ?INFO_MSG("MUC: Created room [~p] with pid [~p] on node [~p]", [Room, Pid, node()]),
++				  ok;
+ 			false ->
++				  ?INFO_MSG("MUC: Room creation denied for [~p]", [Room]),
+ 			    Lang = xmpp:get_lang(Packet),
+ 			    ErrText = <<"Room creation is denied by service policy">>,
+ 			    Err = xmpp:err_forbidden(ErrText, Lang),
+ 			    ejabberd_router:route_error(Packet, Err)
+ 		    end;
+-		false ->
+-		    Lang = xmpp:get_lang(Packet),
+-		    ErrText = <<"Conference room does not exist">>,
+-		    Err = xmpp:err_item_not_found(ErrText, Lang),
+-		    ejabberd_router:route_error(Packet, Err)
+-	    end;
++%		false ->
++%		    Lang = xmpp:get_lang(Packet),
++%		    ErrText = <<"Conference room does not exist">>,
++%		    Err = xmpp:err_item_not_found(ErrText, Lang),
++%		    ejabberd_router:route_error(Packet, Err)
++%	    end;
+ 	{ok, Pid} ->
+ 	    ?DEBUG("MUC: send to process ~p~n", [Pid]),
+ 	    mod_muc_room:route(Pid, Packet),
+diff --git a/src/mod_muc_admin.erl b/src/mod_muc_admin.erl
+index f75e24b7d..d1144e49e 100644
+--- a/src/mod_muc_admin.erl
++++ b/src/mod_muc_admin.erl
+@@ -28,17 +28,17 @@
+ 
+ -behaviour(gen_mod).
+ 
+--export([start/2, stop/1, reload/3, depends/2, 
++-export([start/2, stop/1, reload/3, depends/2,
+ 	 muc_online_rooms/1, muc_online_rooms_by_regex/2,
+ 	 muc_register_nick/3, muc_unregister_nick/2,
+-	 create_room_with_opts/4, create_room/3, destroy_room/2,
++	 create_room_with_opts/4, start_room/2, create_room/3, destroy_room/2,
+ 	 create_rooms_file/1, destroy_rooms_file/1,
+ 	 rooms_unused_list/2, rooms_unused_destroy/2,
+ 	 rooms_empty_list/1, rooms_empty_destroy/1,
+ 	 get_user_rooms/2, get_room_occupants/2,
+ 	 get_room_occupants_number/2, send_direct_invitation/5,
+-	 change_room_option/4, get_room_options/2,
+-	 set_room_affiliation/4, get_room_affiliations/2, get_room_affiliation/3,
++	 change_room_option/4, get_room_options/2, get_room_summary/4, get_room_summary/3,
++	 set_user_affiliation/3, set_room_affiliation/4, get_room_affiliations/2, get_room_affiliation/3,
+ 	 web_menu_main/2, web_page_main/2, web_menu_host/3,
+ 	 subscribe_room/4, unsubscribe_room/2, get_subscribers/2,
+ 	 web_page_host/3, mod_options/1, get_commands_spec/0]).
+@@ -126,7 +126,13 @@ get_commands_spec() ->
+ 		       args_example = [<<"tim@example.org">>, <<"example.org">>],
+ 		       args = [{jid, binary}, {host, binary}],
+ 		       result = {res, rescode}},
+-
++		 #ejabberd_commands{name = start_room, tags = [muc_room],
++		       desc = "Start a MUC room with name and title. If it does not already exist, create it.",
++		       module = ?MODULE, function = start_room,
++		       args_desc = ["Room name", "Room title"],
++		       args_example = ["8626", "Skillz Chat Room"],
++		       args = [{name, binary}, {title, binary}],
++		       result = {res, rescode}},
+      #ejabberd_commands{name = create_room, tags = [muc_room],
+ 		       desc = "Create a MUC room name@service in host",
+ 		       module = ?MODULE, function = create_room,
+@@ -284,6 +290,19 @@ get_commands_spec() ->
+ 								 {value, string}
+ 								]}}
+ 						}}},
++     #ejabberd_commands{name = get_room_summary, tags = [muc_room],
++				desc = "Get room summary: last x messages after a message id",
++				module = ?MODULE, function = get_room_summary,
++				args_desc = ["Room", "Limit", "Last Message Id"],
++				args_example = ["81", "10", "abcd-1234-4567890-defg"],
++				args = [{room, binary}, {limit, binary}, {last_message_id, binary}],
++				result = {messages, {list, {message, {tuple, [{id, string},
++					{from, string},
++					{body, string},
++					{user_role, integer},
++					{avatar_url, string}
++				]}}}}
++		 },
+      #ejabberd_commands{name = subscribe_room, tags = [muc_room],
+ 			desc = "Subscribe to a MUC conference",
+ 			module = ?MODULE, function = subscribe_room,
+@@ -313,6 +332,13 @@ get_commands_spec() ->
+ 		        result_example = ["user2@example.com", "user3@example.com"],
+ 			args = [{name, binary}, {service, binary}],
+ 			result = {subscribers, {list, {jid, string}}}},
++			#ejabberd_commands{name = set_user_affiliation, tags = [muc_room],
++				desc = "Change user affiliation for all rooms",
++				module = ?MODULE, function = set_user_affiliation,
++				args_desc = ["Server Host", "Username", "Affiliation to set"],
++				args_example = ["chat.skillz.com", "user1234", "muted"],
++				args = [{host, binary}, {user, binary}, {affiliation, binary}],
++				result = {res, rescode}},
+      #ejabberd_commands{name = set_room_affiliation, tags = [muc_room],
+ 		       desc = "Change an affiliation in a MUC room",
+ 		       module = ?MODULE, function = set_room_affiliation,
+@@ -652,6 +678,21 @@ create_room_with_opts(Name1, Host1, ServerHost, CustomRoomOpts) ->
+ 	    error
+     end.
+ 
++start_room(RoomBin, RoomTitleBin) ->
++	Service = skillz_util:get_service(),
++	case get_room_pid(RoomBin, Service) of
++		room_not_found ->
++			FromJid = jid:decode(skillz_util:get_cas_jid()),
++			mod_muc:start_new_room(RoomBin, RoomTitleBin, Service, FromJid);
++		Pid ->
++			case get_room_title(Pid) of
++				<<"">> -> change_room_option(RoomBin, Service, <<"title">>, RoomTitleBin);
++				_ -> ok
++			end
++	end,
++	ok
++.
++
+ %% Create the room only in the database.
+ %% It is required to restart the MUC service for the room to appear.
+ muc_create_room(ServerHost, {Name, Host, _}, DefRoomOpts) ->
+@@ -794,6 +835,27 @@ get_room_state(Room_pid) ->
+     {ok, R} = p1_fsm:sync_send_all_state_event(Room_pid, get_state),
+     R.
+ 
++%% @doc Returns the last N messages after the last message id. If the last message is the message id, it returns that message.
++%% Note: Service includes the host prefix, eg: conference.chat.skillz.com
++%% @spec get_room_summary(Service :: binary, RoomName :: binary, LimitIn :: integer, LastMessageId :: binary) -> [{id :: binary, from :: binary, body :: binary, userRole :: integer}, ...]
++get_room_summary(Service, RoomName, LimitIn, LastMessageId) ->
++	Limit = case LimitIn of
++		<<>> -> 5;
++		_ when is_integer(LimitIn) -> LimitIn;
++		_ -> try list_to_integer(binary_to_list(LimitIn)) catch _:_ -> 5 end
++	end,
++	case get_room_pid(RoomName, Service) of
++		room_not_found -> [];
++		Pid ->
++			{ok, RoomSummary} = p1_fsm:sync_send_all_state_event(Pid, {get_room_summary, Limit, LastMessageId}),
++			RoomSummary
++	end
++.
++
++get_room_summary(RoomName, LimitIn, LastMessageId) ->
++	get_room_summary(skillz_util:get_service(), RoomName, LimitIn, LastMessageId)
++.
++
+ %%---------------
+ %% Decide
+ 
+@@ -802,42 +864,47 @@ decide_rooms(Method, Rooms, ServerHost, Last_allowed) ->
+     lists:filter(Decide, Rooms).
+ 
+ decide_room(unused, {_Room_name, _Host, Room_pid}, ServerHost, Last_allowed) ->
+-    C = get_room_config(Room_pid),
+-    Persistent = C#config.persistent,
+-
+-    S = get_room_state(Room_pid),
+-    Just_created = S#state.just_created,
+-
+-    Room_users = S#state.users,
+-    Num_users = maps:size(Room_users),
+-
+-    History = (S#state.history)#lqueue.queue,
+-    Ts_now = calendar:universal_time(),
+-    HistorySize = gen_mod:get_module_opt(ServerHost, mod_muc, history_size),
+-    JustCreated = S#state.just_created,
+-    {Has_hist, Last} = case p1_queue:is_empty(History) of
+-			   true when (HistorySize == 0) or (JustCreated == true) ->
+-			       {false, 0};
+-			   true ->
+-			       Ts_diff = (misc:now_to_usec(now())
+-				    - S#state.just_created) div 1000000,
+-			       {false, Ts_diff};
+-			   false ->
+-			       Last_message = get_queue_last(History),
+-			       Ts_last = calendar:now_to_universal_time(
+-					   element(4, Last_message)),
+-			       Ts_diff =
+-				   calendar:datetime_to_gregorian_seconds(Ts_now)
+-				   - calendar:datetime_to_gregorian_seconds(Ts_last),
+-			       {true, Ts_diff}
+-		       end,
+-    case {Persistent, Just_created, Num_users, Has_hist, seconds_to_days(Last)} of
+-	{_true, JC, 0, _, Last_days}
+-	when (Last_days >= Last_allowed) and (JC /= true) ->
+-	    true;
+-	_ ->
+-	    false
+-    end;
++	try
++			C = get_room_config(Room_pid),
++			Persistent = C#config.persistent,
++
++			S = get_room_state(Room_pid),
++			Just_created = S#state.just_created,
++
++			Room_users = S#state.users,
++			Num_users = maps:size(Room_users),
++
++			History = (S#state.history)#lqueue.queue,
++			Ts_now = calendar:universal_time(),
++			HistorySize = gen_mod:get_module_opt(ServerHost, mod_muc, history_size),
++			JustCreated = S#state.just_created,
++			{Has_hist, Last} = case p1_queue:is_empty(History) of
++					 true when (HistorySize == 0) or (JustCreated == true) ->
++							 {false, 0};
++					 true ->
++							 Ts_diff = (misc:now_to_usec(now())
++							- S#state.just_created) div 1000000,
++							 {false, Ts_diff};
++					 false ->
++							 Last_message = get_queue_last(History),
++							 Ts_last = calendar:now_to_universal_time(
++							 element(4, Last_message)),
++							 Ts_diff = calendar:datetime_to_gregorian_seconds(Ts_now) - calendar:datetime_to_gregorian_seconds(Ts_last),
++							 {true, Ts_diff}
++						 end,
++			case {Persistent, Just_created, Num_users, Has_hist, seconds_to_days(Last)} of
++				{_true, JC, 0, _, Last_days} when (Last_days >= Last_allowed) and (JC /= true) -> true;
++				_ -> false
++			end
++	catch _Type:Error ->
++		case Error of
++			%% room appears to not exist anymore bc get_config is a func on every room, so it is safe to remove
++			{noproc, {p1_fsm, sync_send_all_state_event, [_Pid, get_config]}} -> true;
++			%% some other error occurred; so to be safe, do not remove room
++			_ -> false
++		end
++	end
++;
+ decide_room(empty, {Room_name, Host, _Room_pid}, ServerHost, _Last_allowed) ->
+     case gen_mod:is_loaded(ServerHost, mod_mam) of
+ 	true ->
+@@ -858,6 +925,31 @@ seconds_to_days(S) ->
+ %%---------------
+ %% Act
+ 
++act_on_rooms(Method, destroy, Rooms, ServerHost) ->
++	case Rooms of
++		[] -> ok;
++		_ ->
++			ServerHosts = [ {A, find_host(A)} || A <- ejabberd_config:get_myhosts() ],
++			Delete = fun({_N, H, _Pid} = Room) ->
++				SH = case ServerHost of
++					global -> find_serverhost(H, ServerHosts);
++					O -> O
++				end,
++				act_on_room(Method, destroy_not_forget, Room, SH)
++		 	end,
++			lists:foreach(Delete, Rooms),
++
++			%% all rooms have the same host
++			{_, Host, _} = lists:nth(1, Rooms),
++			SH = case ServerHost of
++				global -> find_serverhost(Host, ServerHosts);
++				O -> O
++		 	end,
++			RoomNames = [Name || {Name, _, _} <- Rooms],
++			rpc:async_call(node(), mod_muc_sql, forget_rooms, [SH, Host, RoomNames])
++	end
++;
++
+ act_on_rooms(Method, Action, Rooms, ServerHost) ->
+     ServerHosts = [ {A, find_host(A)} || A <- ejabberd_config:get_myhosts() ],
+     Delete = fun({_N, H, _Pid} = Room) ->
+@@ -875,12 +967,20 @@ find_serverhost(Host, ServerHosts) ->
+     ServerHost.
+ 
+ act_on_room(Method, destroy, {N, H, Pid}, SH) ->
+-    Message = iolist_to_binary(io_lib:format(
+-        <<"Room destroyed by rooms_~s_destroy.">>, [Method])),
+-    p1_fsm:send_all_state_event(
+-      Pid, {destroy, Message}),
+-    mod_muc:room_destroyed(H, N, Pid, SH),
+-    mod_muc:forget_room(SH, H, N);
++		act_on_room(Method, destroy_not_forget, {N, H, Pid}, SH),
++    mod_muc:forget_room(SH, H, N)
++;
++
++act_on_room(Method, destroy_not_forget, {N, H, Pid}, SH) ->
++	Message = iolist_to_binary(io_lib:format(<<"Room destroyed by rooms_~s_destroy.">>, [Method])),
++	%% catch any errors related to the pid
++	try
++		p1_fsm:send_all_state_event(Pid, {destroy, Message})
++	catch _:_ ->
++		ok
++	end,
++	mod_muc:room_destroyed(H, N, Pid, SH) %% unregister from online rooms list
++;
+ 
+ act_on_room(_Method, list, _, _) ->
+     ok.
+@@ -1077,6 +1177,11 @@ get_options(Config) ->
+                           (V) -> V end, ValuesRaw),
+     lists:zip(Fields, Values).
+ 
++get_room_title(Pid) ->
++	Config = get_room_config(Pid),
++	Config#config.title
++.
++
+ %%----------------------------
+ %% Get Room Affiliations
+ %%----------------------------
+@@ -1143,6 +1248,20 @@ set_room_affiliation(Name, Service, JID, AffiliationString) ->
+ 	    error
+     end.
+ 
++
++%%----------------------------
++%% Change User Affiliation
++%%----------------------------
++
++set_user_affiliation(ServerHost, LUser, NewAffiliation) ->
++	try
++		mod_muc_room:set_user_affiliation(ServerHost, LUser, binary_to_atom(NewAffiliation, latin1)),
++		ok
++	catch _:_ -> ok
++	end
++.
++
++
+ %%%
+ %%% MUC Subscription
+ %%%
+diff --git a/src/mod_muc_mnesia.erl b/src/mod_muc_mnesia.erl
+index 32006256e..a89a4d086 100644
+--- a/src/mod_muc_mnesia.erl
++++ b/src/mod_muc_mnesia.erl
+@@ -36,7 +36,8 @@
+ 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
+ 	 get_subscribed_rooms/3]).
+ -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
+-	 get_affiliations/3, search_affiliation/4]).
++	 get_affiliations/3, get_affiliations/1, search_affiliation/4,
++	 disable_affiliation/2, insert_affiliation/3]).
+ %% gen_server callbacks
+ -export([start_link/2, init/1, handle_cast/2, handle_call/3, handle_info/2,
+ 	 terminate/2, code_change/3]).
+@@ -156,6 +157,15 @@ get_affiliation(_ServerHost, _Room, _Host, _LUser, _LServer) ->
+ get_affiliations(_ServerHost, _Room, _Host) ->
+     {error, not_implemented}.
+ 
++get_affiliations(_Host) ->
++    [].
++
++insert_affiliation(_Host, _LUser, _Affiliation) ->
++    {error, not_implemented}.
++
++disable_affiliation(_Host, _LUser) ->
++    {error, not_implemented}.
++
+ search_affiliation(_ServerHost, _Room, _Host, _Affiliation) ->
+     {error, not_implemented}.
+ 
+diff --git a/src/mod_muc_room.erl b/src/mod_muc_room.erl
+index a8818aca4..fc6e4b327 100644
+--- a/src/mod_muc_room.erl
++++ b/src/mod_muc_room.erl
+@@ -36,6 +36,7 @@
+ 	 start/8,
+ 	 get_role/2,
+ 	 get_affiliation/2,
++	 set_user_affiliation/3,
+ 	 is_occupant_or_admin/2,
+ 	 route/2,
+ 	 expand_opts/1,
+@@ -134,6 +135,7 @@ init([Host, ServerHost, Access, Room, HistorySize,
+ 		   room_shaper = Shaper}),
+     State1 = set_opts(DefRoomOpts, State),
+     store_room(State1),
++    NewState = get_history_upon_init(State, HistorySize),
+     ?INFO_MSG("Created MUC room ~s@~s by ~s",
+ 	      [Room, Host, jid:encode(Creator)]),
+     add_to_log(room_existence, created, State1),
+@@ -151,8 +153,9 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
+ 				  jid = jid:make(Room, Host),
+ 				  room_queue = RoomQueue,
+ 				  room_shaper = Shaper}),
+-    add_to_log(room_existence, started, State),
+-    {ok, normal_state, State}.
++    NewState = get_history_upon_init(State, HistorySize),
++    add_to_log(room_existence, started, NewState),
++    {ok, normal_state, NewState}.
+ 
+ normal_state({route, <<"">>,
+ 	      #message{from = From, type = Type, lang = Lang} = Packet},
+@@ -530,6 +533,60 @@ handle_sync_event(get_config, _From, StateName,
+ handle_sync_event(get_state, _From, StateName,
+ 		  StateData) ->
+     {reply, {ok, StateData}, StateName, StateData};
++handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, StateData) ->
++	History = StateData#state.history,
++	Queue = History#lqueue.queue,
++	Limit = case LimitIn of
++		_ when LimitIn < 0 ->  5;
++		_ when LimitIn > 50 -> 50;
++		_ -> LimitIn
++	end,
++	{Messages, _, _} = lists:foldr(fun({_, Message, _, _, _}, {AccMessages, Count, LastMessageFound} = Acc) ->
++		case LastMessageFound of
++			true ->
++				Acc;
++			_ ->
++				case Count < Limit of
++					true ->
++						MessageId = xmpp:get_id(Message),
++						case LastMessageId == MessageId of
++							true ->
++								case Count == 0 of
++									true -> %% if the last seen message is the last message, only send the last message
++										{[Message], 1, true};
++									_ -> %% stop acc and return all messages after the last seen message
++										{AccMessages, Count, true}
++								end;
++							_ -> %% keep acc messages bc last message not found yet and limit has not been hit
++								{[Message | AccMessages], Count + 1, LastMessageFound }
++						end;
++					_ -> %% do not acc past limit
++						Acc
++				end
++		end
++	end, {[], 0, false}, p1_queue:to_list(Queue)),
++	Summary = case Messages of
++		[] -> [];
++		List ->
++			lists:map(fun({message, Id, _, _, {jid, FromUser, Server, _, _, _, _}, _, _, Texts, _, SubEls, _}) ->
++				Body = xmpp:get_text(Texts),
++				UserRole = case skillz_util:get_value_by_tag(SubEls, <<"user_role">>) of
++					none -> 0;
++					Value -> try list_to_integer(binary_to_list(Value)) catch _:_ -> 0 end
++				end,
++				AvatarUrl = skillz_util:get_value_by_tag(SubEls, <<"avatar_url">>, <<"">>),
++				Username = case skillz_util:get_value_by_tag(SubEls, <<"username">>) of
++					none -> case mod_vcard:get_nickname(FromUser, Server) of
++						none -> FromUser;
++						Nickname -> Nickname
++					end;
++					UsernameValue -> UsernameValue
++			  end,
++				{Id, Username, Body, UserRole, AvatarUrl}
++			end, List)
++	end,
++	{reply, {ok, Summary}, StateName, StateData}
++;
+ handle_sync_event({change_config, Config}, _From,
+ 		  StateName, StateData) ->
+     {result, undefined, NSD} = change_config(Config, StateData),
+@@ -1022,11 +1079,11 @@ process_presence(Nick, #presence{from = From, type = Type0} = Packet0, StateData
+ 	     drop ->
+ 		 {next_state, normal_state, StateData};
+ 	     #presence{} = Packet ->
+-		 close_room_if_temporary_and_empty(
++		 close_room_without_occupants(
+ 		   do_process_presence(Nick, Packet, StateData))
+ 	   end;
+        true ->
+-	    {next_state, normal_state, StateData}
++		close_room_without_occupants(StateData)
+     end.
+ 
+ -spec do_process_presence(binary(), presence(), state()) -> state().
+@@ -1124,17 +1181,39 @@ maybe_strip_status_from_presence(From, Packet, StateData) ->
+ 	_Allowed -> Packet
+     end.
+ 
++-spec close_room_without_occupants(state()) -> fsm_transition().
++close_room_without_occupants(StateData1) ->
++	case maps:size(StateData1#state.users) == 0 of
++		%% room is empty
++	  true ->
++			{LUser, _LServer, _LResource} = jid:tolower(StateData1#state.jid),
++			case binary:matches(LUser, [<<"-">>]) of
++				%% room is a game wide room so continue keeping it around
++				[] ->
++					{next_state, normal_state, StateData1};
++				%% room is a DM and empty so destroy it
++				_ ->
++					?INFO_MSG("Destroyed MUC room ~s becuase it lacks occupants",
++					[jid:encode(StateData1#state.jid)]),
++					add_to_log(room_existence, destroyed, StateData1),
++					{stop, normal, StateData1}
++			end;
++		%% room is not empty so keep it around
++	  _ -> {next_state, normal_state, StateData1}
++	end
++.
++
+ -spec close_room_if_temporary_and_empty(state()) -> fsm_transition().
+ close_room_if_temporary_and_empty(StateData1) ->
+-    case not (StateData1#state.config)#config.persistent
+-	andalso maps:size(StateData1#state.users) == 0
+-	andalso maps:size(StateData1#state.subscribers) == 0 of
+-      true ->
+-	  ?INFO_MSG("Destroyed MUC room ~s because it's temporary "
++	case not (StateData1#state.config)#config.persistent
++		andalso maps:size(StateData1#state.users) == 0
++		andalso maps:size(StateData1#state.subscribers) == 0 of
++	  true ->
++        ?INFO_MSG("Destroyed MUC room ~s because it's temporary "
+ 		    "and empty",
+ 		    [jid:encode(StateData1#state.jid)]),
+-	  add_to_log(room_existence, destroyed, StateData1),
+-	  {stop, normal, StateData1};
++		add_to_log(room_existence, destroyed, StateData1),
++		{stop, normal, StateData1};
+       _ -> {next_state, normal_state, StateData1}
+     end.
+ 
+@@ -1299,17 +1378,48 @@ set_affiliation(JID, Affiliation,
+ 		#state{config = #config{persistent = false}} = StateData,
+ 		Reason) ->
+     set_affiliation_fallback(JID, Affiliation, StateData, Reason);
++
+ set_affiliation(JID, Affiliation, StateData, Reason) ->
+     ServerHost = StateData#state.server_host,
+     Room = StateData#state.room,
+-    Host = StateData#state.host,
+-    Mod = gen_mod:db_mod(ServerHost, mod_muc),
+-    case Mod:set_affiliation(ServerHost, Room, Host, JID, Affiliation, Reason) of
+-	ok ->
+-	    StateData;
+-	{error, _} ->
+-	    set_affiliation_fallback(JID, Affiliation, StateData, Reason)
+-    end.
++    case lists:member($-, binary_to_list(Room)) of
++    true ->
++        set_affiliation_fallback(JID, Affiliation, StateData, Reason);
++    false ->
++        Host = StateData#state.host,
++        Mod = gen_mod:db_mod(ServerHost, mod_muc),
++        LUser = JID#jid.luser,
++        NewAffiliation = case {Affiliation, Reason} of
++        {outcast, <<"muted">>} ->
++            muted;
++        _ ->
++            Affiliation
++        end,
++        case NewAffiliation of
++        none ->
++            Mod:disable_affiliation(ServerHost, LUser);
++        _ ->
++            Mod:disable_affiliation(ServerHost, LUser),
++            Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
++        end
++    end,
++    StateData.
++
++%% @doc set user affiliation for all rooms globally
++%% ServerHost is the host, eg, chat.skillz.com
++%% LUser is the username, eg, 1234
++%% NewAffiliation can be: outcast, muted, none
++%% @spec set_user_affiliation(ServerHost :: binary(), LUser :: binary(), NewAffiliation :: atom()) -> ok
++set_user_affiliation(ServerHost, LUser, NewAffiliation) ->
++	Mod = gen_mod:db_mod(ServerHost, mod_muc),
++	case NewAffiliation of
++		none ->
++			Mod:disable_affiliation(ServerHost, LUser);
++		_ ->
++			Mod:disable_affiliation(ServerHost, LUser),
++			Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
++	end
++.
+ 
+ -spec set_affiliation_fallback(jid(), affiliation(), state(), binary()) -> state().
+ set_affiliation_fallback(JID, Affiliation, StateData, Reason) ->
+@@ -1362,16 +1472,16 @@ do_get_affiliation(JID, #state{config = #config{persistent = false}} = StateData
+     do_get_affiliation_fallback(JID, StateData);
+ do_get_affiliation(JID, StateData) ->
+     Room = StateData#state.room,
+-    Host = StateData#state.host,
+-    LServer = JID#jid.lserver,
+-    LUser = JID#jid.luser,
+-    ServerHost = StateData#state.server_host,
+-    Mod = gen_mod:db_mod(ServerHost, mod_muc),
+-    case Mod:get_affiliation(ServerHost, Room, Host, LUser, LServer) of
+-	{error, _} ->
+-	    do_get_affiliation_fallback(JID, StateData);
+-	{ok, Affiliation} ->
+-	    Affiliation
++    case lists:member($-, binary_to_list(Room)) of
++    true ->
++        do_get_affiliation_fallback(JID, StateData);
++    false ->
++        Host = StateData#state.host,
++        LServer = JID#jid.lserver,
++        LUser = JID#jid.luser,
++        ServerHost = StateData#state.server_host,
++        Mod = gen_mod:db_mod(ServerHost, mod_muc),
++        Mod:get_affiliation(ServerHost, LUser)
+     end.
+ 
+ -spec do_get_affiliation_fallback(jid(), state()) -> affiliation().
+@@ -1484,6 +1594,7 @@ get_default_role(Affiliation, StateData) ->
+       admin -> moderator;
+       member -> participant;
+       outcast -> none;
++      muted -> visitor;
+       none ->
+ 	  case (StateData#state.config)#config.members_only of
+ 	    true -> none;
+@@ -1940,6 +2051,14 @@ add_new_user(From, Nick, Packet, StateData) ->
+ 		  {error, Err}
+ 	  end;
+       {_, _, _, Role} ->
++      RoomJID = StateData#state.jid,
++      To = jid:replace_resource(RoomJID, Nick),
++      case Role of
++      visitor ->
++        set_role(To, visitor, StateData);
++      _ ->
++        ok
++      end,
+ 	  case check_password(ServiceAffiliation, Affiliation,
+ 			      Packet, From, StateData)
+ 	      of
+@@ -2099,6 +2218,26 @@ extract_password(#iq{} = IQ) ->
+ 	    false
+     end.
+ 
++get_history_upon_init(StateData, HistorySize) ->
++    ServerHost = StateData#state.server_host,
++    Room = StateData#state.room,
++    Host = StateData#state.host,
++    MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host, HistorySize),
++    case MessageHistory of
++        {error, _} ->
++            StateData;
++        _ ->
++            lists:foldl(
++              fun([{FromJID, FromNick, {_, UnarchivedMessage}, TS}], SD) ->
++                Conv = 1000000,
++                TimeStamp = {
++                  TS div Conv div Conv,
++                  TS div Conv rem Conv,
++                  TS rem Conv},
++                add_message_to_history(FromNick, FromJID, UnarchivedMessage, SD, TimeStamp)
++              end, StateData, MessageHistory)
++    end.
++
+ -spec get_history(binary(), stanza(), state()) -> lqueue().
+ get_history(Nick, Packet, #state{history = History}) ->
+     case xmpp:get_subtag(Packet, #muc{}) of
+@@ -2515,10 +2654,12 @@ lqueue_cut(Q, N) ->
+ 
+ -spec add_message_to_history(binary(), jid(), message(), state()) -> state().
+ add_message_to_history(FromNick, FromJID, Packet, StateData) ->
++    TimeStamp = p1_time_compat:timestamp(),
++    add_message_to_history(FromNick, FromJID, Packet, StateData, TimeStamp).
++add_message_to_history(FromNick, FromJID, Packet, StateData, TimeStamp) ->
+     add_to_log(text, {FromNick, Packet}, StateData),
+     case check_subject(Packet) of
+ 	[] ->
+-	    TimeStamp = p1_time_compat:timestamp(),
+ 	    AddrPacket = case (StateData#state.config)#config.anonymous of
+ 			     true -> Packet;
+ 			     false ->
+@@ -2744,12 +2885,12 @@ process_item_change(Item, SD, UJID) ->
+ 			SD1 = set_affiliation(JID, none, SD),
+ 			send_update_presence(JID, Reason, SD1, SD),
+ 			maybe_send_affiliation(JID, none, SD1),
+-			SD1
++			set_role(JID, participant, SD1)
+ 		end;
+ 	    {JID, affiliation, outcast, Reason} ->
+ 		send_kickban_presence(UJID, JID, Reason, 301, outcast, SD),
+ 		maybe_send_affiliation(JID, outcast, SD),
+-		set_affiliation(JID, outcast, set_role(JID, none, SD), Reason);
++		set_affiliation(JID, outcast, set_role(JID, visitor, SD), Reason);
+ 	    {JID, affiliation, A, Reason} when (A == admin) or (A == owner) ->
+ 		SD1 = set_affiliation(JID, A, SD, Reason),
+ 		SD2 = set_role(JID, moderator, SD1),
+@@ -2882,8 +3023,10 @@ can_change_ra(_FAffiliation, _FRole, owner, _TRole,
+     true;
+ can_change_ra(_FAffiliation, _FRole, _TAffiliation,
+ 	      _TRole, _RoleorAffiliation, _Value, owner) ->
+-    %% Nobody can decrease MUC admin's role/affiliation
+-    false;
++    %% Originally, nobody could decrease MUC admin's role/affiliation
++    %% But because we allow users to create MUC rooms (DMs), and they must be owners to do this,
++    %% we must allow decreasing the affiliation of an owner in order to ban/mute users that have created DMs
++    true;
+ can_change_ra(_FAffiliation, _FRole, TAffiliation,
+ 	      _TRole, affiliation, Value, _ServiceAf)
+     when TAffiliation == Value ->
+@@ -2897,6 +3040,26 @@ can_change_ra(FAffiliation, _FRole, outcast, _TRole,
+     when (FAffiliation == owner) or
+ 	   (FAffiliation == admin) ->
+     true;
++can_change_ra(FAffiliation, _FRole, outcast, _TRole,
++          affiliation, muted, _ServiceAf)
++    when (FAffiliation == owner) or
++       (FAffiliation == admin) ->
++    true;
++can_change_ra(FAffiliation, _FRole, none, _TRole,
++          affiliation, muted, _ServiceAf)
++    when (FAffiliation == owner) or
++       (FAffiliation == admin) ->
++    true;
++can_change_ra(FAffiliation, _FRole, muted, _TRole,
++          affiliation, none, _ServiceAf)
++    when (FAffiliation == owner) or
++       (FAffiliation == admin) ->
++    true;
++can_change_ra(FAffiliation, _FRole, muted, _TRole,
++          affiliation, outcast, _ServiceAf)
++    when (FAffiliation == owner) or
++       (FAffiliation == admin) ->
++    true;
+ can_change_ra(FAffiliation, _FRole, outcast, _TRole,
+ 	      affiliation, member, _ServiceAf)
+     when (FAffiliation == owner) or
+@@ -2948,7 +3111,10 @@ can_change_ra(owner, _FRole, owner, _TRole, affiliation,
+     check_owner;
+ can_change_ra(_FAffiliation, _FRole, _TAffiliation,
+ 	      _TRole, affiliation, _Value, _ServiceAf) ->
+-    false;
++    % Originally, this returned false
++    % We require this to return true in order to ban users that have created DMs
++    % and are owners of their own room
++    true;
+ can_change_ra(_FAffiliation, moderator, _TAffiliation,
+ 	      visitor, role, none, _ServiceAf) ->
+     true;
+@@ -2986,6 +3152,16 @@ can_change_ra(FAffiliation, subscriber, _TAffiliation,
+     when (FAffiliation == owner) or
+ 	   (FAffiliation == admin) ->
+     true;
++can_change_ra(FAffiliation, muted, _TAffiliation,
++          visitor, role, none, _ServiceAf)
++    when (FAffiliation == owner) or
++       (FAffiliation == admin) ->
++    true;
++can_change_ra(FAffiliation, subscriber, _TAffiliation,
++          _, role, _, _ServiceAf)
++    when (FAffiliation == owner) or
++       (FAffiliation == admin) ->
++    true;
+ can_change_ra(FAffiliation, _FRole, _TAffiliation,
+ 	      participant, role, moderator, _ServiceAf)
+     when (FAffiliation == owner) or
+@@ -3158,7 +3334,7 @@ process_iq_owner(From, #iq{type = set, lang = Lang,
+ 						 items = Items}]},
+ 		 StateData) ->
+     FAffiliation = get_affiliation(From, StateData),
+-    if FAffiliation /= owner ->
++    if FAffiliation /= owner andalso FAffiliation /= admin  ->
+ 	    ErrText = <<"Owner privileges required">>,
+ 	    {error, xmpp:err_forbidden(ErrText, Lang)};
+        Destroy /= undefined, Config == undefined, Items == [] ->
+@@ -3203,7 +3379,7 @@ process_iq_owner(From, #iq{type = get, lang = Lang,
+ 						 items = Items}]},
+ 		 StateData) ->
+     FAffiliation = get_affiliation(From, StateData),
+-    if FAffiliation /= owner ->
++    if FAffiliation /= owner andalso FAffiliation /= admin ->
+ 	    ErrText = <<"Owner privileges required">>,
+ 	    {error, xmpp:err_forbidden(ErrText, Lang)};
+        Destroy == undefined, Config == undefined ->
+@@ -3458,8 +3634,7 @@ set_config(Opts, Config, ServerHost, Lang) ->
+ -spec change_config(#config{}, state()) -> {result, undefined, state()}.
+ change_config(Config, StateData) ->
+     send_config_change_info(Config, StateData),
+-    StateData0 = StateData#state{config = Config},
+-    StateData1 = remove_subscriptions(StateData0),
++    StateData1 = StateData#state{config = Config},
+     StateData2 =
+         case {(StateData#state.config)#config.persistent,
+               Config#config.persistent} of
+@@ -3803,12 +3978,12 @@ destroy_room(DEl, StateData) ->
+ 			   Info#user.jid, Packet,
+ 			   ?NS_MUCSUB_NODES_CONFIG, StateData)
+       end, ok, get_users_and_subscribers(StateData)),
+-    case (StateData#state.config)#config.persistent of
+-      true ->
+-	  mod_muc:forget_room(StateData#state.server_host,
+-			      StateData#state.host, StateData#state.room);
+-      false -> ok
+-    end,
++%    case (StateData#state.config)#config.persistent of
++%      true ->
++%	  mod_muc:forget_room(StateData#state.server_host,
++%			      StateData#state.host, StateData#state.room);
++%      false -> ok
++%    end,
+     {result, undefined, stop}.
+ 
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+@@ -3964,7 +4139,7 @@ process_iq_vcard(_From, #iq{type = get}, StateData) ->
+     end;
+ process_iq_vcard(From, #iq{type = set, lang = Lang, sub_els = [Pkt]},
+ 		 StateData) ->
+-    case get_affiliation(From, StateData) of
++	case get_affiliation(From, StateData) of
+ 	owner ->
+ 	    SubEl = xmpp:encode(Pkt),
+ 	    VCardRaw = fxml:element_to_binary(SubEl),
+@@ -4073,7 +4248,11 @@ process_iq_mucsub(From, #iq{type = get, lang = Lang,
+ 		     fun(_, #subscriber{jid = J, nodes = Nodes}, Acc) ->
+ 			     [#muc_subscription{jid = J, events = Nodes}|Acc]
+ 		     end, [], StateData#state.subscribers),
+-	    {result, #muc_subscriptions{list = Subs}, StateData};
++	    NewStateData = case close_room_without_occupants(StateData) of
++	        {stop, normal, _} -> stop;
++	        {next_state, normal_state, SD} -> SD
++	    end,
++	    {result, #muc_subscriptions{list = Subs}, NewStateData};
+        true ->
+ 	    Txt = <<"Moderator privileges required">>,
+ 	    {error, xmpp:err_forbidden(Txt, Lang)}
+@@ -4371,23 +4550,94 @@ send_subscriptions_change_notifications(From, Nick, Type, State) ->
+ 		    end
+ 	       end, ok, State#state.subscribers).
+ 
++-spec is_privacy_allow(stanza()) -> boolean().
++is_privacy_allow(Packet) ->
++    To = xmpp:get_to(Packet),
++    LServer = To#jid.server,
++    allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, allow, [To, Packet, in]).
++
++-spec is_offline_privacy_allow(stanza()) -> boolean().
++is_offline_privacy_allow(Packet) ->
++    To = xmpp:get_to(Packet),
++    LServer = To#jid.server,
++    ?DEBUG("mod_muc_room checking is_offline_privacy_allow", []),
++    allow == ejabberd_hooks:run_fold(privacy_check_packet, LServer, respect_mute, [To, Packet, in]).
++
++-spec inspect_sdk_xmlels(binary(), map(), list()) -> list().
++inspect_sdk_xmlels(User, #xmlel{name = Name, children = ChildrenList}, Acc) ->
++    [Children|_] = ChildrenList,
++    {_, CData} = Children,
++    case Name of
++      <<"user_id">> -> [User == CData | Acc];
++      %% TODO: Filtering by message_type is cruft that wasn't working as intended, but it's something we may want to
++      %% reimplement properly in the future, so for now we consider all message_types as potentially ignorable
++      <<"message_type">> -> [true | Acc];
++      _ -> Acc
++    end;
++inspect_sdk_xmlels(_, _, Acc) -> Acc.
++
++-spec should_send_message(stanza(), jid()) -> boolean().
++should_send_message(#message{sub_els = SubEls}, #jid{user = User}) ->
++    SdkEl = lists:nth(?SdkElementsPosition, SubEls),
++    #xmlel{children = SdkChildren} = SdkEl,
++    ShouldIgnore = lists:foldl(fun(Child, Acc) ->
++        inspect_sdk_xmlels(User, Child, Acc)
++    end, [], SdkChildren),
++    ?DEBUG("ShouldIgnore [user_id, message_type]: ~p", [ShouldIgnore]),
++    ShouldIgnore /= [true, true].
++
++%% If they are not in the room, and the message_type isn't in the list of
++%% specified message_types, and the to user doesn't match the user_id then
++%% send to the offline message hook, otherwise just send to the room.
++%% (Won't update offline message count).
++-spec send_to_room_or_offline(boolean(), boolean(), stanza(), stanza(), binary()) -> any().
++send_to_room_or_offline(false, true, Packet, PrivacyCheckPacket, LServer) ->
++	case is_offline_privacy_allow(PrivacyCheckPacket) of
++		true ->
++		  ?DEBUG("offline_privacy_allowed, sending offline_message", []),
++		  ejabberd_hooks:run_fold(offline_message_hook, LServer, {bounce, Packet}, []);
++		_ ->
++		  ?DEBUG("Failed to allow offline_privacy_allowed, doing nothing", []),
++		  ok
++	end;
++send_to_room_or_offline(_, _, Packet, _, _) -> ejabberd_router:route(Packet).
++
+ -spec send_wrapped(jid(), jid(), stanza(), binary(), state()) -> ok.
+ send_wrapped(From, To, Packet, Node, State) ->
+     LTo = jid:tolower(To),
+     LBareTo = jid:tolower(jid:remove_resource(To)),
++	IsSubscriber = case maps:get(LBareTo, State#state.subscribers, error) of
++		{ok, #subscriber{nodes = NodeCheck, jid = _}} -> lists:member(Node, NodeCheck);
++		error -> false;
++		_ -> false
++	end,
++	IsInRoom = case maps:get(LTo, State#state.users, error) of
++		{ok, _} -> true;
++		error -> false;
++		_ -> false
++	end,
+     IsOffline = case maps:get(LTo, State#state.users, error) of
+ 		    #user{last_presence = undefined} -> true;
+ 		    error -> true;
+ 		    _ -> false
+ 		end,
+-    if IsOffline ->
++	?DEBUG("User is offline: ~p and is in room: ~p ", [IsOffline, IsInRoom]),
++    if IsSubscriber; IsOffline ->
+ 	    try maps:get(LBareTo, State#state.subscribers) of
+ 		#subscriber{nodes = Nodes, jid = JID} ->
+ 		    case lists:member(Node, Nodes) of
+ 			true ->
+-			    NewPacket = wrap(From, JID, Packet, Node),
+-			    ejabberd_router:route(
+-			      xmpp:set_from_to(NewPacket, State#state.jid, JID));
++			    NewPacket          = wrap(From, JID, Packet, Node),
++				PrivacyCheckPacket = xmpp:set_from_to(NewPacket, From, JID),
++				PacketToSend       = xmpp:set_from_to(NewPacket, State#state.jid, JID),
++				LServer            = To#jid.lserver,
++				?DEBUG("This packet will be used:~n~s", [xmpp:pp(PacketToSend)]),
++				case is_privacy_allow(PrivacyCheckPacket) of
++					true ->
++						send_to_room_or_offline(IsInRoom, should_send_message(Packet, To), PacketToSend, PrivacyCheckPacket, LServer);
++					false ->
++						?DEBUG("Packet wasnt allowed due to privacy list: ~p", [Packet])
++				end;
+ 			false ->
+ 			    ok
+ 		    end
+@@ -4422,7 +4672,7 @@ send_wrapped(From, To, Packet, Node, State) ->
+ 
+ -spec wrap(jid(), jid(), stanza(), binary()) -> message().
+ wrap(From, To, Packet, Node) ->
+-    El = xmpp:set_from_to(Packet, From, To),
++    El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
+     #message{
+        sub_els = [#ps_event{
+ 		     items = #ps_items{
+diff --git a/src/mod_muc_sql.erl b/src/mod_muc_sql.erl
+index 12487e628..68f20c677 100644
+--- a/src/mod_muc_sql.erl
++++ b/src/mod_muc_sql.erl
+@@ -30,16 +30,18 @@
+ -behaviour(mod_muc_room).
+ 
+ %% API
+--export([init/2, store_room/5, restore_room/3, forget_room/3,
+-	 can_use_nick/4, get_rooms/2, get_nick/3, set_nick/4,
+-	 import/3, export/1]).
++-export([init/2, store_room/5, restore_room/3, forget_room/3, forget_rooms/3, forget_rooms_batch/3,
++   can_use_nick/4, get_rooms/2, get_nick/3, set_nick/4,
++   import/3, export/1]).
+ -export([register_online_room/4, unregister_online_room/4, find_online_room/3,
+-	 get_online_rooms/3, count_online_rooms/2, rsm_supported/0,
+-	 register_online_user/4, unregister_online_user/4,
+-	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
+-	 get_subscribed_rooms/3]).
++   get_online_rooms/3, count_online_rooms/2, rsm_supported/0,
++   register_online_user/4, unregister_online_user/4,
++   count_online_rooms_by_user/3, get_online_rooms_by_user/3,
++   get_subscribed_rooms/3]).
+ -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
+-	 get_affiliations/3, search_affiliation/4]).
++   get_affiliations/3, get_affiliations/1, get_affiliation/2,
++   search_affiliation/4, disable_affiliation/2, insert_affiliation/3]).
++-export([decode_affiliation/1]).
+ 
+ -include("jid.hrl").
+ -include("mod_muc.hrl").
+@@ -51,20 +53,20 @@
+ %%%===================================================================
+ init(Host, Opts) ->
+     case gen_mod:ram_db_mod(Host, Opts, mod_muc) of
+-	?MODULE ->
+-	    clean_tables(Host);
+-	_ ->
+-	    ok
++  ?MODULE ->
++      clean_tables(Host);
++  _ ->
++      ok
+     end.
+ 
+ store_room(LServer, Host, Name, Opts, ChangesHints) ->
+     {Subs, Opts2} = case lists:keytake(subscribers, 1, Opts) of
+-			{value, {subscribers, S}, OptN} -> {S, OptN};
+-			_ -> {[], Opts}
+-		    end,
++      {value, {subscribers, S}, OptN} -> {S, OptN};
++      _ -> {[], Opts}
++        end,
+     SOpts = misc:term_to_expr(Opts2),
+     F = fun () ->
+-		?SQL_UPSERT_T(
++    ?SQL_UPSERT_T(
+                    "muc_room",
+                    ["!name=%(Name)s",
+                     "!host=%(Host)s",
+@@ -80,7 +82,7 @@ store_room(LServer, Host, Name, Opts, ChangesHints) ->
+                         [change_room(Host, Name, {add_subscription, JID, Nick, Nodes})
+                          || {JID, Nick, Nodes} <- Subs]
+                 end
+-	end,
++  end,
+     ejabberd_sql:sql_transaction(LServer, F).
+ 
+ change_room(Host, Room, {add_subscription, JID, Nick, Nodes}) ->
+@@ -89,14 +91,14 @@ change_room(Host, Room, {add_subscription, JID, Nick, Nodes}) ->
+     ?SQL_UPSERT_T(
+        "muc_room_subscribers",
+        ["!jid=%(SJID)s",
+-	"!host=%(Host)s",
+-	"!room=%(Room)s",
+-	"nick=%(Nick)s",
+-	"nodes=%(SNodes)s"]);
++  "!host=%(Host)s",
++  "!room=%(Room)s",
++  "nick=%(Nick)s",
++  "nodes=%(SNodes)s"]);
+ change_room(Host, Room, {del_subscription, JID}) ->
+     SJID = jid:encode(JID),
+     ejabberd_sql:sql_query_t(?SQL("delete from muc_room_subscribers where "
+-				  "room=%(Room)s and host=%(Host)s and jid=%(SJID)s"));
++          "room=%(Room)s and host=%(Host)s and jid=%(SJID)s"));
+ change_room(Host, Room, Change) ->
+     ?ERROR_MSG("Unsupported change on room ~s@~s: ~p", [Room, Host, Change]).
+ 
+@@ -105,44 +107,83 @@ restore_room(LServer, Host, Name) ->
+                  LServer,
+                  ?SQL("select @(opts)s from muc_room where name=%(Name)s"
+                       " and host=%(Host)s")) of
+-	{selected, [{Opts}]} ->
+-	    OptsD = ejabberd_sql:decode_term(Opts),
+-	    case catch ejabberd_sql:sql_query(
+-		LServer,
+-		?SQL("select @(jid)s, @(nick)s, @(nodes)s from muc_room_subscribers where room=%(Name)s"
+-		     " and host=%(Host)s")) of
+-		{selected, []} ->
+-		    OptsR = mod_muc:opts_to_binary(OptsD),
+-		    case lists:keymember(subscribers, 1, OptsD) of
+-			true ->
+-			    store_room(LServer, Host, Name, OptsR, undefined);
+-			_ ->
+-			    ok
+-		    end,
+-		    OptsR;
+-		{selected, Subs} ->
+-		    SubData = lists:map(
+-			     fun({Jid, Nick, Nodes}) ->
+-				 {jid:decode(Jid), Nick, ejabberd_sql:decode_term(Nodes)}
+-			     end, Subs),
+-		    Opts2 = lists:keystore(subscribers, 1, OptsD, {subscribers, SubData}),
+-		    mod_muc:opts_to_binary(Opts2);
+-		_ ->
+-		    error
+-	    end;
+-	_ ->
+-	    error
++  {selected, [{Opts}]} ->
++      OptsD = ejabberd_sql:decode_term(Opts),
++      case catch ejabberd_sql:sql_query(
++    LServer,
++    ?SQL("select @(jid)s, @(nick)s, @(nodes)s from muc_room_subscribers where room=%(Name)s"
++         " and host=%(Host)s")) of
++    {selected, []} ->
++        OptsR = mod_muc:opts_to_binary(OptsD),
++        case lists:keymember(subscribers, 1, OptsD) of
++      true ->
++          store_room(LServer, Host, Name, OptsR, undefined);
++      _ ->
++          ok
++        end,
++        OptsR;
++    {selected, Subs} ->
++        SubData = lists:map(
++           fun({Jid, Nick, Nodes}) ->
++         {jid:decode(Jid), Nick, ejabberd_sql:decode_term(Nodes)}
++           end, Subs),
++        Opts2 = lists:keystore(subscribers, 1, OptsD, {subscribers, SubData}),
++        mod_muc:opts_to_binary(Opts2);
++    _ ->
++        error
++      end;
++  _ ->
++      error
+     end.
+ 
++forget_rooms(LServer, Host, Rooms) ->
++  forget_rooms(LServer, Host, Rooms, length(Rooms), 32)
++.
++
++forget_rooms(LServer, Host, Rooms, RoomsLen, BatchSize) ->
++  {BatchRooms, Rest} = case RoomsLen > BatchSize of
++    true -> lists:split(BatchSize, Rooms);
++    _ -> {Rooms, []}
++  end,
++  forget_rooms_batch(LServer, Host, BatchRooms),
++  case Rest of
++    [] -> ok;
++    _ ->
++      timer:sleep(30000),
++      forget_rooms(LServer, Host, Rest, RoomsLen - BatchSize, BatchSize)
++  end
++.
++
++forget_rooms_batch(LServer, Host, Rooms) ->
++  case Rooms of
++    [] -> ok;
++    _ ->
++      RoomInStr = str:join([[<<"'">>, ejabberd_sql:escape(Room), <<"'">>] || Room <- Rooms], <<",">>),
++      RoomQuery = <<(<<"delete from muc_room where host = '">>)/binary,
++        (ejabberd_sql:escape(Host))/binary, (<<"' and name in (">>)/binary,
++        RoomInStr/binary,
++        (<<")">>)/binary>>,
++      RoomSubscrQuery = <<(<<"delete from muc_room_subscribers where host = '">>)/binary,
++        (ejabberd_sql:escape(Host))/binary, (<<"' and room in (">>)/binary,
++        RoomInStr/binary,
++        (<<")">>)/binary>>,
++      F = fun () ->
++        ejabberd_sql:sql_query_t(RoomQuery),
++        ejabberd_sql:sql_query_t(RoomSubscrQuery)
++      end,
++      ejabberd_sql:sql_transaction(LServer, F)
++  end
++.
++
+ forget_room(LServer, Host, Name) ->
+     F = fun () ->
+-		ejabberd_sql:sql_query_t(
+-                  ?SQL("delete from muc_room where name=%(Name)s"
+-                       " and host=%(Host)s")),
+-		ejabberd_sql:sql_query_t(
+-		    ?SQL("delete from muc_room_subscribers where room=%(Name)s"
+-                       " and host=%(Host)s"))
+-	end,
++      ejabberd_sql:sql_query_t(
++                    ?SQL("delete from muc_room where name=%(Name)s"
++                         " and host=%(Host)s")),
++      ejabberd_sql:sql_query_t(
++          ?SQL("delete from muc_room_subscribers where room=%(Name)s"
++                         " and host=%(Host)s"))
++    end,
+     ejabberd_sql:sql_transaction(LServer, F).
+ 
+ can_use_nick(LServer, Host, JID, Nick) ->
+@@ -152,8 +193,8 @@ can_use_nick(LServer, Host, JID, Nick) ->
+                  ?SQL("select @(jid)s from muc_registered "
+                       "where nick=%(Nick)s"
+                       " and host=%(Host)s")) of
+-	{selected, [{SJID1}]} -> SJID == SJID1;
+-	_ -> true
++  {selected, [{SJID1}]} -> SJID == SJID1;
++  _ -> true
+     end.
+ 
+ get_rooms(LServer, Host) ->
+@@ -161,37 +202,37 @@ get_rooms(LServer, Host) ->
+                  LServer,
+                  ?SQL("select @(name)s, @(opts)s from muc_room"
+                       " where host=%(Host)s")) of
+-	{selected, RoomOpts} ->
+-	    case catch ejabberd_sql:sql_query(
+-		LServer,
+-		?SQL("select @(room)s, @(jid)s, @(nick)s, @(nodes)s from muc_room_subscribers"
+-		     " where host=%(Host)s")) of
+-		{selected, Subs} ->
+-		    SubsD = lists:foldl(
+-			fun({Room, Jid, Nick, Nodes}, Dict) ->
+-			    dict:append(Room, {jid:decode(Jid),
+-					       Nick, ejabberd_sql:decode_term(Nodes)}, Dict)
+-			end, dict:new(), Subs),
+-	    lists:map(
+-	      fun({Room, Opts}) ->
+-			    OptsD = ejabberd_sql:decode_term(Opts),
+-			    OptsD2 = case {dict:find(Room, SubsD), lists:keymember(subscribers, 1, OptsD)} of
+-					 {_, true} ->
+-					     store_room(LServer, Host, Room, mod_muc:opts_to_binary(OptsD), undefined),
+-					     OptsD;
+-					 {{ok, SubsI}, false} ->
+-					     lists:keystore(subscribers, 1, OptsD, {subscribers, SubsI});
+-					 _ ->
+-					     OptsD
+-			    end,
+-		      #muc_room{name_host = {Room, Host},
+-				      opts = mod_muc:opts_to_binary(OptsD2)}
+-	      end, RoomOpts);
+-	_Err ->
+-		    []
+-	    end;
+-	_Err ->
+-	    []
++  {selected, RoomOpts} ->
++      case catch ejabberd_sql:sql_query(
++    LServer,
++    ?SQL("select @(room)s, @(jid)s, @(nick)s, @(nodes)s from muc_room_subscribers"
++         " where host=%(Host)s")) of
++    {selected, Subs} ->
++        SubsD = lists:foldl(
++      fun({Room, Jid, Nick, Nodes}, Dict) ->
++          dict:append(Room, {jid:decode(Jid),
++                 Nick, ejabberd_sql:decode_term(Nodes)}, Dict)
++      end, dict:new(), Subs),
++      lists:map(
++        fun({Room, Opts}) ->
++          OptsD = ejabberd_sql:decode_term(Opts),
++          OptsD2 = case {dict:find(Room, SubsD), lists:keymember(subscribers, 1, OptsD)} of
++           {_, true} ->
++               store_room(LServer, Host, Room, mod_muc:opts_to_binary(OptsD), undefined),
++               OptsD;
++           {{ok, SubsI}, false} ->
++               lists:keystore(subscribers, 1, OptsD, {subscribers, SubsI});
++           _ ->
++               OptsD
++          end,
++          #muc_room{name_host = {Room, Host},
++              opts = mod_muc:opts_to_binary(OptsD2)}
++        end, RoomOpts);
++  _Err ->
++        []
++      end;
++  _Err ->
++      []
+     end.
+ 
+ get_nick(LServer, Host, From) ->
+@@ -200,42 +241,82 @@ get_nick(LServer, Host, From) ->
+                  LServer,
+                  ?SQL("select @(nick)s from muc_registered where"
+                       " jid=%(SJID)s and host=%(Host)s")) of
+-	{selected, [{Nick}]} -> Nick;
+-	_ -> error
++  {selected, [{Nick}]} -> Nick;
++  _ -> error
+     end.
+ 
+ set_nick(LServer, Host, From, Nick) ->
+     JID = jid:encode(jid:tolower(jid:remove_resource(From))),
+     F = fun () ->
+-		case Nick of
+-		    <<"">> ->
+-			ejabberd_sql:sql_query_t(
+-			  ?SQL("delete from muc_registered where"
++    case Nick of
++        <<"">> ->
++      ejabberd_sql:sql_query_t(
++        ?SQL("delete from muc_registered where"
+                                " jid=%(JID)s and host=%(Host)s")),
+-			ok;
+-		    _ ->
+-			Allow = case ejabberd_sql:sql_query_t(
+-				       ?SQL("select @(jid)s from muc_registered"
++      ok;
++        _ ->
++      Allow = case ejabberd_sql:sql_query_t(
++               ?SQL("select @(jid)s from muc_registered"
+                                             " where nick=%(Nick)s"
+                                             " and host=%(Host)s")) of
+-				    {selected, [{J}]} -> J == JID;
+-				    _ -> true
+-				end,
+-			if Allow ->
+-				?SQL_UPSERT_T(
++            {selected, [{J}]} -> J == JID;
++            _ -> true
++        end,
++      if Allow ->
++        ?SQL_UPSERT_T(
+                                   "muc_registered",
+                                   ["!jid=%(JID)s",
+                                    "!host=%(Host)s",
+                                    "server_host=%(LServer)s",
+                                    "nick=%(Nick)s"]),
+-				ok;
+-			   true ->
+-				false
+-			end
+-		end
+-	end,
++        ok;
++         true ->
++        false
++      end
++    end
++  end,
+     ejabberd_sql:sql_transaction(LServer, F).
+ 
++-spec decode_affiliation(Arg :: binary()) -> atom().
++decode_affiliation(<<"owner">>) -> owner;
++decode_affiliation(<<"member">>) -> member;
++decode_affiliation(<<"outcast">>) -> outcast;
++decode_affiliation(<<"muted">>) -> muted;
++decode_affiliation(_) -> none.
++
++-spec encode_affiliation(Arg :: atom()) -> binary().
++encode_affiliation(owner) -> <<"owner">>;
++encode_affiliation(member) -> <<"member">>;
++encode_affiliation(outcast) -> <<"outcast">>;
++encode_affiliation(muted) -> <<"muted">>;
++encode_affiliation(_) -> <<"none">>.
++
++disable_affiliation(Host, LUser) ->
++    ejabberd_sql:sql_query(Host,
++        ?SQL("update user_affiliation "
++        "set version = version + 1, enabled = 0, last_updated = now() "
++        "where nick = %(LUser)s and enabled = 1")),
++    ok.
++
++insert_affiliation(Host, LUser, Affiliation) ->
++    AffiliationBinary = encode_affiliation(Affiliation),
++    ejabberd_sql:sql_query(Host,
++        ?SQL("insert into user_affiliation "
++        "(version, enabled, nick, affiliation, date_created, last_updated) "
++        "values (0, 1, %(LUser)s, %(AffiliationBinary)s, now(), now())")),
++    ok.
++
++get_affiliation(Host, LUser) ->
++    case ejabberd_sql:sql_query(Host,
++        ?SQL("select @(affiliation)s "
++             "from user_affiliation "
++             "where nick = %(LUser)s and enabled = 1")) of
++    {selected, [{AffiliationBinary}]} ->
++        decode_affiliation(AffiliationBinary);
++    _ ->
++        none
++    end.
++
+ set_affiliation(_ServerHost, _Room, _Host, _JID, _Affiliation, _Reason) ->
+     {error, not_implemented}.
+ 
+@@ -245,6 +326,17 @@ set_affiliations(_ServerHost, _Room, _Host, _Affiliations) ->
+ get_affiliation(_ServerHost, _Room, _Host, _LUser, _LServer) ->
+     {error, not_implemented}.
+ 
++get_affiliations(Host) ->
++    case ejabberd_sql:sql_query(Host,
++            ?SQL("select @(nick)s, @(affiliation)s "
++                 "from user_affiliation "
++                 "where enabled = 1")) of
++    {selected, Affiliations} ->
++        Affiliations;
++    _ ->
++        []
++    end.
++
+ get_affiliations(_ServerHost, _Room, _Host) ->
+     {error, not_implemented}.
+ 
+@@ -255,16 +347,16 @@ register_online_room(ServerHost, Room, Host, Pid) ->
+     PidS = misc:encode_pid(Pid),
+     NodeS = erlang:atom_to_binary(node(Pid), latin1),
+     case ?SQL_UPSERT(ServerHost,
+-		     "muc_online_room",
+-		     ["!name=%(Room)s",
+-		      "!host=%(Host)s",
++         "muc_online_room",
++         ["!name=%(Room)s",
++          "!host=%(Host)s",
+                       "server_host=%(ServerHost)s",
+-		      "node=%(NodeS)s",
+-		      "pid=%(PidS)s"]) of
+-	ok ->
+-	    ok;
+-	Err ->
+-	    Err
++          "node=%(NodeS)s",
++          "pid=%(PidS)s"]) of
++  ok ->
++      ok;
++  Err ->
++      Err
+     end.
+ 
+ unregister_online_room(ServerHost, Room, Host, Pid) ->
+@@ -274,48 +366,48 @@ unregister_online_room(ServerHost, Room, Host, Pid) ->
+     ejabberd_sql:sql_query(
+       ServerHost,
+       ?SQL("delete from muc_online_room where name=%(Room)s and "
+-	   "host=%(Host)s and node=%(NodeS)s and pid=%(PidS)s")).
++     "host=%(Host)s and node=%(NodeS)s and pid=%(PidS)s")).
+ 
+ find_online_room(ServerHost, Room, Host) ->
+     case ejabberd_sql:sql_query(
+-	   ServerHost,
+-	   ?SQL("select @(pid)s, @(node)s from muc_online_room where "
+-		"name=%(Room)s and host=%(Host)s")) of
+-	{selected, [{PidS, NodeS}]} ->
+-	    try {ok, misc:decode_pid(PidS, NodeS)}
+-	    catch _:{bad_node, _} -> error
+-	    end;
+-	{selected, []} ->
+-	    error;
+-	_Err ->
+-	    error
++     ServerHost,
++     ?SQL("select @(pid)s, @(node)s from muc_online_room where "
++    "name=%(Room)s and host=%(Host)s")) of
++  {selected, [{PidS, NodeS}]} ->
++      try {ok, misc:decode_pid(PidS, NodeS)}
++      catch _:{bad_node, _} -> error
++      end;
++  {selected, []} ->
++      error;
++  _Err ->
++      error
+     end.
+ 
+ count_online_rooms(ServerHost, Host) ->
+     case ejabberd_sql:sql_query(
+-	   ServerHost,
+-	   ?SQL("select @(count(*))d from muc_online_room "
+-		"where host=%(Host)s")) of
+-	{selected, [{Num}]} ->
+-	    Num;
+-	_Err ->
+-	    0
++     ServerHost,
++     ?SQL("select @(count(*))d from muc_online_room "
++    "where host=%(Host)s")) of
++  {selected, [{Num}]} ->
++      Num;
++  _Err ->
++      0
+     end.
+ 
+ get_online_rooms(ServerHost, Host, _RSM) ->
+     case ejabberd_sql:sql_query(
+-	   ServerHost,
+-	   ?SQL("select @(name)s, @(pid)s, @(node)s from muc_online_room "
+-		"where host=%(Host)s")) of
+-	{selected, Rows} ->
+-	    lists:flatmap(
+-	      fun({Room, PidS, NodeS}) ->
+-		      try [{Room, Host, misc:decode_pid(PidS, NodeS)}]
+-		      catch _:{bad_node, _} -> []
+-		      end
+-	      end, Rows);
+-	_Err ->
+-	    []
++     ServerHost,
++     ?SQL("select @(name)s, @(pid)s, @(node)s from muc_online_room "
++    "where host=%(Host)s")) of
++  {selected, Rows} ->
++      lists:flatmap(
++        fun({Room, PidS, NodeS}) ->
++          try [{Room, Host, misc:decode_pid(PidS, NodeS)}]
++          catch _:{bad_node, _} -> []
++          end
++        end, Rows);
++  _Err ->
++      []
+     end.
+ 
+ rsm_supported() ->
+@@ -324,17 +416,17 @@ rsm_supported() ->
+ register_online_user(ServerHost, {U, S, R}, Room, Host) ->
+     NodeS = erlang:atom_to_binary(node(), latin1),
+     case ?SQL_UPSERT(ServerHost, "muc_online_users",
+-		     ["!username=%(U)s",
+-		      "!server=%(S)s",
+-		      "!resource=%(R)s",
+-		      "!name=%(Room)s",
+-		      "!host=%(Host)s",
++         ["!username=%(U)s",
++          "!server=%(S)s",
++          "!resource=%(R)s",
++          "!name=%(Room)s",
++          "!host=%(Host)s",
+                       "server_host=%(ServerHost)s",
+-		      "node=%(NodeS)s"]) of
+-	ok ->
+-	    ok;
+-	Err ->
+-	    Err
++          "node=%(NodeS)s"]) of
++  ok ->
++      ok;
++  Err ->
++      Err
+     end.
+ 
+ unregister_online_user(ServerHost, {U, S, R}, Room, Host) ->
+@@ -342,29 +434,29 @@ unregister_online_user(ServerHost, {U, S, R}, Room, Host) ->
+     ejabberd_sql:sql_query(
+       ServerHost,
+       ?SQL("delete from muc_online_users where username=%(U)s and "
+-	   "server=%(S)s and resource=%(R)s and name=%(Room)s and "
+-	   "host=%(Host)s")).
++     "server=%(S)s and resource=%(R)s and name=%(Room)s and "
++     "host=%(Host)s")).
+ 
+ count_online_rooms_by_user(ServerHost, U, S) ->
+     case ejabberd_sql:sql_query(
+-	   ServerHost,
+-	   ?SQL("select @(count(*))d from muc_online_users where "
+-		"username=%(U)s and server=%(S)s")) of
+-	{selected, [{Num}]} ->
+-	    Num;
+-	_Err ->
+-	    0
++     ServerHost,
++     ?SQL("select @(count(*))d from muc_online_users where "
++    "username=%(U)s and server=%(S)s")) of
++  {selected, [{Num}]} ->
++      Num;
++  _Err ->
++      0
+     end.
+ 
+ get_online_rooms_by_user(ServerHost, U, S) ->
+     case ejabberd_sql:sql_query(
+-	   ServerHost,
+-	   ?SQL("select @(name)s, @(host)s from muc_online_users where "
+-		"username=%(U)s and server=%(S)s")) of
+-	{selected, Rows} ->
+-	    Rows;
+-	_Err ->
+-	    []
++     ServerHost,
++     ?SQL("select @(name)s, @(host)s from muc_online_users where "
++    "username=%(U)s and server=%(S)s")) of
++  {selected, Rows} ->
++      Rows;
++  _Err ->
++      []
+     end.
+ 
+ export(_Server) ->
+@@ -408,16 +500,24 @@ import(_, _, _) ->
+     ok.
+ 
+ get_subscribed_rooms(LServer, Host, Jid) ->
+-    JidS = jid:encode(Jid),
+-    case catch ejabberd_sql:sql_query(
+-	LServer,
+-	?SQL("select @(room)s, @(nodes)s from muc_room_subscribers where jid=%(JidS)s"
+-	     " and host=%(Host)s")) of
+-	{selected, Subs} ->
+-	    [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs];
+-	_Error ->
+-	    []
+-    end.
++  JidS = jid:encode(Jid),
++  case catch ejabberd_sql:sql_query(
++    LServer,
++    ?SQL("select @(m.room)s, @(m.nodes)s "
++    "from muc_room_subscribers m "
++    "left join archive as a on a.username = concat(m.room, concat('@', %(Host)s)) "
++    "where m.jid = %(JidS)s "
++    "and m.host = %(Host)s "
++    "group by m.room "
++    "order by max(a.timestamp) desc, m.created_at desc"),
++    secondary
++  ) of
++    {selected, Subs} ->
++      [{jid:make(Room, Host, <<>>), ejabberd_sql:decode_term(Nodes)} || {Room, Nodes} <- Subs];
++    _Error ->
++      []
++  end
++.
+ 
+ %%%===================================================================
+ %%% Internal functions
+@@ -426,21 +526,21 @@ clean_tables(ServerHost) ->
+     NodeS = erlang:atom_to_binary(node(), latin1),
+     ?DEBUG("Cleaning SQL muc_online_room table...", []),
+     case ejabberd_sql:sql_query(
+-	   ServerHost,
+-	   ?SQL("delete from muc_online_room where node=%(NodeS)s")) of
+-	{updated, _} ->
+-	    ok;
+-	Err1 ->
+-	    ?ERROR_MSG("failed to clean 'muc_online_room' table: ~p", [Err1]),
+-	    Err1
++     ServerHost,
++     ?SQL("delete from muc_online_room where node=%(NodeS)s")) of
++  {updated, _} ->
++      ok;
++  Err1 ->
++      ?ERROR_MSG("failed to clean 'muc_online_room' table: ~p", [Err1]),
++      Err1
+     end,
+     ?DEBUG("Cleaning SQL muc_online_users table...", []),
+     case ejabberd_sql:sql_query(
+-	   ServerHost,
+-	   ?SQL("delete from muc_online_users where node=%(NodeS)s")) of
+-	{updated, _} ->
+-	    ok;
+-	Err2 ->
+-	    ?ERROR_MSG("failed to clean 'muc_online_users' table: ~p", [Err2]),
+-	    Err2
++     ServerHost,
++     ?SQL("delete from muc_online_users where node=%(NodeS)s")) of
++  {updated, _} ->
++      ok;
++  Err2 ->
++      ?ERROR_MSG("failed to clean 'muc_online_users' table: ~p", [Err2]),
++      Err2
+     end.
+diff --git a/src/mod_offline.erl b/src/mod_offline.erl
+index 2582a7c98..917cebf71 100644
+--- a/src/mod_offline.erl
++++ b/src/mod_offline.erl
+@@ -405,32 +405,36 @@ need_to_store(LServer, #message{type = Type} = Packet) ->
+ store_packet({_Action, #message{from = From, to = To} = Packet} = Acc) ->
+     case need_to_store(To#jid.lserver, Packet) of
+ 	true ->
+-	    case check_event(Packet) of
+-		true ->
+-		    #jid{luser = LUser, lserver = LServer} = To,
+-		    case ejabberd_hooks:run_fold(store_offline_message, LServer,
+-						 Packet, []) of
+-			drop ->
+-			    Acc;
+-			NewPacket ->
+-			    TimeStamp = p1_time_compat:timestamp(),
+-			    Expire = find_x_expire(TimeStamp, NewPacket),
+-			    OffMsg = #offline_msg{us = {LUser, LServer},
+-						  timestamp = TimeStamp,
+-						  expire = Expire,
+-						  from = From,
+-						  to = To,
+-						  packet = NewPacket},
+-			    case store_offline_msg(OffMsg) of
+-				ok ->
+-				    {offlined, NewPacket};
+-				{error, Reason} ->
+-				    discard_warn_sender(Packet, Reason),
+-				    stop
+-			    end
+-		    end;
+-		_ -> Acc
+-	    end;
++	    case ejabberd_hooks:run_fold(privacy_check_packet, To#jid.lserver, respect_mute, [To, Packet, in]) of
++	    	allow ->
++			    case check_event(Packet) of
++				true ->
++				    #jid{luser = LUser, lserver = LServer} = To,
++				    case ejabberd_hooks:run_fold(store_offline_message, LServer,
++								 Packet, []) of
++					drop ->
++					    Acc;
++					NewPacket ->
++					    TimeStamp = p1_time_compat:timestamp(),
++					    Expire = find_x_expire(TimeStamp, NewPacket),
++					    OffMsg = #offline_msg{us = {LUser, LServer},
++								  timestamp = TimeStamp,
++								  expire = Expire,
++								  from = From,
++								  to = To,
++								  packet = NewPacket},
++					    case store_offline_msg(OffMsg) of
++						ok ->
++						    {offlined, NewPacket};
++						{error, Reason} ->
++						    discard_warn_sender(Packet, Reason),
++						    stop
++					    end
++				    end;
++				_ -> Acc
++			    end;
++			_ -> Acc
++		end;
+ 	false -> Acc
+     end.
+ 
+diff --git a/src/mod_offline_sql.erl b/src/mod_offline_sql.erl
+index cb0efa51e..e39ad8b98 100644
+--- a/src/mod_offline_sql.erl
++++ b/src/mod_offline_sql.erl
+@@ -68,8 +68,8 @@ store_message(#offline_msg{us = {LUser, LServer}} = M) ->
+     end.
+ 
+ pop_messages(LUser, LServer) ->
+-    case get_and_del_spool_msg_t(LServer, LUser) of
+-	{atomic, {selected, Rs}} ->
++    case get_spool_msg(LServer, LUser) of
++	{selected, Rs} ->
+ 	    {ok, lists:flatmap(
+ 		   fun({_, XML}) ->
+ 			   case xml_to_offline_msg(XML) of
+@@ -184,7 +184,7 @@ count_messages(LUser, LServer) ->
+     case catch ejabberd_sql:sql_query(
+                  LServer,
+                  ?SQL("select @(count(*))d from spool "
+-                      "where username=%(LUser)s and %(LServer)H")) of
++                      "where username=%(LUser)s and %(LServer)H"), secondary) of
+         {selected, [{Res}]} ->
+             Res;
+         _ -> 0
+@@ -259,15 +259,7 @@ el_to_offline_msg(El) ->
+ 	    {error, bad_jid_from}
+     end.
+ 
+-get_and_del_spool_msg_t(LServer, LUser) ->
+-    F = fun () ->
+-		Result =
+-		    ejabberd_sql:sql_query_t(
+-                      ?SQL("select @(username)s, @(xml)s from spool where "
+-                           "username=%(LUser)s and %(LServer)H order by seq;")),
+-		ejabberd_sql:sql_query_t(
+-                  ?SQL("delete from spool where"
+-                       " username=%(LUser)s and %(LServer)H;")),
+-		Result
+-	end,
+-    ejabberd_sql:sql_transaction(LServer, F).
++get_spool_msg(LServer, LUser) ->
++	ejabberd_sql:sql_query(LServer,
++		?SQL("select @(username)s, @(xml)s from spool where "
++		"username=%(LUser)s and %(LServer)H order by seq;"), secondary).
+diff --git a/src/mod_privacy.erl b/src/mod_privacy.erl
+index 0b534d272..a677fe4dc 100644
+--- a/src/mod_privacy.erl
++++ b/src/mod_privacy.erl
+@@ -476,12 +476,15 @@ get_user_list(LUser, LServer, Name) ->
+ 		      case ets_cache:lookup(
+ 			     ?PRIVACY_CACHE, {LUser, LServer}) of
+ 			  {ok, Privacy} ->
++			      ?DEBUG("Found a privacy in the cache", []),
+ 			      get_list_by_name(Privacy, Name);
+ 			  error ->
++			  	  ?DEBUG("Did not find a privacy in the cache", []),
+ 			      Mod:get_list(LUser, LServer, Name)
+ 		      end
+ 	      end);
+ 	false ->
++		?DEBUG("Looking up privacy list in DB", []),
+ 	    Mod:get_list(LUser, LServer, Name)
+     end.
+ 
+@@ -510,8 +513,9 @@ set_default_list(LUser, LServer, Name) ->
+ 	    Err
+     end.
+ 
+--spec check_packet(allow | deny, c2s_state() | jid(), stanza(), in | out) -> allow | deny.
++-spec check_packet(allow | respect_mute | deny, c2s_state() | jid(), stanza(), in | out) -> allow | deny.
+ check_packet(Acc, #{jid := JID} = State, Packet, Dir) ->
++    ?DEBUG("mod_privacy check_packet. Acc: '~s'", [Acc]),
+     case maps:get(privacy_active_list, State, none) of
+ 	none ->
+ 	    check_packet(Acc, JID, Packet, Dir);
+@@ -519,29 +523,31 @@ check_packet(Acc, #{jid := JID} = State, Packet, Dir) ->
+ 	    #jid{luser = LUser, lserver = LServer} = JID,
+ 	    case get_user_list(LUser, LServer, ListName) of
+ 		{ok, {_, List}} ->
+-		    do_check_packet(JID, List, Packet, Dir);
++		    ?DEBUG("Found a custom privacy list for user ~s", [JID]),
++		    do_check_packet(Acc, JID, List, Packet, Dir); % found a privacy list
+ 		_ ->
+-		    ?DEBUG("Non-existing active list '~s' is set "
+-			   "for user '~s'", [ListName, jid:encode(JID)]),
+ 		    check_packet(Acc, JID, Packet, Dir)
+ 	    end
+     end;
+-check_packet(_, JID, Packet, Dir) ->
++check_packet(Acc, JID, Packet, Dir) ->
++    ?DEBUG("mod_privacy check_packet (529). Acc", []),
+     #jid{luser = LUser, lserver = LServer} = JID,
+     case get_user_list(LUser, LServer, default) of
+ 	{ok, {_, List}} ->
+-	    do_check_packet(JID, List, Packet, Dir);
++	    ?DEBUG("Found a default privacy list for user ~s", [JID]),
++	    do_check_packet(Acc, JID, List, Packet, Dir); % found a default privacy list
+ 	_ ->
++		?DEBUG("No default privacy list, allowing", []),
+ 	    allow
+     end.
+ 
+ %% From is the sender, To is the destination.
+ %% If Dir = out, User@Server is the sender account (From).
+ %% If Dir = in, User@Server is the destination account (To).
+--spec do_check_packet(jid(), [listitem()], stanza(), in | out) -> allow | deny.
+-do_check_packet(_, [], _, _) ->
++-spec do_check_packet(allow | respect_mute | deny, jid(), [listitem()], stanza(), in | out) -> allow | deny.
++do_check_packet(_, _, [], _, _) ->
+     allow;
+-do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
++do_check_packet(Acc, #jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
+     From = xmpp:get_from(Packet),
+     To = xmpp:get_to(Packet),
+     case {From, To} of
+@@ -584,41 +590,47 @@ do_check_packet(#jid{luser = LUser, lserver = LServer}, List, Packet, Dir) ->
+ 					   roster_get_jid_info, LServer,
+ 					   {none, none, []},
+ 					   [LUser, LServer, LJID]),
+-	  check_packet_aux(List, PType2, LJID, Subscription, Groups)
++	  check_packet_aux(Acc, List, PType2, LJID, Subscription, Groups)
+     end.
+ 
+--spec check_packet_aux([listitem()],
++-spec check_packet_aux(allow | respect_mute | deny, [listitem()],
+ 		       message | iq | presence_in | presence_out | other,
+ 		       ljid(), none | both | from | to, [binary()]) ->
+ 			      allow | deny.
+ %% Ptype = mesage | iq | presence_in | presence_out | other
+-check_packet_aux([], _PType, _JID, _Subscription,
++check_packet_aux(Acc, [], _PType, _JID, _Subscription,
+ 		 _Groups) ->
+     allow;
+-check_packet_aux([Item | List], PType, JID,
++check_packet_aux(Acc, [Item | List], PType, JID,
+ 		 Subscription, Groups) ->
+     #listitem{type = Type, value = Value, action = Action} =
+ 	Item,
+-    case is_ptype_match(Item, PType) of
++	?DEBUG("checking packet with action: '~s'", [Action]),
++    case is_ptype_match(Acc, Item, PType) of
+       true ->
+ 	    case is_type_match(Type, Value, JID, Subscription, Groups) of
+ 		true -> Action;
+ 		false ->
+-		    check_packet_aux(List, PType, JID, Subscription, Groups)
++		    check_packet_aux(Acc, List, PType, JID, Subscription, Groups)
+ 	    end;
+       false ->
+-	  check_packet_aux(List, PType, JID, Subscription, Groups)
++	  check_packet_aux(Acc, List, PType, JID, Subscription, Groups)
+     end.
+ 
+--spec is_ptype_match(listitem(),
++-spec is_ptype_match(allow | respect_mute | deny, listitem(),
+ 		     message | iq | presence_in | presence_out | other) ->
+ 			    boolean().
+-is_ptype_match(Item, PType) ->
++is_ptype_match(Acc, Item, PType) ->
++	% true, false
++	#listitem{type = Type, value = Value, action = Action} = Item,
++	IgnoreMessageFlag = ((Acc == respect_mute) and Item#listitem.match_message and not Item#listitem.match_presence_in and not Item#listitem.match_presence_out),
++	BlockedMessageFlag = Item#listitem.match_message and Item#listitem.match_presence_in and Item#listitem.match_presence_out,
++    ?DEBUG("mod_privacy checking packet type. Acc: '~s' match_message: '~p', match_presence_in: '~p', match_presence_out: '~p', applying action: '~p'. IgnoreMessageFlag: '~p', PType: '~s'", [Acc, Item#listitem.match_message, Item#listitem.match_presence_in, Item#listitem.match_presence_out, Action, IgnoreMessageFlag, PType]),
+     case Item#listitem.match_all of
+       true -> true;
+       false ->
+ 	  case PType of
+-	    message -> Item#listitem.match_message;
++	    message -> Item#listitem.match_message and (IgnoreMessageFlag or BlockedMessageFlag);
+ 	    iq -> Item#listitem.match_iq;
+ 	    presence_in -> Item#listitem.match_presence_in;
+ 	    presence_out -> Item#listitem.match_presence_out;
+@@ -640,6 +652,7 @@ is_type_match(jid, Value, JID, _Subscription, _Groups) ->
+ 	{User, Server, <<"">>} ->
+ 	    case JID of
+ 		{User, Server, _} -> true;
++		{_, _, User} -> true;
+ 		_ -> false
+ 	    end;
+ 	{<<"">>, Server, Resource} ->
+diff --git a/src/mod_privacy_sql.erl b/src/mod_privacy_sql.erl
+index e5a97c96b..06bb5ed8b 100644
+--- a/src/mod_privacy_sql.erl
++++ b/src/mod_privacy_sql.erl
+@@ -319,7 +319,7 @@ get_default_privacy_list(LUser, LServer) ->
+     ejabberd_sql:sql_query(
+       LServer,
+       ?SQL("select @(name)s from privacy_default_list "
+-           "where username=%(LUser)s and %(LServer)H")).
++           "where username=%(LUser)s and %(LServer)H"), secondary).
+ 
+ get_default_privacy_list_t(LUser, LServer) ->
+     ejabberd_sql:sql_query_t(
+diff --git a/src/mod_roster.erl b/src/mod_roster.erl
+index c67f5bb32..cbd7075ab 100644
+--- a/src/mod_roster.erl
++++ b/src/mod_roster.erl
+@@ -520,8 +520,7 @@ route_presence_change(From, OldItem, NewItem) ->
+ 		allow ->
+ 		    ejabberd_router:route(PU)
+ 	    end;
+-       true ->
+-	    ok
++       true -> ok
+     end.
+ 
+ ask_to_pending(subscribe) -> out;
+diff --git a/src/mod_roster_sql.erl b/src/mod_roster_sql.erl
+index 91242f610..e18d3bb09 100644
+--- a/src/mod_roster_sql.erl
++++ b/src/mod_roster_sql.erl
+@@ -70,7 +70,7 @@ get_roster(LUser, LServer) ->
+ 	   ?SQL("select @(username)s, @(jid)s, @(nick)s, @(subscription)s, "
+ 		"@(ask)s, @(askmessage)s, @(server)s, @(subscribe)s, "
+ 		"@(type)s from rosterusers "
+-                "where username=%(LUser)s and %(LServer)H")) of
++                "where username=%(LUser)s and %(LServer)H"), secondary) of
+         {selected, Items} when is_list(Items) ->
+             JIDGroups = case get_roster_jid_groups(LServer, LUser) of
+                             {selected, JGrps} when is_list(JGrps) ->
+@@ -225,7 +225,7 @@ get_roster_jid_groups(LServer, LUser) ->
+     ejabberd_sql:sql_query(
+       LServer,
+       ?SQL("select @(jid)s, @(grp)s from rostergroups where "
+-           "username=%(LUser)s and %(LServer)H")).
++           "username=%(LUser)s and %(LServer)H"), secondary).
+ 
+ get_roster_groups(LServer, LUser, SJID) ->
+     ejabberd_sql:sql_query_t(
+diff --git a/src/mod_vcard.erl b/src/mod_vcard.erl
+index 5caecae50..aada6cd48 100644
+--- a/src/mod_vcard.erl
++++ b/src/mod_vcard.erl
+@@ -36,9 +36,9 @@
+ -export([start/2, stop/1, get_sm_features/5, mod_options/1,
+ 	 process_local_iq/1, process_sm_iq/1, string2lower/1,
+ 	 remove_user/2, export/1, import_info/0, import/5, import_start/2,
+-	 depends/2, process_search/1, process_vcard/1, get_vcard/2,
++	 depends/2, process_search/1, process_vcard/1, get_vcard/2, get_vcards/2,
+ 	 disco_items/5, disco_features/5, disco_identity/5,
+-	 vcard_iq_set/1, mod_opt_type/1, set_vcard/3, make_vcard_search/4]).
++	 vcard_iq_set/1, mod_opt_type/1, set_vcard/3, make_vcard_search/4, get_nickname/2]).
+ -export([init/1, handle_call/3, handle_cast/2,
+ 	 handle_info/2, terminate/2, code_change/3]).
+ 
+@@ -216,17 +216,33 @@ process_sm_iq(#iq{type = set, lang = Lang, from = From} = IQ) ->
+ 	    Txt = <<"The query is only allowed from local users">>,
+ 	    xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang))
+     end;
+-process_sm_iq(#iq{type = get, from = From, to = To, lang = Lang} = IQ) ->
++process_sm_iq(#iq{type = get, from = From, to = To, lang = Lang, sub_els = SubEls} = IQ) ->
+     #jid{luser = LUser, lserver = LServer} = To,
+-    case get_vcard(LUser, LServer) of
+-	error ->
+-	    Txt = <<"Database failure">>,
+-	    xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang));
+-	[] ->
+-	    xmpp:make_iq_result(IQ, #vcard_temp{});
+-	Els ->
+-	    IQ#iq{type = result, to = From, from = To, sub_els = Els}
+-    end.
++		JabberIdList = case SubEls of
++			[{
++			 vcard_temp, _, _, _, _, _, _, _, _, _, _,
++			 JabberId, _, _, _, _, _, _, _, _, _,
++			 _, _, _, _, _, _, _, _, _
++			}] when is_binary(JabberId) andalso byte_size(JabberId) > 0 -> binary:split(JabberId, <<"+">>, [global]);
++			_ -> undefined
++		end,
++		case
++			case JabberIdList of
++				undefined -> get_vcard(LUser, LServer);
++				_ -> get_vcards(JabberIdList, LServer)
++			end of
++				error ->
++					Txt = <<"Database failure">>,
++					xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang));
++				[] ->
++					case JabberIdList of
++						undefined -> xmpp:make_iq_result(IQ, #vcard_temp{});
++						_ -> xmpp:make_iq_result(IQ, #xmlel{name = <<"vCards">>, attrs = [{<<"xmlns">>, <<"jabber:client">>}]})
++					end;
++				Els ->
++					IQ#iq{type = result, to = From, from = To, sub_els = Els}
++		end
++.
+ 
+ -spec process_vcard(iq()) -> iq().
+ process_vcard(#iq{type = set, lang = Lang} = IQ) ->
+@@ -307,6 +323,43 @@ get_vcard(LUser, LServer) ->
+ 	error -> error
+     end.
+ 
++-spec get_vcards(binary(), binary()) -> [{list(), xmlel()}] | error.
++get_vcards(LUsers, LServer) ->
++	VCards = lists:map(fun(LUser) ->
++		{ LUser, get_vcard(LUser, LServer) }
++	end, LUsers),
++	[#xmlel{name = <<"vCards">>, attrs = [{<<"xmlns">>, <<"jabber:client">>}], children = [
++		case VCard of
++			error -> #xmlel{
++				name = <<"vCard">>,
++				attrs = [{<<"xmlns">>, <<"jabber:client">>}, {<<"username">>, Username}],
++				children = [ {xmlcdata, <<"error">>} ]
++			};
++			_ -> VCard#xmlel{attrs = VCard#xmlel.attrs ++ [{<<"username">>, Username}]}
++		end || {Username, [VCard]} <- VCards
++	]}]
++.
++
++get_vcard_field(LUser, LServer, FieldName) ->
++	try
++		case get_vcard(LUser, LServer) of
++			[{xmlel, <<"vCard">>, _, VCardElems}] when is_list(VCardElems) ->
++				case lists:keyfind(FieldName, 2, VCardElems) of
++					{xmlel, _, _, PropList} ->
++						proplists:get_value(xmlcdata, PropList);
++					_ -> none
++				end;
++			_ -> none
++		end
++	catch _:_ ->
++		none
++	end
++.
++
++get_nickname(LUser, LServer) ->
++	get_vcard_field(LUser, LServer, <<"NICKNAME">>)
++.
++
+ -spec make_vcard_search(binary(), binary(), binary(), xmlel()) -> #vcard_search{}.
+ make_vcard_search(User, LUser, LServer, VCARD) ->
+     FN = fxml:get_path_s(VCARD, [{elem, <<"FN">>}, cdata]),
+diff --git a/src/mod_vcard_sql.erl b/src/mod_vcard_sql.erl
+index 93ef2e948..b4fc97bbc 100644
+--- a/src/mod_vcard_sql.erl
++++ b/src/mod_vcard_sql.erl
+@@ -29,7 +29,7 @@
+ -behaviour(mod_vcard).
+ 
+ %% API
+--export([init/2, stop/1, get_vcard/2, set_vcard/4, search/4, remove_user/2,
++-export([init/2, stop/1, get_vcard/2, get_vcards/2, set_vcard/4, search/4, remove_user/2,
+ 	 search_fields/1, search_reported/1, import/3, export/1]).
+ -export([is_search_supported/1]).
+ 
+@@ -55,7 +55,7 @@ get_vcard(LUser, LServer) ->
+     case ejabberd_sql:sql_query(
+ 	   LServer,
+ 	   ?SQL("select @(vcard)s from vcard"
+-                " where username=%(LUser)s and %(LServer)H")) of
++                " where username=%(LUser)s and %(LServer)H"), secondary) of
+ 	{selected, [{SVCARD}]} ->
+ 	    case fxml_stream:parse_element(SVCARD) of
+ 		{error, _Reason} -> error;
+@@ -65,6 +65,31 @@ get_vcard(LUser, LServer) ->
+ 	_ -> error
+     end.
+ 
++get_vcards(LUsers, LServer) ->
++  UserInStr = str:join([[<<"'">>, ejabberd_sql:escape(User), <<"'">>] || User <- LUsers], <<",">>),
++  Query = <<(<<"select username, vcard from vcard where username in (">>)/binary, UserInStr/binary, (<<")">>)/binary>>,
++  ?DEBUG("get_vcards: [~p]", [Query]),
++  case ejabberd_sql:sql_query(LServer, Query, secondary) of
++    {selected, _, []} -> [];
++    {selected, _, Results} -> [
++      %% note: every elem needs an xmlns (jabber:client is default)
++      #xmlel{name = <<"vCards">>, attrs = [{<<"xmlns">>, <<"jabber:client">>}], children = [
++        case fxml_stream:parse_element(SVCARD) of
++          {error, _Reason} -> #xmlel{
++            name = <<"vCard">>,
++            attrs = [{<<"xmlns">>, <<"jabber:client">>}, {<<"username">>, Username}],
++            children = [ {xmlcdata, <<"error">>} ]
++          };
++          VCARD -> VCARD#xmlel{attrs = VCARD#xmlel.attrs ++ [{<<"username">>, Username}]}
++        end || [Username, SVCARD] <- Results
++      ]}
++    ];
++    Error ->
++      ?ERROR_MSG("get_vcards database error: [~p]", [Error]),
++      error
++  end
++.
++
+ set_vcard(LUser, LServer, VCARD,
+ 	  #vcard_search{user = {User, _},
+ 			fn = FN,

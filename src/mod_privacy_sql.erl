@@ -387,7 +387,7 @@ item_to_raw(#listitem{type = Type, value = Value,
      MatchMessage, MatchPresenceIn, MatchPresenceOut}.
 
 get_default_privacy_list(LUser, LServer) ->
-    ejabberd_sql:sql_query(
+    ejabberd_sql:sql_query_replica(
       LServer,
       ?SQL("select @(name)s from privacy_default_list "
            "where username=%(LUser)s and %(LServer)H")).
