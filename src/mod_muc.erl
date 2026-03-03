@@ -46,6 +46,8 @@
 	 store_changes/4,
 	 restore_room/3,
 	 forget_room/3,
+	 forget_rooms/3,
+	 start_new_room/4,
 	 create_room/3,
 	 create_room/5,
 	 shutdown_rooms/1,
@@ -122,7 +124,8 @@
           {ok, [{jid(), binary(), [binary()]}]} | {error, db_failure}.
 
 -optional_callbacks([get_subscribed_rooms/3,
-                     store_changes/4]).
+                     store_changes/4,
+                     forget_rooms/3]).
 
 %%====================================================================
 %% API
@@ -137,7 +140,9 @@ start(Host, Opts) ->
 	    RMod = gen_mod:ram_db_mod(Opts, ?MODULE),
 	    Mod:init(Host, gen_mod:set_opt(hosts, MyHosts, Opts)),
 	    RMod:init(Host, gen_mod:set_opt(hosts, MyHosts, Opts)),
-	    load_permanent_rooms(MyHosts, Host, Opts);
+	    %% Permanent rooms are not loaded into memory (Skillz)
+	    %% load_permanent_rooms(MyHosts, Host, Opts);
+	    ok;
 	Err ->
 	    Err
     end.
@@ -174,7 +179,7 @@ reload(ServerHost, NewOpts, OldOpts) ->
 	      ?GEN_SERVER:cast(procname(ServerHost, I),
 			       {reload, AddHosts, DelHosts, NewHosts})
       end, lists:seq(1, misc:logical_processors())),
-    load_permanent_rooms(AddHosts, ServerHost, NewOpts),
+    %% load_permanent_rooms(AddHosts, ServerHost, NewOpts),
     shutdown_rooms(ServerHost, DelHosts, OldRMod),
     lists:foreach(
       fun(Host) ->
@@ -347,9 +352,15 @@ restore_room(ServerHost, Host, Name) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:restore_room(LServer, Host, Name).
 
+forget_rooms(ServerHost, Host, Rooms) ->
+    LServer = jid:nameprep(ServerHost),
+    Mod = gen_mod:db_mod(LServer, ?MODULE),
+    Mod:forget_rooms(LServer, Host, Rooms).
+
 forget_room(ServerHost, Host, Name) ->
     LServer = jid:nameprep(ServerHost),
-    ejabberd_hooks:run(remove_room, LServer, [LServer, Name, Host]),
+    %% Removed hook which triggers archive removal
+    %% ejabberd_hooks:run(remove_room, LServer, [LServer, Name, Host]),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:forget_room(LServer, Host, Name).
 
@@ -358,6 +369,12 @@ can_use_nick(ServerHost, Host, JID, Nick) ->
     LServer = jid:nameprep(ServerHost),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:can_use_nick(LServer, Host, JID, Nick).
+
+-spec start_new_room(binary(), binary(), binary(), jid()) -> ok.
+start_new_room(RoomBin, RoomTitleBin, HostBin, FromJid) ->
+    ServerHost = ejabberd_router:host_of_route(HostBin),
+    Proc = procname(ServerHost, {RoomBin, HostBin}),
+    ?GEN_SERVER:call(Proc, {start_new_room, RoomBin, RoomTitleBin, HostBin, FromJid}).
 
 -spec find_online_room(binary(), binary()) -> {ok, pid()} | error.
 find_online_room(Room, Host) ->
@@ -453,7 +470,26 @@ handle_call({create, Room, Host, From, Nick, Opts}, _From,
 	    {reply, ok, State};
 	Err ->
 	    {reply, Err, State}
-    end.
+    end;
+handle_call({start_new_room, RoomBin, RoomTitleBin, HostBin, FromJid}, _From,
+	    #{server_host := ServerHost} = State) ->
+    RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
+    case RMod:find_online_room(ServerHost, RoomBin, HostBin) of
+	error ->
+	    DefOpts = mod_muc_opt:default_room_options(ServerHost),
+	    Opts = DefOpts ++ [{persistent, true}, {title, RoomTitleBin}],
+	    case start_room(RMod, HostBin, ServerHost, RoomBin, Opts, FromJid, <<>>) of
+		{ok, _} ->
+		    maybe_store_new_room(ServerHost, HostBin, RoomBin, Opts),
+		    ejabberd_hooks:run(create_room, ServerHost, [ServerHost, RoomBin, HostBin]),
+		    ?INFO_MSG("MUC: Created room [~p] with title [~p] on node [~p]", [RoomBin, RoomTitleBin, node()]);
+		_ ->
+		    ok
+	    end;
+	_ ->
+	    ok
+    end,
+    {reply, ok, State}.
 
 -spec handle_cast(term(), state()) -> {noreply, state()}.
 handle_cast({route_to_room, Packet}, #{server_host := ServerHost} = State) ->
@@ -625,42 +661,42 @@ route_to_room(Packet, ServerHost) ->
     RMod = gen_mod:ram_db_mod(ServerHost, ?MODULE),
     case RMod:find_online_room(ServerHost, Room, Host) of
 	error ->
-	    case should_start_room(Packet) of
-		false ->
+	    %% Force room creation: always try load/create (Skillz)
+	    StartType = case should_start_room(Packet) of
+			   false -> start;
+			   T -> T
+		       end,
+	    case load_room(RMod, Host, ServerHost, Room, true) of
+		{error, notfound} when StartType == start ->
+		    case ejabberd_hooks:run_fold(check_create_room,
+						ServerHost, true,
+						[ServerHost, Room, Host]) of
+			true ->
+			    Pass = extract_password(Packet),
+			    case start_new_room(RMod, Host, ServerHost, Room, Pass, From, Nick) of
+				{ok, Pid} ->
+				    mod_muc_room:route(Pid, Packet),
+				    ?INFO_MSG("MUC: Created room [~p] with pid [~p] on node [~p]", [Room, Pid, node()]);
+				_Err ->
+				    Err = xmpp:err_internal_server_error(),
+				    ejabberd_router:route_error(Packet, Err)
+			    end;
+			false ->
+			    Lang = xmpp:get_lang(Packet),
+			    ErrText = ?T("Room creation is denied by service policy"),
+			    Err = xmpp:err_forbidden(ErrText, Lang),
+			    ejabberd_router:route_error(Packet, Err)
+		    end;
+		{error, notfound} ->
 		    Lang = xmpp:get_lang(Packet),
 		    ErrText = ?T("Conference room does not exist"),
 		    Err = xmpp:err_item_not_found(ErrText, Lang),
 		    ejabberd_router:route_error(Packet, Err);
-		StartType ->
-		    case load_room(RMod, Host, ServerHost, Room, true) of
-			{error, notfound} when StartType == start ->
-			    case check_create_room(ServerHost, Host, Room, From) of
-				true ->
-				    Pass = extract_password(Packet),
-				    case start_new_room(RMod, Host, ServerHost, Room, Pass, From, Nick) of
-					{ok, Pid} ->
-					    mod_muc_room:route(Pid, Packet);
-					_Err ->
-					    Err = xmpp:err_internal_server_error(),
-					    ejabberd_router:route_error(Packet, Err)
-				    end;
-				false ->
-				    Lang = xmpp:get_lang(Packet),
-				    ErrText = ?T("Room creation is denied by service policy"),
-				    Err = xmpp:err_forbidden(ErrText, Lang),
-				    ejabberd_router:route_error(Packet, Err)
-			    end;
-			{error, notfound} ->
-			    Lang = xmpp:get_lang(Packet),
-			    ErrText = ?T("Conference room does not exist"),
-			    Err = xmpp:err_item_not_found(ErrText, Lang),
-			    ejabberd_router:route_error(Packet, Err);
-			{error, _} ->
-			    Err = xmpp:err_internal_server_error(),
-			    ejabberd_router:route_error(Packet, Err);
-			{ok, Pid2} ->
-			    mod_muc_room:route(Pid2, Packet)
-		    end
+		{error, _} ->
+		    Err = xmpp:err_internal_server_error(),
+		    ejabberd_router:route_error(Packet, Err);
+		{ok, Pid2} ->
+		    mod_muc_room:route(Pid2, Packet)
 	    end;
 	{ok, Pid} ->
 	    mod_muc_room:route(Pid, Packet)

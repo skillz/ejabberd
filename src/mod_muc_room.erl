@@ -40,6 +40,7 @@
 	 supervisor/1,
 	 get_role/2,
 	 get_affiliation/2,
+	 set_user_affiliation/3,
 	 is_occupant_or_admin/2,
 	 route/2,
 	 expand_opts/1,
@@ -50,6 +51,7 @@
 	 get_config/1,
 	 set_config/2,
 	 get_state/1,
+	 get_room_summary/3,
 	 get_info/1,
 	 change_item/5,
 	 change_item_async/5,
@@ -227,6 +229,16 @@ get_state(Pid) ->
 	    {error, notfound}
     end.
 
+-spec get_room_summary(pid(), non_neg_integer(), binary()) ->
+      {ok, [{binary(), binary(), binary(), integer(), binary()}]} | {error, notfound | timeout}.
+get_room_summary(Pid, Limit, LastMessageId) ->
+    try p1_fsm:sync_send_all_state_event(Pid, {get_room_summary, Limit, LastMessageId})
+    catch _:{timeout, {p1_fsm, _, _}} ->
+	    {error, timeout};
+	  _:{_, {p1_fsm, _, _}} ->
+	    {error, notfound}
+    end.
+
 -spec get_info(pid()) -> {ok, #{occupants_number => integer()}} |
                          {error, notfound | timeout}.
 get_info(Pid) ->
@@ -315,14 +327,15 @@ init([Host, ServerHost, Access, Room, HistorySize,
 			    room_shaper = Shaper}),
     State1 = set_affiliation(Creator, owner, State),
     store_room(State1),
+    NewState = get_history_upon_init(State1, HistorySize),
     ?INFO_MSG("Created MUC room ~ts@~ts by ~ts",
 	      [Room, Host, jid:encode(Creator)]),
-    add_to_log(room_existence, created, State1),
-    add_to_log(room_existence, started, State1),
+    add_to_log(room_existence, created, NewState),
+    add_to_log(room_existence, started, NewState),
     ejabberd_hooks:run(start_room, ServerHost, [ServerHost, Room, Host]),
     erlang:send_after(?CLEAN_ROOM_TIMEOUT, self(),
                       close_room_if_temporary_and_empty),
-    {ok, normal_state, reset_hibernate_timer(State1)};
+    {ok, normal_state, reset_hibernate_timer(NewState)};
 init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType]) ->
     process_flag(trap_exit, true),
     misc:set_proc_label({?MODULE, Room, Host}),
@@ -338,9 +351,10 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
 				  salt = p1_rand:get_string(),
 				  room_queue = RoomQueue,
 				  room_shaper = Shaper}),
-    add_to_log(room_existence, started, State),
+    NewState = get_history_upon_init(State, HistorySize),
+    add_to_log(room_existence, started, NewState),
     ejabberd_hooks:run(start_room, ServerHost, [ServerHost, Room, Host]),
-    State1 = cleanup_affiliations(State),
+    State1 = cleanup_affiliations(NewState),
     State2 =
     case {lists:keyfind(hibernation_time, 1, Opts),
 	  (State1#state.config)#config.mam,
@@ -797,6 +811,67 @@ handle_sync_event(get_config, _From, StateName,
 handle_sync_event(get_state, _From, StateName,
 		  StateData) ->
     {reply, {ok, StateData}, StateName, StateData};
+handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, StateData) ->
+    History = StateData#state.history,
+    Queue = History#lqueue.queue,
+    Limit = case LimitIn of
+		_ when LimitIn < 0 -> 5;
+		_ when LimitIn > 50 -> 50;
+		_ -> LimitIn
+	    end,
+    {Messages, _, _} = lists:foldr(
+	fun({_FromNick, Message, _, _, _}, {AccMessages, Count, LastMessageFound} = Acc) ->
+	    case LastMessageFound of
+		true -> Acc;
+		_ ->
+		    case Count < Limit of
+			true ->
+			    MessageId = xmpp:get_id(Message),
+			    case LastMessageId == MessageId of
+				true ->
+				    case Count == 0 of
+					true -> {[Message], 1, true};
+					_ -> {AccMessages, Count, true}
+				    end;
+				_ ->
+				    {[Message | AccMessages], Count + 1, LastMessageFound}
+			    end;
+			_ -> Acc
+		    end
+	    end
+	end, {[], 0, false}, p1_queue:to_list(Queue)),
+    Summary = case Messages of
+	[] -> [];
+	List ->
+	    lists:map(
+		fun(Packet) ->
+			Id = xmpp:get_id(Packet),
+			Body = xmpp:get_text(Packet),
+			From = xmpp:get_from(Packet),
+			FromUser = From#jid.luser,
+			Server = From#jid.lserver,
+			SubEls = Packet#message.sub_els,
+			UserRole = case skillz_util:get_value_by_tag(SubEls, <<"user_role">>) of
+				none -> 0;
+				Value -> try binary_to_integer(Value) catch _:_ -> 0 end
+			end,
+			AvatarUrl = case skillz_util:get_value_by_tag(SubEls, <<"avatar_url">>, <<"">>) of
+				V when is_binary(V) -> V;
+				_ -> <<"">>
+			end,
+			Username = case skillz_util:get_value_by_tag(SubEls, <<"username">>) of
+				none ->
+				    case mod_vcard:get_nickname(FromUser, Server) of
+					<<>> -> FromUser;
+					Nickname -> Nickname
+				    end;
+				V when is_binary(V) -> V;
+				_ -> FromUser
+			end,
+			{Id, Username, Body, UserRole, AvatarUrl}
+		end, List)
+    end,
+    {reply, {ok, Summary}, StateName, StateData};
 handle_sync_event(get_info, _From, StateName,
 		  StateData) ->
     Result = #{occupants_number => maps:size(StateData#state.users)},
@@ -1401,11 +1476,11 @@ process_presence(Nick, #presence{from = From, type = Type0} = Packet0, StateData
 	     drop ->
 		 {next_state, normal_state, StateData};
 	     #presence{} = Packet ->
-		 close_room_if_temporary_and_empty(
+		 close_room_without_occupants(
 		   do_process_presence(Nick, Packet, StateData))
 	   end;
        true ->
-	    {next_state, normal_state, StateData}
+	    close_room_without_occupants(StateData)
     end.
 
 -spec do_process_presence(binary(), presence(), state()) -> state().
@@ -1506,6 +1581,24 @@ maybe_strip_status_from_presence(From, Packet, StateData) ->
 	{false, true} ->
 	    strip_status(Packet);
 	_Allowed -> Packet
+    end.
+
+-spec close_room_without_occupants(state()) -> fsm_transition().
+close_room_without_occupants(StateData1) ->
+    case maps:size(StateData1#state.users) == 0 of
+	true ->
+	    {LUser, _LServer, _LResource} = jid:tolower(StateData1#state.jid),
+	    case binary:matches(LUser, [<<"-">>]) of
+		[] ->
+		    {next_state, normal_state, StateData1};
+		_ ->
+		    ?INFO_MSG("Destroyed MUC room ~s because it lacks occupants",
+			[jid:encode(StateData1#state.jid)]),
+		    add_to_log(room_existence, destroyed, StateData1),
+		    {stop, normal, StateData1}
+	    end;
+	_ ->
+	    {next_state, normal_state, StateData1}
     end.
 
 -spec close_room_if_temporary_and_empty(state()) -> fsm_transition().
@@ -1695,13 +1788,44 @@ set_affiliation(JID, Affiliation,
 set_affiliation(JID, Affiliation, StateData, Reason) ->
     ServerHost = StateData#state.server_host,
     Room = StateData#state.room,
-    Host = StateData#state.host,
+    LUser = JID#jid.luser,
+    case lists:member($-, binary_to_list(Room)) of
+	true ->
+	    set_affiliation_fallback(JID, Affiliation, StateData, Reason);
+	false ->
+	    Host = StateData#state.host,
+	    Mod = gen_mod:db_mod(ServerHost, mod_muc),
+	    NewAffiliation = case {Affiliation, Reason} of
+		{outcast, <<"muted">>} -> muted;
+		_ -> Affiliation
+	    end,
+	    case erlang:function_exported(Mod, disable_affiliation, 2) of
+		true ->
+		    Mod:disable_affiliation(ServerHost, LUser),
+		    case NewAffiliation of
+			none -> ok;
+			_ -> Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
+		    end,
+		    StateData;
+		_ ->
+		    case Mod:set_affiliation(ServerHost, Room, Host, JID, Affiliation, Reason) of
+			ok -> StateData;
+			{error, _} -> set_affiliation_fallback(JID, Affiliation, StateData, Reason)
+		    end
+	    end
+    end.
+
+set_user_affiliation(ServerHost, LUser, NewAffiliation) ->
     Mod = gen_mod:db_mod(ServerHost, mod_muc),
-    case Mod:set_affiliation(ServerHost, Room, Host, JID, Affiliation, Reason) of
-	ok ->
-	    StateData;
-	{error, _} ->
-	    set_affiliation_fallback(JID, Affiliation, StateData, Reason)
+    case erlang:function_exported(Mod, disable_affiliation, 2) of
+	true ->
+	    Mod:disable_affiliation(ServerHost, LUser),
+	    case NewAffiliation of
+		none -> ok;
+		_ -> Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
+	    end;
+	_ ->
+	    ok
     end.
 
 -spec set_affiliation_fallback(jid(), affiliation(), state(), binary()) -> state().
@@ -1765,16 +1889,28 @@ do_get_affiliation(JID, #state{config = #config{persistent = false}} = StateData
     do_get_affiliation_fallback(JID, StateData);
 do_get_affiliation(JID, StateData) ->
     Room = StateData#state.room,
-    Host = StateData#state.host,
-    LServer = JID#jid.lserver,
     LUser = JID#jid.luser,
     ServerHost = StateData#state.server_host,
     Mod = gen_mod:db_mod(ServerHost, mod_muc),
-    case Mod:get_affiliation(ServerHost, Room, Host, LUser, LServer) of
-	{error, _} ->
+    case lists:member($-, binary_to_list(Room)) of
+	true ->
 	    do_get_affiliation_fallback(JID, StateData);
-	{ok, Affiliation} ->
-	    Affiliation
+	false ->
+	    case erlang:function_exported(Mod, get_affiliation, 2) of
+		true ->
+		    case Mod:get_affiliation(ServerHost, LUser) of
+			none -> do_get_affiliation_fallback(JID, StateData);
+			Aff when is_atom(Aff) -> Aff;
+			_ -> do_get_affiliation_fallback(JID, StateData)
+		    end;
+		_ ->
+		    Host = StateData#state.host,
+		    LServer = JID#jid.lserver,
+		    case Mod:get_affiliation(ServerHost, Room, Host, LUser, LServer) of
+			{error, _} -> do_get_affiliation_fallback(JID, StateData);
+			{ok, Affiliation} -> Affiliation
+		    end
+	    end
     end.
 
 -spec do_get_affiliation_fallback(jid(), state()) -> affiliation() | {affiliation(),  binary()}.
@@ -1899,6 +2035,7 @@ get_default_role(Affiliation, StateData) ->
       admin -> moderator;
       member -> participant;
       outcast -> none;
+      muted -> visitor;
       none ->
 	  case (StateData#state.config)#config.members_only of
 	    true -> none;
@@ -2407,8 +2544,14 @@ add_new_user(From, Nick, Packet, StateData) ->
 		  {error, Err}
 	  end;
       {_, _, _, Role} ->
+	  RoomJID = StateData#state.jid,
+	  To = jid:replace_resource(RoomJID, Nick),
+	  StateData2 = case Role of
+	      visitor -> set_role(To, visitor, StateData);
+	      _ -> StateData
+	  end,
 	  case check_password(ServiceAffiliation, Affiliation,
-			      Packet, From, StateData)
+			      Packet, From, StateData2)
 	      of
 	    true ->
 		Nodes = get_subscription_nodes(Packet),
@@ -2417,19 +2560,19 @@ add_new_user(From, Nick, Packet, StateData) ->
 			      NewState = add_user_presence(
 					   From, Packet,
 					   add_online_user(From, Nick, Role,
-							   StateData)),
+							   StateData2)),
 			      send_initial_presences_and_messages(
-				From, Nick, Packet, NewState, StateData),
+				From, Nick, Packet, NewState, StateData2),
 			      NewState;
 			 true ->
-			      set_subscriber(From, Nick, Nodes, StateData)
+			      set_subscriber(From, Nick, Nodes, StateData2)
 		      end,
 		  ResultState =
 		      case NewStateData#state.just_created of
 			  true ->
 			      NewStateData#state{just_created = erlang:system_time(microsecond)};
 			  _ ->
-			      Robots = maps:remove(From, StateData#state.robots),
+			      Robots = maps:remove(From, StateData2#state.robots),
 			      NewStateData#state{robots = Robots}
 		      end,
 		  if not IsSubscribeRequest -> ResultState;
@@ -2440,7 +2583,7 @@ add_new_user(From, Nick, Packet, StateData) ->
 		Err = xmpp:err_not_authorized(ErrText, Lang),
 		if not IsSubscribeRequest ->
 			ejabberd_router:route_error(Packet, Err),
-			StateData;
+			StateData2;
 		   true ->
 			{error, Err}
 		end;
@@ -2994,10 +3137,13 @@ lqueue_cut(Q, N) ->
 
 -spec add_message_to_history(binary(), jid(), message(), state()) -> state().
 add_message_to_history(FromNick, FromJID, Packet, StateData) ->
+    TimeStamp = erlang:timestamp(),
+    add_message_to_history(FromNick, FromJID, Packet, StateData, TimeStamp).
+
+add_message_to_history(FromNick, FromJID, Packet, StateData, TimeStamp) ->
     add_to_log(text, {FromNick, Packet}, StateData),
     case check_subject(Packet) of
 	[] ->
-	    TimeStamp = erlang:timestamp(),
 	    AddrPacket = case (StateData#state.config)#config.anonymous of
 			     true -> Packet;
 			     false ->
@@ -3019,6 +3165,26 @@ add_message_to_history(FromNick, FromJID, Packet, StateData) ->
 	    StateData#state{history = Q1, just_created = erlang:system_time(microsecond)};
 	_ ->
 	    StateData#state{just_created = erlang:system_time(microsecond)}
+    end.
+
+get_history_upon_init(StateData, HistorySize) ->
+    ServerHost = StateData#state.server_host,
+    Room = StateData#state.room,
+    Host = StateData#state.host,
+    MessageHistory = mod_mam:get_room_history(ServerHost, Room, Host, HistorySize),
+    case MessageHistory of
+	{error, _} ->
+	    StateData;
+	_ when is_list(MessageHistory) ->
+	    lists:foldl(
+		fun({FromJID, FromNick, Message, TS}, SD) ->
+			MicroSec = TS rem 1000000,
+			SecPart = TS div 1000000,
+			Sec = SecPart rem 1000000,
+			MegaSec = SecPart div 1000000,
+			TimeStamp = {MegaSec, Sec, MicroSec},
+			add_message_to_history(FromNick, FromJID, Message, SD, TimeStamp)
+		end, StateData, MessageHistory)
     end.
 
 remove_from_history(StanzaId, #state{history = #lqueue{queue = Queue} = LQueue} = StateData) ->
@@ -3261,7 +3427,7 @@ process_item_change(Item, SD, UJID) ->
                                 maybe_send_affiliation(JID, none, SD),
                                 unsubscribe_from_room(JID, SD),
                                 SD1 = set_affiliation(JID, none, SD),
-                                set_role(JID, none, SD1);
+                                set_role(JID, participant, SD1);
                             _ ->
                                 SD1 = set_affiliation(JID, none, SD),
                                 SD2 = case (SD1#state.config)#config.moderated of
@@ -3281,7 +3447,7 @@ process_item_change(Item, SD, UJID) ->
                     process_iq_mucsub(JID,
                                       #iq{type = set,
                                           sub_els = [#muc_unsubscribe{}]}, SD),
-		set_role(JID, none, set_affiliation(JID, outcast, SD2, Reason));
+		set_role(JID, visitor, set_affiliation(JID, outcast, SD2, Reason));
 	    {JID, affiliation, A, Reason} when (A == admin) or (A == owner) ->
 		SD1 = set_affiliation(JID, A, SD, Reason),
 		SD2 = set_role(JID, moderator, SD1),
@@ -3441,8 +3607,8 @@ can_change_ra(_FAffiliation, _FRole, owner, _TRole,
     true;
 can_change_ra(_FAffiliation, _FRole, _TAffiliation,
 	      _TRole, _RoleorAffiliation, _Value, owner) ->
-    %% Nobody can decrease MUC admin's role/affiliation
-    false;
+    %% Allow decreasing owner (Skillz: DM creators can be demoted)
+    true;
 can_change_ra(_FAffiliation, _FRole, TAffiliation,
 	      _TRole, affiliation, Value, _ServiceAf)
     when TAffiliation == Value ->
@@ -3505,9 +3671,33 @@ can_change_ra(owner, _FRole, admin, _TRole, affiliation,
 can_change_ra(owner, _FRole, owner, _TRole, affiliation,
 	      _Affiliation, _ServiceAf) ->
     check_owner;
+can_change_ra(FAffiliation, _FRole, outcast, _TRole,
+	      affiliation, muted, _ServiceAf)
+    when (FAffiliation == owner) or (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, _FRole, none, _TRole,
+	      affiliation, muted, _ServiceAf)
+    when (FAffiliation == owner) or (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, _FRole, muted, _TRole,
+	      affiliation, none, _ServiceAf)
+    when (FAffiliation == owner) or (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, _FRole, muted, _TRole,
+	      affiliation, outcast, _ServiceAf)
+    when (FAffiliation == owner) or (FAffiliation == admin) ->
+    true;
 can_change_ra(_FAffiliation, _FRole, _TAffiliation,
 	      _TRole, affiliation, _Value, _ServiceAf) ->
-    false;
+    true;
+can_change_ra(FAffiliation, muted, _TAffiliation,
+	      visitor, role, none, _ServiceAf)
+    when (FAffiliation == owner) or (FAffiliation == admin) ->
+    true;
+can_change_ra(FAffiliation, subscriber, _TAffiliation,
+	      _TRole, role, _Value, _ServiceAf)
+    when (FAffiliation == owner) or (FAffiliation == admin) ->
+    true;
 can_change_ra(_FAffiliation, moderator, _TAffiliation,
 	      visitor, role, none, _ServiceAf) ->
     true;
@@ -3716,7 +3906,7 @@ process_iq_owner(From, #iq{type = set, lang = Lang,
 						 items = Items}]},
 		 StateData) ->
     FAffiliation = get_affiliation(From, StateData),
-    if FAffiliation /= owner ->
+    if FAffiliation /= owner andalso FAffiliation /= admin ->
 	    ErrText = ?T("Owner privileges required"),
 	    {error, xmpp:err_forbidden(ErrText, Lang)};
        Destroy /= undefined, Config == undefined, Items == [] ->
@@ -3761,7 +3951,7 @@ process_iq_owner(From, #iq{type = get, lang = Lang,
 						 items = Items}]},
 		 StateData) ->
     FAffiliation = get_affiliation(From, StateData),
-    if FAffiliation /= owner ->
+    if FAffiliation /= owner andalso FAffiliation /= admin ->
 	    ErrText = ?T("Owner privileges required"),
 	    {error, xmpp:err_forbidden(ErrText, Lang)};
        Destroy == undefined, Config == undefined ->
@@ -4032,8 +4222,7 @@ set_config(Opts, Config, ServerHost, Lang) ->
 -spec change_config(#config{}, state()) -> {result, undefined, state()}.
 change_config(Config, StateData) ->
     send_config_change_info(Config, StateData),
-    StateData0 = StateData#state{config = Config},
-    StateData1 = remove_subscriptions(StateData0),
+    StateData1 = StateData#state{config = Config},
     StateData2 =
         case {(StateData#state.config)#config.persistent,
               Config#config.persistent} of
@@ -4434,7 +4623,8 @@ destroy_room(DEl, StateData) ->
 			   ?NS_MUCSUB_NODES_CONFIG, StateData)
       end, ok, get_users_and_subscribers_with_node(
                  ?NS_MUCSUB_NODES_CONFIG, StateData)),
-    forget_room(StateData),
+    %% Skillz: do not forget room on destroy (archive preserved)
+    %% forget_room(StateData),
     {result, undefined, stop}.
 
 -spec forget_room(state()) -> state().
@@ -5776,7 +5966,7 @@ send_wrapped(From, To, Packet, Node, State) ->
 
 -spec wrap(jid(), undefined | jid(), stanza(), binary(), binary()) -> message().
 wrap(From, To, Packet, Node, Id) ->
-    El = xmpp:set_from_to(Packet, From, To),
+    El = xmpp:encode(xmpp:set_from_to(Packet, From, To)),
     #message{
 	id = Id,
 	sub_els = [#ps_event{

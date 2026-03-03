@@ -34,14 +34,15 @@
 	 muc_unregister_nick/2, muc_unregister_nick/3,
          muc_get_registered_nick/3,
          muc_get_registered_nicks/1,
-	 create_room_with_opts/4, create_room/3, destroy_room/2,
+	 create_room_with_opts/4, start_room/2, create_room/3, destroy_room/2,
 	 create_rooms_file/1, destroy_rooms_file/1,
 	 rooms_unused_list/2, rooms_unused_destroy/2,
 	 rooms_empty_list/1, rooms_empty_destroy/1, rooms_empty_destroy_restuple/1,
 	 get_user_rooms/2, get_user_subscriptions/2, get_room_occupants/2,
 	 get_room_occupants_number/2, send_direct_invitation/5,
-	 change_room_option/4, get_room_options/2,
-	 set_room_affiliation/4, set_room_affiliation/5, get_room_affiliations/2,
+	 change_room_option/4, get_room_options/2, get_room_summary/4, get_room_summary/3,
+	 get_room_title/1,
+	 set_user_affiliation/3, set_room_affiliation/4, set_room_affiliation/5, get_room_affiliations/2,
 	 get_room_affiliations_v3/2, get_room_affiliation/3,
 	 subscribe_room/4, subscribe_room/6,
 	 subscribe_room_many/3, subscribe_room_many_v3/4,
@@ -207,6 +208,13 @@ get_commands_spec() ->
 		       args = [{room, binary}, {service, binary},
 			       {host, binary}],
 		       args_rename = [{name, room}],
+		       result = {res, rescode}},
+     #ejabberd_commands{name = start_room, tags = [muc_room],
+		       desc = "Start a MUC room with name and title. If it does not already exist, create it.",
+		       module = ?MODULE, function = start_room,
+		       args_desc = ["Room name", "Room title"],
+		       args_example = ["8626", "Skillz Chat Room"],
+		       args = [{name, binary}, {title, binary}],
 		       result = {res, rescode}},
      #ejabberd_commands{name = destroy_room, tags = [muc_room],
 		       desc = "Destroy a MUC room",
@@ -437,6 +445,18 @@ get_commands_spec() ->
 								 {value, string}
 								]}}
 						}}},
+     #ejabberd_commands{name = get_room_summary, tags = [muc_room],
+			desc = "Get room summary: last x messages after a message id",
+			module = ?MODULE, function = get_room_summary,
+			args_desc = ["Room", "Limit", "Last Message Id"],
+			args_example = ["81", "10", "abcd-1234-4567890-defg"],
+			args = [{room, binary}, {limit, binary}, {last_message_id, binary}],
+			result = {messages, {list, {message, {tuple, [{id, string},
+				{from, string},
+				{body, string},
+				{user_role, integer},
+				{avatar_url, string}
+			]}}}}},
      #ejabberd_commands{name = subscribe_room, tags = [muc_room, muc_sub],
 			desc = "Subscribe to a MUC conference",
 			module = ?MODULE, function = subscribe_room,
@@ -579,6 +599,13 @@ get_commands_spec() ->
 			args = [{room, binary}, {service, binary}],
 		        args_rename = [{name, room}],
 			result = {subscribers, {list, {jid, string}}}},
+     #ejabberd_commands{name = set_user_affiliation, tags = [muc_room],
+			desc = "Change user affiliation for all rooms",
+			module = ?MODULE, function = set_user_affiliation,
+			args_desc = ["Server Host", "Username", "Affiliation to set"],
+			args_example = ["chat.skillz.com", "user1234", "muted"],
+			args = [{host, binary}, {user, binary}, {affiliation, binary}],
+			result = {res, rescode}},
      #ejabberd_commands{name = set_room_affiliation, tags = [muc_room],
 		       desc = "Change an affiliation in a MUC room",
 		       module = ?MODULE, function = set_room_affiliation,
@@ -1381,6 +1408,22 @@ make_webadmin_roster_table(Service, R, RPath) ->
 create_room(Name1, Host1, ServerHost) ->
     create_room_with_opts(Name1, Host1, ServerHost, []).
 
+start_room(RoomBin, RoomTitleBin) ->
+    Service = skillz_util:get_service(),
+    case get_room_pid(RoomBin, Service) of
+	room_not_found ->
+	    FromJid = jid:decode(skillz_util:get_cas_jid()),
+	    mod_muc:start_new_room(RoomBin, RoomTitleBin, Service, FromJid);
+	Pid when is_pid(Pid) ->
+	    case get_room_title(Pid) of
+		<<"">> -> change_room_option(RoomBin, Service, <<"title">>, RoomTitleBin);
+		_ -> ok
+	    end;
+	_ ->
+	    ok
+    end,
+    ok.
+
 create_room_with_opts(Name1, Host1, ServerHost1, CustomRoomOpts) ->
     ServerHost = validate_host(ServerHost1, <<"serverhost">>),
     case get_room_pid_validate(Name1, Host1, <<"service">>) of
@@ -1601,6 +1644,30 @@ get_room_state(Room_pid) ->
     {ok, R} = mod_muc_room:get_state(Room_pid),
     R.
 
+get_room_title(Pid) ->
+    Config = get_room_config(Pid),
+    Config#config.title.
+
+%% @doc Returns the last N messages after the last message id.
+get_room_summary(Service, RoomName, LimitIn, LastMessageId) ->
+    Limit = case LimitIn of
+		<<>> -> 5;
+		_ when is_integer(LimitIn) -> LimitIn;
+		_ -> try binary_to_integer(LimitIn) catch _:_ -> 5 end
+	    end,
+    case get_room_pid(RoomName, Service) of
+	room_not_found -> [];
+	Pid when is_pid(Pid) ->
+	    case mod_muc_room:get_room_summary(Pid, Limit, LastMessageId) of
+		{ok, RoomSummary} -> RoomSummary;
+		_ -> []
+	    end;
+	_ -> []
+    end.
+
+get_room_summary(RoomName, LimitIn, LastMessageId) ->
+    get_room_summary(skillz_util:get_service(), RoomName, LimitIn, LastMessageId).
+
 %%---------------
 %% Decide
 
@@ -1609,46 +1676,52 @@ decide_rooms(Method, Rooms, Last_allowed) ->
     lists:filter(Decide, Rooms).
 
 decide_room(unused, {_Room_name, _Host, ServerHost, Room_pid}, Last_allowed) ->
-    NodeStartTime = erlang:system_time(microsecond) -
+    try
+	NodeStartTime = erlang:system_time(microsecond) -
 		    1000000*(erlang:monotonic_time(second)-ejabberd_config:get_node_start()),
-    OnlyHibernated = case mod_muc_opt:hibernation_timeout(ServerHost) of
-	Value when Value < Last_allowed*24*60*60*1000 ->
-	    true;
-	_ ->
-	    false
+	OnlyHibernated = case mod_muc_opt:hibernation_timeout(ServerHost) of
+	    Value when Value < Last_allowed*24*60*60*1000 ->
+		true;
+	    _ ->
+		false
 	end,
-    {Just_created, Num_users} =
-    case Room_pid of
-	Pid when is_pid(Pid) andalso OnlyHibernated ->
-	    {erlang:system_time(microsecond), 0};
-	Pid when is_pid(Pid) ->
-	    case mod_muc_room:get_state(Room_pid) of
-		{ok, #state{just_created = JC, users = U}} ->
-		    {JC, maps:size(U)};
-		_ ->
-		    {erlang:system_time(microsecond), 0}
-	    end;
-	Opts ->
-	    case lists:keyfind(hibernation_time, 1, Opts) of
-		false ->
-		    {NodeStartTime, 0};
-		{_, undefined} ->
-		    {NodeStartTime, 0};
-		{_, T} ->
-		    {T, 0}
-	    end
-    end,
-    Last = case Just_created of
-	       true ->
-		   0;
-	       _ ->
-		   (erlang:system_time(microsecond)
-		    - Just_created) div 1000000
-	   end,
-    case {Num_users, seconds_to_days(Last)} of
-	{0, Last_days} when (Last_days >= Last_allowed) ->
+	{Just_created, Num_users} =
+	case Room_pid of
+	    Pid when is_pid(Pid) andalso OnlyHibernated ->
+		{erlang:system_time(microsecond), 0};
+	    Pid when is_pid(Pid) ->
+		case mod_muc_room:get_state(Room_pid) of
+		    {ok, #state{just_created = JC, users = U}} ->
+			{JC, maps:size(U)};
+		    _ ->
+			{erlang:system_time(microsecond), 0}
+		end;
+	    Opts ->
+		case lists:keyfind(hibernation_time, 1, Opts) of
+		    false ->
+			{NodeStartTime, 0};
+		    {_, undefined} ->
+			{NodeStartTime, 0};
+		    {_, T} ->
+			{T, 0}
+		end
+	end,
+	Last = case Just_created of
+		   true ->
+		       0;
+		   _ ->
+		       (erlang:system_time(microsecond)
+			- Just_created) div 1000000
+	       end,
+	case {Num_users, seconds_to_days(Last)} of
+	    {0, Last_days} when (Last_days >= Last_allowed) ->
+		true;
+	    _ ->
+		false
+	end
+    catch _:{noproc, {p1_fsm, sync_send_all_state_event, _}} ->
 	    true;
-	_ ->
+	_:_ ->
 	    false
     end;
 decide_room(empty, {Room_name, Host, ServerHost, Room_pid}, _Last_allowed) ->
@@ -1676,26 +1749,49 @@ seconds_to_days(S) ->
 %%---------------
 %% Act
 
+act_on_rooms(Method, destroy, Rooms) when Rooms =/= [] ->
+    ServerHosts = [{A, find_host(A)} || A <- ejabberd_config:get_myhosts()],
+    Delete = fun({N, H, _SH, Pid} = Room) ->
+		     SH = find_serverhost(H, ServerHosts),
+		     act_on_room(Method, destroy_not_forget, Room, SH)
+	     end,
+    lists:foreach(Delete, Rooms),
+    {_, Host, _} = hd(Rooms),
+    SH = find_serverhost(Host, ServerHosts),
+    RoomNames = [Name || {Name, _, _, _} <- Rooms],
+    mod_muc:forget_rooms(SH, Host, RoomNames);
 act_on_rooms(Method, Action, Rooms) ->
     Delete = fun(Room) ->
 		     act_on_room(Method, Action, Room)
 	     end,
     lists:foreach(Delete, Rooms).
 
-act_on_room(Method, destroy, {N, H, _SH, Pid}) ->
-    Message = iolist_to_binary(io_lib:format(
-        <<"Room destroyed by rooms_~s_destroy.">>, [Method])),
-    case Pid of
-	V when is_pid(V) ->
-	    mod_muc_room:destroy(Pid, Message);
-	_ ->
-	    case get_room_pid(N, H) of
-		Pid2 when is_pid(Pid2) ->
-		    mod_muc_room:destroy(Pid2, Message);
-		_ ->
-		    ok
-	    end
-    end;
+act_on_room(Method, destroy, {N, H, SH, Pid}) ->
+    act_on_room(Method, destroy_not_forget, {N, H, SH, Pid}, SH),
+    mod_muc:forget_room(SH, H, N).
+
+act_on_room(Method, destroy_not_forget, {N, H, _SH, Pid}, SH) ->
+    Message = iolist_to_binary(io_lib:format(<<"Room destroyed by rooms_~s_destroy.">>, [Method])),
+    try
+	case Pid of
+	    V when is_pid(V) ->
+		mod_muc_room:destroy(Pid, Message);
+	    _ ->
+		case get_room_pid(N, H) of
+		    Pid2 when is_pid(Pid2) ->
+			mod_muc_room:destroy(Pid2, Message);
+		    _ ->
+			ok
+		end
+	end
+    catch _:_ ->
+	    ok
+    end,
+    mod_muc:room_destroyed(H, N, Pid, SH).
+
+act_on_room(Method, destroy, {N, H, SH, Pid}) ->
+    act_on_room(Method, destroy_not_forget, {N, H, SH, Pid}, SH),
+    mod_muc:forget_room(SH, H, N);
 act_on_room(_Method, list, _) ->
     ok.
 
@@ -2146,6 +2242,13 @@ get_room_affiliation(Name, Service, JID) ->
 %% Change Room Affiliation
 %%----------------------------
 
+set_user_affiliation(ServerHost, LUser, NewAffiliation) ->
+    try
+	mod_muc_room:set_user_affiliation(ServerHost, LUser, binary_to_atom(NewAffiliation, latin1)),
+	ok
+    catch _:_ -> ok
+    end.
+
 set_room_affiliation(Name, Service, User, Host, AffiliationString) ->
     set_room_affiliation(Name, Service, makeencode(User, Host), AffiliationString).
 
@@ -2386,6 +2489,12 @@ get_room_serverhost(Service) when is_binary(Service) ->
 
 find_host(ServerHost) ->
     hd(gen_mod:get_module_opt_hosts(ServerHost, mod_muc)).
+
+find_serverhost(Host, ServerHosts) ->
+    case lists:keyfind(Host, 2, ServerHosts) of
+	{ServerHost, _} -> ServerHost;
+	_ -> get_room_serverhost(Host)
+    end.
 
 find_hosts(Global) when Global == global;
 			Global == <<"global">> ->

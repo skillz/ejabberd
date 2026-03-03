@@ -54,6 +54,7 @@
 	 webadmin_page_hostuser/4,
 	 get_mam_messages/2, webadmin_user/4,
 	 delete_old_messages_batch/5, delete_old_messages_status/1, delete_old_messages_abort/1,
+	 get_room_history/4,
 	 remove_message_from_archive/3]).
 
 -import(ejabberd_web_admin, [make_command/4, make_command/2]).
@@ -1558,6 +1559,13 @@ send(Msgs, Count, IsComplete,
 	      #message{from = To, to = From, sub_els = [Result, Hint]}),
 	    ignore
     end.
+
+-spec get_room_history(binary(), binary(), binary(), non_neg_integer()) ->
+      [{jid(), binary(), message(), integer()}].
+get_room_history(ServerHost, Room, Host, HistorySize) ->
+    LServer = jid:nameprep(ServerHost),
+    Mod = gen_mod:db_mod(LServer, ?MODULE),
+    Mod:get_room_history(LServer, Room, Host, HistorySize).
 
 -spec make_rsm_out([{binary(), integer(), xmlel()}], count()) -> rsm_set().
 make_rsm_out([], Count) ->

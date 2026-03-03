@@ -30,15 +30,16 @@
 -behaviour(ejabberd_db_serialize).
 
 %% API
--export([init/2, import/3, store_room/5, restore_room/3, forget_room/3,
+-export([init/2, import/3, store_room/5, restore_room/3, forget_room/3, forget_rooms/3,
 	 can_use_nick/4, get_rooms/2, get_nick/3, get_nicks/2, set_nick/4]).
 -export([register_online_room/4, unregister_online_room/4, find_online_room/3,
 	 get_online_rooms/3, count_online_rooms/2, rsm_supported/0,
 	 register_online_user/4, unregister_online_user/4,
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
 	 find_online_room_by_pid/2]).
--export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
-	 get_affiliations/3, search_affiliation/4]).
+-export([set_affiliation/6, set_affiliations/4, get_affiliation/5, get_affiliation/2,
+	 get_affiliations/3, get_affiliations/1, search_affiliation/4,
+	 disable_affiliation/2, insert_affiliation/3]).
 %% gen_server callbacks
 -export([start_link/2, init/1, handle_cast/2, handle_call/3, handle_info/2,
 	 terminate/2, code_change/3]).
@@ -93,6 +94,9 @@ forget_room(_LServer, Host, Name) ->
     F = fun () -> mnesia:delete({muc_room, {Name, Host}})
 	end,
     mnesia:transaction(F).
+
+forget_rooms(LServer, Host, Rooms) ->
+    lists:foreach(fun(Name) -> forget_room(LServer, Host, Name) end, Rooms).
 
 can_use_nick(_LServer, ServiceOrRoom, JID, Nick) ->
     {LUser, LServer, _} = jid:tolower(JID),
@@ -197,8 +201,20 @@ get_affiliation(_ServerHost, _Room, _Host, _LUser, _LServer) ->
 get_affiliations(_ServerHost, _Room, _Host) ->
     {error, not_implemented}.
 
+get_affiliations(_Host) ->
+    [].
+
+insert_affiliation(_Host, _LUser, _Affiliation) ->
+    {error, not_implemented}.
+
+disable_affiliation(_Host, _LUser) ->
+    {error, not_implemented}.
+
 search_affiliation(_ServerHost, _Room, _Host, _Affiliation) ->
     {error, not_implemented}.
+
+get_affiliation(_ServerHost, _LUser) ->
+    none.
 
 register_online_room(_ServerHost, Room, Host, Pid) ->
     F = fun() ->
