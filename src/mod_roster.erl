@@ -5,7 +5,7 @@
 %%% Created : 11 Dec 2002 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -34,35 +34,42 @@
 
 -module(mod_roster).
 
--protocol({xep, 237, '1.3'}).
+-protocol({xep, 237, '1.3', '2.1.0', "complete", ""}).
 
 -author('alexey@process-one.net').
 
 -behaviour(gen_mod).
 
 -export([start/2, stop/1, reload/3, process_iq/1, export/1,
-	 import_info/0, process_local_iq/1, get_user_roster/2,
+	 import_info/0, process_local_iq/1, get_user_roster_items/2,
 	 import/5, get_roster/2, push_item/3,
 	 import_start/2, import_stop/2, is_subscribed/2,
 	 c2s_self_presence/1, in_subscription/2,
 	 out_subscription/1, set_items/3, remove_user/2,
-	 get_jid_info/4, encode_item/1, webadmin_page/3,
-	 webadmin_user/4, get_versioning_feature/2,
-	 roster_versioning_enabled/1, roster_version/2,
+	 get_jid_info/4, encode_item/1, get_versioning_feature/2,
+	 roster_version/2, mod_doc/0,
 	 mod_opt_type/1, mod_options/1, set_roster/1, del_roster/3,
-	 depends/2]).
+	 process_rosteritems/5,
+	 depends/2, set_item_and_notify_clients/3]).
+
+-export([webadmin_page_hostuser/4, webadmin_menu_hostuser/4, webadmin_user/4]).
+
+-import(ejabberd_web_admin, [make_command/4, make_command_raw_value/3, make_table/4]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_roster.hrl").
 -include("ejabberd_http.hrl").
 -include("ejabberd_web_admin.hrl").
--include("ejabberd_stacktrace.hrl").
+
+-include("translate.hrl").
 
 -define(ROSTER_CACHE, roster_cache).
 -define(ROSTER_ITEM_CACHE, roster_item_cache).
 -define(ROSTER_VERSION_CACHE, roster_version_cache).
+-define(SM_MIX_ANNOTATE, roster_mix_annotate).
 
+-type c2s_state() :: ejabberd_c2s:state().
 -export_type([subscription/0]).
 
 -callback init(binary(), gen_mod:opts()) -> any().
@@ -74,7 +81,7 @@
 -callback read_subscription_and_groups(binary(), binary(), ljid())
           -> {ok, {subscription(), ask(), [binary()]}} | error.
 -callback roster_subscribe(binary(), binary(), ljid(), #roster{}) -> any().
--callback transaction(binary(), function()) -> {atomic, any()} | {aborted, any()}.
+-callback transaction(binary(), fun(() -> T)) -> {atomic, T} | {aborted, any()}.
 -callback remove_user(binary(), binary()) -> any().
 -callback update_roster(binary(), binary(), ljid(), #roster{}) -> any().
 -callback del_roster(binary(), binary(), ljid()) -> any().
@@ -84,64 +91,38 @@
 -optional_callbacks([use_cache/2, cache_nodes/1]).
 
 start(Host, Opts) ->
-    Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
+    Mod = gen_mod:db_mod(Opts, ?MODULE),
     Mod:init(Host, Opts),
     init_cache(Mod, Host, Opts),
-    ejabberd_hooks:add(roster_get, Host, ?MODULE,
-		       get_user_roster, 50),
-    ejabberd_hooks:add(roster_in_subscription, Host,
-		       ?MODULE, in_subscription, 50),
-    ejabberd_hooks:add(roster_out_subscription, Host,
-		       ?MODULE, out_subscription, 50),
-    ejabberd_hooks:add(roster_get_jid_info, Host, ?MODULE,
-		       get_jid_info, 50),
-    ejabberd_hooks:add(remove_user, Host, ?MODULE,
-		       remove_user, 50),
-    ejabberd_hooks:add(c2s_self_presence, Host, ?MODULE,
-		       c2s_self_presence, 50),
-    ejabberd_hooks:add(c2s_post_auth_features, Host,
-		       ?MODULE, get_versioning_feature, 50),
-    ejabberd_hooks:add(webadmin_page_host, Host, ?MODULE,
-		       webadmin_page, 50),
-    ejabberd_hooks:add(webadmin_user, Host, ?MODULE,
-		       webadmin_user, 50),
-    gen_iq_handler:add_iq_handler(ejabberd_sm, Host,
-				  ?NS_ROSTER, ?MODULE, process_iq).
+    {ok, [{hook, roster_get, get_user_roster_items, 50},
+          {hook, roster_in_subscription, in_subscription, 50},
+          {hook, roster_out_subscription, out_subscription, 50},
+          {hook, roster_get_jid_info, get_jid_info, 50},
+          {hook, remove_user, remove_user, 50},
+          {hook, c2s_self_presence, c2s_self_presence, 50},
+          {hook, c2s_post_auth_features, get_versioning_feature, 50},
+          {hook, webadmin_menu_hostuser, webadmin_menu_hostuser, 50},
+          {hook, webadmin_page_hostuser, webadmin_page_hostuser, 50},
+          {hook, webadmin_user, webadmin_user, 50},
+          {iq_handler, ejabberd_sm, ?NS_ROSTER, process_iq}]}.
 
-stop(Host) ->
-    ejabberd_hooks:delete(roster_get, Host, ?MODULE,
-			  get_user_roster, 50),
-    ejabberd_hooks:delete(roster_in_subscription, Host,
-			  ?MODULE, in_subscription, 50),
-    ejabberd_hooks:delete(roster_out_subscription, Host,
-			  ?MODULE, out_subscription, 50),
-    ejabberd_hooks:delete(roster_get_jid_info, Host,
-			  ?MODULE, get_jid_info, 50),
-    ejabberd_hooks:delete(remove_user, Host, ?MODULE,
-			  remove_user, 50),
-    ejabberd_hooks:delete(c2s_self_presence, Host, ?MODULE,
-			  c2s_self_presence, 50),
-    ejabberd_hooks:delete(c2s_post_auth_features,
-			  Host, ?MODULE, get_versioning_feature, 50),
-    ejabberd_hooks:delete(webadmin_page_host, Host, ?MODULE,
-			  webadmin_page, 50),
-    ejabberd_hooks:delete(webadmin_user, Host, ?MODULE,
-			  webadmin_user, 50),
-    gen_iq_handler:remove_iq_handler(ejabberd_sm, Host,
-				     ?NS_ROSTER).
+stop(_Host) ->
+    ok.
 
 reload(Host, NewOpts, OldOpts) ->
-    NewMod = gen_mod:db_mod(Host, NewOpts, ?MODULE),
-    OldMod = gen_mod:db_mod(Host, OldOpts, ?MODULE),
+    NewMod = gen_mod:db_mod(NewOpts, ?MODULE),
+    OldMod = gen_mod:db_mod(OldOpts, ?MODULE),
     if NewMod /= OldMod ->
 	    NewMod:init(Host, NewOpts);
        true ->
 	    ok
-    end.
+    end,
+    init_cache(NewMod, Host, NewOpts).
 
 depends(_Host, _Opts) ->
     [].
 
+-spec process_iq(iq()) -> iq().
 process_iq(#iq{from = #jid{luser = U, lserver = S},
 	       to =   #jid{luser = U, lserver = S}} = IQ) ->
     process_local_iq(IQ);
@@ -149,31 +130,38 @@ process_iq(#iq{lang = Lang, to = To} = IQ) ->
     case ejabberd_hooks:run_fold(roster_remote_access,
 				 To#jid.lserver, false, [IQ]) of
 	false ->
-	    Txt = <<"Query to another users is forbidden">>,
+	    Txt = ?T("Query to another users is forbidden"),
 	    xmpp:make_error(IQ, xmpp:err_forbidden(Txt, Lang));
-	true ->
-	    process_local_iq(IQ)
+	{true, IQ1} ->
+	    process_local_iq(IQ1)
     end.
 
+-spec process_local_iq(iq()) -> iq().
 process_local_iq(#iq{type = set,lang = Lang,
 		     sub_els = [#roster_query{
 				   items = [#roster_item{ask = Ask}]}]} = IQ)
   when Ask /= undefined ->
-    Txt = <<"Possessing 'ask' attribute is not allowed by RFC6121">>,
+    Txt = ?T("Possessing 'ask' attribute is not allowed by RFC6121"),
     xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang));
 process_local_iq(#iq{type = set, from = From, lang = Lang,
 		     sub_els = [#roster_query{
 				   items = [#roster_item{} = Item]}]} = IQ) ->
     case has_duplicated_groups(Item#roster_item.groups) of
 	true ->
-	    Txt = <<"Duplicated groups are not allowed by RFC6121">>,
+	    Txt = ?T("Duplicated groups are not allowed by RFC6121"),
 	    xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang));
 	false ->
-	    #jid{lserver = LServer} = From,
-	    Access = gen_mod:get_module_opt(LServer, ?MODULE, access),
+	    From1 = case xmpp:get_meta(IQ, privilege_from, none) of
+			#jid{} = PrivFrom ->
+			    PrivFrom;
+			none ->
+			    From
+		    end,
+	    #jid{lserver = LServer} = From1,
+	    Access = mod_roster_opt:access(LServer),
 	    case acl:match_rule(LServer, Access, From) of
 		deny ->
-		    Txt = <<"Access denied by service policy">>,
+		    Txt = ?T("Access denied by service policy"),
 		    xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
 		allow ->
 		    process_iq_set(IQ)
@@ -181,7 +169,7 @@ process_local_iq(#iq{type = set, from = From, lang = Lang,
     end;
 process_local_iq(#iq{type = set, lang = Lang,
 		     sub_els = [#roster_query{items = [_|_]}]} = IQ) ->
-    Txt = <<"Multiple <item/> elements are not allowed by RFC6121">>,
+    Txt = ?T("Multiple <item/> elements are not allowed by RFC6121"),
     xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang));
 process_local_iq(#iq{type = get, lang = Lang,
 		     sub_els = [#roster_query{items = Items}]} = IQ) ->
@@ -189,31 +177,25 @@ process_local_iq(#iq{type = get, lang = Lang,
 	[] ->
 	    process_iq_get(IQ);
 	[_|_] ->
-	    Txt = <<"The query must not contain <item/> elements">>,
+	    Txt = ?T("The query must not contain <item/> elements"),
 	    xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang))
     end;
 process_local_iq(#iq{lang = Lang} = IQ) ->
-    Txt = <<"No module is handling this query">>,
+    Txt = ?T("No module is handling this query"),
     xmpp:make_error(IQ, xmpp:err_service_unavailable(Txt, Lang)).
 
+-spec roster_hash([#roster{}]) -> binary().
 roster_hash(Items) ->
-    str:sha(term_to_binary(lists:sort([R#roster{groups =
-						    lists:sort(Grs)}
-				       || R = #roster{groups = Grs}
+    str:sha(term_to_binary(lists:sort([R#roster_item{groups = lists:sort(Grs)}
+				       || R = #roster_item{groups = Grs}
 					      <- Items]))).
-
-roster_versioning_enabled(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, versioning).
-
-roster_version_on_db(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, store_current_id).
 
 %% Returns a list that may contain an xmlelement with the XEP-237 feature if it's enabled.
 -spec get_versioning_feature([xmpp_element()], binary()) -> [xmpp_element()].
 get_versioning_feature(Acc, Host) ->
     case gen_mod:is_loaded(Host, ?MODULE) of
 	true ->
-    case roster_versioning_enabled(Host) of
+    case mod_roster_opt:versioning(Host) of
       true ->
 	  [#rosterver_feature{}|Acc];
 		false ->
@@ -223,19 +205,19 @@ get_versioning_feature(Acc, Host) ->
 	    Acc
     end.
 
+-spec roster_version(binary(), binary()) -> undefined | binary().
 roster_version(LServer, LUser) ->
-    US = {LUser, LServer},
-    case roster_version_on_db(LServer) of
+    case mod_roster_opt:store_current_id(LServer) of
       true ->
 	  case read_roster_version(LUser, LServer) of
 	    error -> undefined;
 	    {ok, V} -> V
 	  end;
       false ->
-	  roster_hash(ejabberd_hooks:run_fold(roster_get, LServer,
-					      [], [US]))
+	  roster_hash(run_roster_get_hook(LUser, LServer))
     end.
 
+-spec read_roster_version(binary(), binary()) -> {ok, binary()} | error.
 read_roster_version(LUser, LServer) ->
     ets_cache:lookup(
       ?ROSTER_VERSION_CACHE, {LUser, LServer},
@@ -244,14 +226,17 @@ read_roster_version(LUser, LServer) ->
 	      Mod:read_roster_version(LUser, LServer)
       end).
 
+-spec write_roster_version(binary(), binary()) -> binary().
 write_roster_version(LUser, LServer) ->
     write_roster_version(LUser, LServer, false).
 
+-spec write_roster_version_t(binary(), binary()) -> binary().
 write_roster_version_t(LUser, LServer) ->
     write_roster_version(LUser, LServer, true).
 
+-spec write_roster_version(binary(), binary(), boolean()) -> binary().
 write_roster_version(LUser, LServer, InTransaction) ->
-    Ver = str:sha(term_to_binary(p1_time_compat:unique_integer())),
+    Ver = str:sha(term_to_binary(erlang:unique_integer())),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:write_roster_version(LUser, LServer, InTransaction, Ver),
     if InTransaction -> ok;
@@ -267,74 +252,71 @@ write_roster_version(LUser, LServer, InTransaction) ->
 %%     - roster versioning is not used by the client OR
 %%     - roster versioning is used by server and client, BUT the server isn't storing versions on db OR
 %%     - the roster version from client don't match current version.
-process_iq_get(#iq{to = To, lang = Lang,
-		   sub_els = [#roster_query{ver = RequestedVersion}]} = IQ) ->
+-spec process_iq_get(iq()) -> iq().
+process_iq_get(#iq{to = To, from = From,
+		   sub_els = [#roster_query{ver = RequestedVersion, mix_annotate = MixEnabled}]} = IQ) ->
     LUser = To#jid.luser,
     LServer = To#jid.lserver,
-    US = {LUser, LServer},
-    try {ItemsToSend, VersionToSend} =
-	     case {roster_versioning_enabled(LServer),
-		   roster_version_on_db(LServer)} of
-		 {true, true} when RequestedVersion /= undefined ->
-		     case read_roster_version(LUser, LServer) of
-			 error ->
-			     RosterVersion = write_roster_version(LUser, LServer),
-			     {lists:map(fun encode_item/1,
-					ejabberd_hooks:run_fold(
-					  roster_get, To#jid.lserver, [], [US])),
-			      RosterVersion};
-			 {ok, RequestedVersion} ->
-			     {false, false};
-			 {ok, NewVersion} ->
-			     {lists:map(fun encode_item/1,
-					ejabberd_hooks:run_fold(
-					  roster_get, To#jid.lserver, [], [US])),
-			      NewVersion}
-		     end;
-		 {true, false} when RequestedVersion /= undefined ->
-		     RosterItems = ejabberd_hooks:run_fold(
-				     roster_get, To#jid.lserver, [], [US]),
-		     case roster_hash(RosterItems) of
-			 RequestedVersion ->
-			     {false, false};
-			 New ->
-			     {lists:map(fun encode_item/1, RosterItems), New}
-		     end;
-		 _ ->
-		     {lists:map(fun encode_item/1,
-				ejabberd_hooks:run_fold(
-				  roster_get, To#jid.lserver, [], [US])),
-		      false}
-	     end,
-	 xmpp:make_iq_result(
-	   IQ,
-	   case {ItemsToSend, VersionToSend} of
-	       {false, false} ->
-		   undefined;
-	       {Items, false} ->
-		   #roster_query{items = Items};
-	       {Items, Version} ->
-		   #roster_query{items = Items,
-				 ver = Version}
-	   end)
-    catch ?EX_RULE(E, R, St) ->
-	    ?ERROR_MSG("failed to process roster get for ~s: ~p",
-		       [jid:encode(To), {E, {R, ?EX_STACK(St)}}]),
-	    Txt = <<"Roster module has failed">>,
-	    xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
-    end.
+    {ItemsToSend, VersionToSend} =
+	case {mod_roster_opt:versioning(LServer),
+	      mod_roster_opt:store_current_id(LServer)} of
+	    {true, true} when RequestedVersion /= undefined ->
+		case read_roster_version(LUser, LServer) of
+		    error ->
+			RosterVersion = write_roster_version(LUser, LServer),
+			{run_roster_get_hook(LUser, LServer), RosterVersion};
+		    {ok, RequestedVersion} ->
+			{false, false};
+		    {ok, NewVersion} ->
+			{run_roster_get_hook(LUser, LServer), NewVersion}
+		end;
+	    {true, false} when RequestedVersion /= undefined ->
+		RosterItems = run_roster_get_hook(LUser, LServer),
+		case roster_hash(RosterItems) of
+		    RequestedVersion ->
+			{false, false};
+		    New ->
+			{RosterItems, New}
+		end;
+	    _ ->
+		{run_roster_get_hook(LUser, LServer), false}
+	end,
+    % Store that MIX annotation is enabled (for roster pushes)
+    set_mix_annotation_enabled(From, MixEnabled),
+    % Only include <channel/> element when MIX annotation is enabled
+    Items = case ItemsToSend of
+	false -> false;
+	FullItems -> process_items_mix(FullItems, MixEnabled)
+    end,
+    xmpp:make_iq_result(
+      IQ,
+      case {Items, VersionToSend} of
+	  {false, false} ->
+	      undefined;
+	  {Items, false} ->
+	      #roster_query{items = Items};
+	  {Items, Version} ->
+	      #roster_query{items = Items,
+			    ver = Version}
+      end).
 
--spec get_user_roster([#roster{}], {binary(), binary()}) -> [#roster{}].
-get_user_roster(Acc, {LUser, LServer}) ->
-    Items = get_roster(LUser, LServer),
-    lists:filter(fun (#roster{subscription = none,
-			      ask = in}) ->
-			 false;
-		     (_) -> true
-		 end,
-		 Items)
-      ++ Acc.
+-spec run_roster_get_hook(binary(), binary()) -> [#roster_item{}].
+run_roster_get_hook(LUser, LServer) ->
+    ejabberd_hooks:run_fold(roster_get, LServer, [], [{LUser, LServer}]).
 
+-spec get_filtered_roster(binary(), binary()) -> [#roster{}].
+get_filtered_roster(LUser, LServer) ->
+    lists:filter(
+	fun (#roster{subscription = none, ask = in}) -> false;
+	    (_) -> true
+	end,
+	get_roster(LUser, LServer)).
+
+-spec get_user_roster_items([#roster_item{}], {binary(), binary()}) -> [#roster_item{}].
+get_user_roster_items(Acc, {LUser, LServer}) ->
+    lists:map(fun encode_item/1, get_filtered_roster(LUser, LServer)) ++ Acc.
+
+-spec get_roster(binary(), binary()) -> [#roster{}].
 get_roster(LUser, LServer) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     R = case use_cache(Mod, LServer, roster) of
@@ -350,6 +332,7 @@ get_roster(LUser, LServer) ->
 	error -> []
     end.
 
+-spec get_roster_item(binary(), binary(), ljid()) -> #roster{}.
 get_roster_item(LUser, LServer, LJID) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     case Mod:get_roster_item(LUser, LServer, LJID) of
@@ -361,6 +344,8 @@ get_roster_item(LUser, LServer, LJID) ->
 		    us = {LUser, LServer}, jid = LBJID}
     end.
 
+-spec get_subscription_and_groups(binary(), binary(), ljid()) ->
+					 {subscription(), ask(), [binary()]}.
 get_subscription_and_groups(LUser, LServer, LJID) ->
     LBJID = jid:remove_resource(LJID),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
@@ -395,6 +380,7 @@ get_subscription_and_groups(LUser, LServer, LJID) ->
 	    {none, none, []}
     end.
 
+-spec set_roster(#roster{}) -> {atomic | aborted, any()}.
 set_roster(#roster{us = {LUser, LServer}, jid = LJID} = Item) ->
     transaction(
       LUser, LServer, [LJID],
@@ -402,6 +388,7 @@ set_roster(#roster{us = {LUser, LServer}, jid = LJID} = Item) ->
 	      update_roster_t(LUser, LServer, LJID, Item)
       end).
 
+-spec del_roster(binary(), binary(), ljid()) -> {atomic | aborted, any()}.
 del_roster(LUser, LServer, LJID) ->
     transaction(
       LUser, LServer, [LJID],
@@ -409,6 +396,7 @@ del_roster(LUser, LServer, LJID) ->
 	      del_roster_t(LUser, LServer, LJID)
       end).
 
+-spec encode_item(#roster{}) -> roster_item().
 encode_item(Item) ->
     #roster_item{jid = jid:make(Item#roster.jid),
 		 name = Item#roster.name,
@@ -420,6 +408,7 @@ encode_item(Item) ->
 		       end,
 		 groups = Item#roster.groups}.
 
+-spec decode_item(roster_item(), #roster{}, boolean()) -> #roster{}.
 decode_item(#roster_item{subscription = remove} = Item, R, _) ->
     R#roster{jid = jid:tolower(Item#roster_item.jid),
 	     name = <<"">>,
@@ -437,48 +426,58 @@ decode_item(Item, R, Managed) ->
 			    end,
 	     groups = Item#roster_item.groups}.
 
-process_iq_set(#iq{from = _From, to = To,
+-spec process_iq_set(iq()) -> iq().
+process_iq_set(#iq{from = _From, to = To, lang = Lang,
 		   sub_els = [#roster_query{items = [QueryItem]}]} = IQ) ->
+    case set_item_and_notify_clients(To, QueryItem, false) of
+	ok ->
+	    xmpp:make_iq_result(IQ);
+	{error, _} ->
+	    Txt = ?T("Database failure"),
+	    Err = xmpp:err_internal_server_error(Txt, Lang),
+	    xmpp:make_error(IQ, Err)
+    end.
+
+-spec set_item_and_notify_clients(jid(), #roster_item{}, boolean()) -> ok | {error, any()}.
+set_item_and_notify_clients(To, #roster_item{jid = PeerJID} = RosterItem,
+			    OverrideSubscription) ->
     #jid{luser = LUser, lserver = LServer} = To,
-    LJID = jid:tolower(QueryItem#roster_item.jid),
+    PeerLJID = jid:tolower(PeerJID),
     F = fun () ->
-		Item = get_roster_item(LUser, LServer, LJID),
-		Item2 = decode_item(QueryItem, Item, false),
+		Item1 = get_roster_item(LUser, LServer, PeerLJID),
+		Item2 = decode_item(RosterItem, Item1, OverrideSubscription),
 		Item3 = ejabberd_hooks:run_fold(roster_process_item,
 						LServer, Item2,
 						[LServer]),
 		case Item3#roster.subscription of
-		    remove -> del_roster_t(LUser, LServer, LJID);
-		    _ -> update_roster_t(LUser, LServer, LJID, Item3)
+		    remove -> del_roster_t(LUser, LServer, PeerLJID);
+		    _ -> update_roster_t(LUser, LServer, PeerLJID, Item3)
 		end,
-		case roster_version_on_db(LServer) of
+		case mod_roster_opt:store_current_id(LServer) of
 		    true -> write_roster_version_t(LUser, LServer);
 		    false -> ok
 		end,
-		{Item, Item3}
+		{Item1, Item3}
 	end,
-    case transaction(LUser, LServer, [LJID], F) of
-	{atomic, {OldItem, Item}} ->
-	    push_item(To, OldItem, Item),
-	    case Item#roster.subscription of
+    case transaction(LUser, LServer, [PeerLJID], F) of
+	{atomic, {OldItem, NewItem}} ->
+	    push_item(To, encode_item(OldItem), encode_item(NewItem)),
+	    case NewItem#roster.subscription of
 		remove ->
 		    send_unsubscribing_presence(To, OldItem);
 		_ ->
 		    ok
-	    end,
-	    xmpp:make_iq_result(IQ);
-	E ->
-	    ?ERROR_MSG("roster set failed:~nIQ = ~s~nError = ~p",
-		       [xmpp:pp(IQ), E]),
-	    xmpp:make_error(IQ, xmpp:err_internal_server_error())
+	    end;
+	{aborted, Reason} ->
+	    {error, Reason}
     end.
 
+-spec push_item(jid(), #roster_item{}, #roster_item{}) -> ok.
 push_item(To, OldItem, NewItem) ->
     #jid{luser = LUser, lserver = LServer} = To,
-    Ver = case roster_versioning_enabled(LServer) of
+    Ver = case mod_roster_opt:versioning(LServer) of
 	      true -> roster_version(LServer, LUser);
-	      false -> undefined;
-	      undefined -> undefined
+	      false -> undefined
 	  end,
     lists:foreach(
       fun(Resource) ->
@@ -486,20 +485,22 @@ push_item(To, OldItem, NewItem) ->
 	      push_item(To1, OldItem, NewItem, Ver)
       end, ejabberd_sm:get_user_resources(LUser, LServer)).
 
+-spec push_item(jid(), #roster_item{}, #roster_item{}, undefined | binary()) -> ok.
 push_item(To, OldItem, NewItem, Ver) ->
     route_presence_change(To, OldItem, NewItem),
+    [Item] = process_items_mix([NewItem], To),
     IQ = #iq{type = set, to = To,
 	     from = jid:remove_resource(To),
 	     id = <<"push", (p1_rand:get_string())/binary>>,
 	     sub_els = [#roster_query{ver = Ver,
-				      items = [encode_item(NewItem)]}]},
+				      items = [Item]}]},
     ejabberd_router:route(IQ).
 
--spec route_presence_change(jid(), #roster{}, #roster{}) -> ok.
+-spec route_presence_change(jid(), #roster_item{}, #roster_item{}) -> ok.
 route_presence_change(From, OldItem, NewItem) ->
-    OldSub = OldItem#roster.subscription,
-    NewSub = NewItem#roster.subscription,
-    To = jid:make(NewItem#roster.jid),
+    OldSub = OldItem#roster_item.subscription,
+    NewSub = NewItem#roster_item.subscription,
+    To = NewItem#roster_item.jid,
     NewIsFrom = NewSub == both orelse NewSub == from,
     OldIsFrom = OldSub == both orelse OldSub == from,
     if NewIsFrom andalso not OldIsFrom ->
@@ -520,17 +521,21 @@ route_presence_change(From, OldItem, NewItem) ->
 		allow ->
 		    ejabberd_router:route(PU)
 	    end;
-       true -> ok
+       true ->
+	    ok
     end.
 
+-spec ask_to_pending(ask()) -> none | in | out | both.
 ask_to_pending(subscribe) -> out;
 ask_to_pending(unsubscribe) -> none;
 ask_to_pending(Ask) -> Ask.
 
+-spec roster_subscribe_t(binary(), binary(), ljid(), #roster{}) -> any().
 roster_subscribe_t(LUser, LServer, LJID, Item) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:roster_subscribe(LUser, LServer, LJID, Item).
 
+-spec transaction(binary(), binary(), [ljid()], fun(() -> T)) -> {atomic, T} | {aborted, any()}.
 transaction(LUser, LServer, LJIDs, F) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     case Mod:transaction(LServer, F) of
@@ -543,21 +548,25 @@ transaction(LUser, LServer, LJIDs, F) ->
 
 -spec in_subscription(boolean(), presence()) -> boolean().
 in_subscription(_, #presence{from = JID, to = To,
+                             sub_els = SubEls,
 			     type = Type, status = Status}) ->
     #jid{user = User, server = Server} = To,
     Reason = if Type == subscribe -> xmpp:get_text(Status);
 		true -> <<"">>
 	     end,
     process_subscription(in, User, Server, JID, Type,
-			 Reason).
+			 Reason, SubEls).
 
 -spec out_subscription(presence()) -> boolean().
 out_subscription(#presence{from = From, to = JID, type = Type}) ->
     #jid{user = User, server = Server} = From,
-    process_subscription(out, User, Server, JID, Type, <<"">>).
+    process_subscription(out, User, Server, JID, Type, <<"">>, []).
 
+-spec process_subscription(in | out, binary(), binary(), jid(),
+			   subscribe | subscribed | unsubscribe | unsubscribed,
+			   binary(), [fxml:xmlel()]) -> boolean().
 process_subscription(Direction, User, Server, JID1,
-		     Type, Reason) ->
+		     Type, Reason, SubEls) ->
     LUser = jid:nodeprep(User),
     LServer = jid:nameprep(Server),
     LJID = jid:tolower(jid:remove_resource(JID1)),
@@ -591,9 +600,11 @@ process_subscription(Direction, User, Server, JID1,
 		    {Subscription, Pending} ->
 			NewItem = Item#roster{subscription = Subscription,
 					      ask = Pending,
+					      name = get_nick_subels(SubEls, Item#roster.name),
+					      xs = SubEls,
 					      askmessage = AskMessage},
 			roster_subscribe_t(LUser, LServer, LJID, NewItem),
-			case roster_version_on_db(LServer) of
+			case mod_roster_opt:store_current_id(LServer) of
 			    true -> write_roster_version_t(LUser, LServer);
 			    false -> ok
 			end,
@@ -616,7 +627,9 @@ process_subscription(Direction, User, Server, JID1,
 		       NewItem#roster.ask == in ->
 			    ok;
 		       true ->
-			    push_item(jid:make(User, Server), OldItem, NewItem)
+			    push_item(jid:make(User, Server),
+				      encode_item(OldItem),
+				      encode_item(NewItem))
 		    end,
 		    true;
 		none ->
@@ -624,6 +637,12 @@ process_subscription(Direction, User, Server, JID1,
 	    end;
 	_ ->
 	    false
+    end.
+
+get_nick_subels(SubEls, Default) ->
+    case xmpp:get_subtag(#presence{sub_els = SubEls}, #nick{}) of
+        {nick, N} -> N;
+        _ -> Default
     end.
 
 %% in_state_change(Subscription, Pending, Type) -> NewState
@@ -681,6 +700,30 @@ in_state_change(both, none, subscribe) -> none;
 in_state_change(both, none, subscribed) -> none;
 in_state_change(both, none, unsubscribe) -> {to, none};
 in_state_change(both, none, unsubscribed) ->
+    {from, none};
+% Invalid states that can occurs from roster modification from API
+in_state_change(to, out, subscribe) -> {to, in};
+in_state_change(to, out, subscribed) -> none;
+in_state_change(to, out, unsubscribe) -> none;
+in_state_change(to, out, unsubscribed) -> {none, none};
+in_state_change(to, both, subscribe) -> none;
+in_state_change(to, both, subscribed) -> none;
+in_state_change(to, both, unsubscribe) -> {to, none};
+in_state_change(to, both, unsubscribed) -> {none, in};
+in_state_change(from, in, subscribe) -> none;
+in_state_change(from, in, subscribed) -> {both, none};
+in_state_change(from, in, unsubscribe) ->
+    {none, none};
+in_state_change(from, in, unsubscribed) -> none;
+in_state_change(from, both, subscribe) -> none;
+in_state_change(from, both, subscribed) -> {both, none};
+in_state_change(from, both, unsubscribe) -> {none, out};
+in_state_change(from, both, unsubscribed) ->
+    {from, none};
+in_state_change(both, _, subscribe) -> none;
+in_state_change(both, _, subscribed) -> none;
+in_state_change(both, _, unsubscribe) -> {to, none};
+in_state_change(both, _, unsubscribed) ->
     {from, none}.
 
 out_state_change(none, none, subscribe) -> {none, out};
@@ -688,8 +731,7 @@ out_state_change(none, none, subscribed) -> none;
 out_state_change(none, none, unsubscribe) -> none;
 out_state_change(none, none, unsubscribed) -> none;
 out_state_change(none, out, subscribe) ->
-    {none,
-     out}; %% We need to resend query (RFC3921, section 9.2)
+    {none, out}; %% We need to resend query (RFC3921, section 9.2)
 out_state_change(none, out, subscribed) -> none;
 out_state_change(none, out, unsubscribe) ->
     {none, none};
@@ -728,6 +770,32 @@ out_state_change(both, none, subscribed) -> none;
 out_state_change(both, none, unsubscribe) ->
     {from, none};
 out_state_change(both, none, unsubscribed) ->
+    {to, none};
+% Invalid states that can occurs from roster modification from API
+out_state_change(to, out, subscribe) -> none;
+out_state_change(to, out, subscribed) -> {both, none};
+out_state_change(to, out, unsubscribe) -> {none, none};
+out_state_change(to, out, unsubscribed) -> none;
+out_state_change(to, both, subscribe) -> none;
+out_state_change(to, both, subscribed) -> {both, none};
+out_state_change(to, both, unsubscribe) -> {none, in};
+out_state_change(to, both, unsubscribed) -> {to, none};
+out_state_change(from, in, subscribe) -> {from, out};
+out_state_change(from, in, subscribed) -> none;
+out_state_change(from, in, unsubscribe) -> none;
+out_state_change(from, in, unsubscribed) ->
+    {none, none};
+out_state_change(from, both, subscribe) -> none;
+out_state_change(from, both, subscribed) -> none;
+out_state_change(from, both, unsubscribe) ->
+    {from, none};
+out_state_change(from, both, unsubscribed) ->
+    {none, out};
+out_state_change(both, _, subscribe) -> none;
+out_state_change(both, _, subscribed) -> none;
+out_state_change(both, _, unsubscribe) ->
+    {from, none};
+out_state_change(both, _, unsubscribed) ->
     {to, none}.
 
 in_auto_reply(from, none, subscribe) -> subscribed;
@@ -745,7 +813,7 @@ in_auto_reply(_, _, _) -> none.
 remove_user(User, Server) ->
     LUser = jid:nodeprep(User),
     LServer = jid:nameprep(Server),
-    Items = get_user_roster([], {LUser, LServer}),
+    Items = get_filtered_roster(LUser, LServer),
     send_unsubscription_to_rosteritems(LUser, LServer, Items),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:remove_user(LUser, LServer),
@@ -754,6 +822,7 @@ remove_user(User, Server) ->
 %% For each contact with Subscription:
 %% Both or From, send a "unsubscribed" presence stanza;
 %% Both or To, send a "unsubscribe" presence stanza.
+-spec send_unsubscription_to_rosteritems(binary(), binary(), [#roster{}]) -> ok.
 send_unsubscription_to_rosteritems(LUser, LServer, RosterItems) ->
     From = jid:make({LUser, LServer, <<"">>}),
     lists:foreach(fun (RosterItem) ->
@@ -761,6 +830,7 @@ send_unsubscription_to_rosteritems(LUser, LServer, RosterItems) ->
 		  end,
 		  RosterItems).
 
+-spec send_unsubscribing_presence(jid(), #roster{}) -> ok.
 send_unsubscribing_presence(From, Item) ->
     IsTo = case Item#roster.subscription of
 	     both -> true;
@@ -785,12 +855,62 @@ send_unsubscribing_presence(From, Item) ->
 			from = jid:remove_resource(From),
 			to = jid:make(Item#roster.jid)});
        true -> ok
-    end,
-    ok.
+    end.
+
+%%%===================================================================
+%%% MIX
+%%%===================================================================
+
+-spec remove_mix_channel([#roster_item{}]) -> [#roster_item{}].
+remove_mix_channel(Items) ->
+    lists:map(
+	fun(Item) ->
+	    Item#roster_item{mix_channel = undefined}
+	end, Items).
+
+-spec process_items_mix([#roster_item{}], boolean() | jid()) -> [#roster_item{}].
+process_items_mix(Items, true) -> Items;
+process_items_mix(Items, false) -> remove_mix_channel(Items);
+process_items_mix(Items, JID) -> process_items_mix(Items, is_mix_annotation_enabled(JID)).
+
+-spec is_mix_annotation_enabled(jid()) -> boolean().
+is_mix_annotation_enabled(#jid{luser = User, lserver = Host, lresource = Res}) ->
+    case ejabberd_sm:get_user_info(User, Host, Res) of
+	offline -> false;
+	Info ->
+	    case lists:keyfind(?SM_MIX_ANNOTATE, 1, Info) of
+		{_, true} -> true;
+		_ -> false
+	    end
+    end.
+
+-spec set_mix_annotation_enabled(jid(), boolean()) -> ok | {error, any()}.
+set_mix_annotation_enabled(#jid{luser = U, lserver = Host, lresource = R} = JID, false) ->
+    case is_mix_annotation_enabled(JID) of
+	true ->
+	    ?DEBUG("Disabling roster MIX annotation for ~ts@~ts/~ts", [U, Host, R]),
+	    case ejabberd_sm:del_user_info(U, Host, R, ?SM_MIX_ANNOTATE) of
+		ok -> ok;
+		{error, Reason} = Err ->
+		    ?ERROR_MSG("Failed to disable roster MIX annotation for ~ts@~ts/~ts: ~p",
+			[U, Host, R, Reason]),
+		    Err
+	    end;
+	false -> ok
+    end;
+set_mix_annotation_enabled(#jid{luser = U, lserver = Host, lresource = R}, true)->
+    ?DEBUG("Enabling roster MIX annotation for ~ts@~ts/~ts", [U, Host, R]),
+    case ejabberd_sm:set_user_info(U, Host, R, ?SM_MIX_ANNOTATE, true) of
+	ok -> ok;
+	{error, Reason} = Err ->
+	    ?ERROR_MSG("Failed to enable roster MIX annotation for ~ts@~ts/~ts: ~p",
+		[U, Host, R, Reason]),
+	    Err
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
--spec set_items(binary(), binary(), roster_query()) -> any().
+-spec set_items(binary(), binary(), roster_query()) -> {atomic, ok} | {aborted, any()}.
 set_items(User, Server, #roster_query{items = Items}) ->
     LUser = jid:nodeprep(User),
     LServer = jid:nameprep(Server),
@@ -803,14 +923,17 @@ set_items(User, Server, #roster_query{items = Items}) ->
 	end,
     transaction(LUser, LServer, LJIDs, F).
 
+-spec update_roster_t(binary(), binary(), ljid(), #roster{}) -> any().
 update_roster_t(LUser, LServer, LJID, Item) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:update_roster(LUser, LServer, LJID, Item).
 
+-spec del_roster_t(binary(), binary(), ljid()) -> any().
 del_roster_t(LUser, LServer, LJID) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:del_roster(LUser, LServer, LJID).
 
+-spec process_item_set_t(binary(), binary(), roster_item()) -> any().
 process_item_set_t(LUser, LServer, #roster_item{jid = JID1} = QueryItem) ->
     JID = {JID1#jid.user, JID1#jid.server, <<>>},
     LJID = {JID1#jid.luser, JID1#jid.lserver, <<>>},
@@ -823,8 +946,7 @@ process_item_set_t(LUser, LServer, #roster_item{jid = JID1} = QueryItem) ->
     end;
 process_item_set_t(_LUser, _LServer, _) -> ok.
 
--spec c2s_self_presence({presence(), ejabberd_c2s:state()})
-      -> {presence(), ejabberd_c2s:state()}.
+-spec c2s_self_presence({presence(), c2s_state()}) -> {presence(), c2s_state()}.
 c2s_self_presence({_, #{pres_last := _}} = Acc) ->
     Acc;
 c2s_self_presence({#presence{type = available} = Pkt, State}) ->
@@ -838,7 +960,7 @@ c2s_self_presence({#presence{type = available} = Pkt, State}) ->
 c2s_self_presence(Acc) ->
     Acc.
 
--spec resend_pending_subscriptions(ejabberd_c2s:state()) -> ejabberd_c2s:state().
+-spec resend_pending_subscriptions(c2s_state()) -> c2s_state().
 resend_pending_subscriptions(#{jid := JID} = State) ->
     BareJID = jid:remove_resource(JID),
     Result = get_roster(JID#jid.luser, JID#jid.lserver),
@@ -851,6 +973,7 @@ resend_pending_subscriptions(#{jid := JID} = State) ->
 	      Sub = #presence{from = jid:make(R#roster.jid),
 			      to = BareJID,
 			      type = subscribe,
+			      sub_els = R#roster.xs,
 			      status = xmpp:mk_text(Status)},
 	      ejabberd_c2s:send(AccState, Sub);
 	 (_, AccState) ->
@@ -890,203 +1013,98 @@ is_subscribed(From, #jid{luser = LUser, lserver = LServer}) ->
     (Sub /= none) orelse (Ask == subscribe)
 	orelse (Ask == out) orelse (Ask == both).
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-webadmin_page(_, Host,
-	      #request{us = _US, path = [<<"user">>, U, <<"roster">>],
-		       q = Query, lang = Lang} =
-		  _Request) ->
-    Res = user_roster(U, Host, Query, Lang), {stop, Res};
-webadmin_page(Acc, _, _) -> Acc.
-
-user_roster(User, Server, Query, Lang) ->
-    LUser = jid:nodeprep(User),
-    LServer = jid:nameprep(Server),
-    US = {LUser, LServer},
-    Items1 = get_roster(LUser, LServer),
-    Res = user_roster_parse_query(User, Server, Items1,
-				  Query),
-    Items = get_roster(LUser, LServer),
-    SItems = lists:sort(Items),
-    FItems = case SItems of
-	       [] -> [?CT(<<"None">>)];
-	       _ ->
-		   [?XE(<<"table">>,
-			[?XE(<<"thead">>,
-			     [?XE(<<"tr">>,
-				  [?XCT(<<"td">>, <<"Jabber ID">>),
-				   ?XCT(<<"td">>, <<"Nickname">>),
-				   ?XCT(<<"td">>, <<"Subscription">>),
-				   ?XCT(<<"td">>, <<"Pending">>),
-				   ?XCT(<<"td">>, <<"Groups">>)])]),
-			 ?XE(<<"tbody">>,
-			     (lists:map(fun (R) ->
-						Groups = lists:flatmap(fun
-									 (Group) ->
-									     [?C(Group),
-									      ?BR]
-								       end,
-								       R#roster.groups),
-						Pending =
-						    ask_to_pending(R#roster.ask),
-						TDJID =
-						    build_contact_jid_td(R#roster.jid),
-						?XE(<<"tr">>,
-						    [TDJID,
-						     ?XAC(<<"td">>,
-							  [{<<"class">>,
-							    <<"valign">>}],
-							  (R#roster.name)),
-						     ?XAC(<<"td">>,
-							  [{<<"class">>,
-							    <<"valign">>}],
-							  (iolist_to_binary(atom_to_list(R#roster.subscription)))),
-						     ?XAC(<<"td">>,
-							  [{<<"class">>,
-							    <<"valign">>}],
-							  (iolist_to_binary(atom_to_list(Pending)))),
-						     ?XAE(<<"td">>,
-							  [{<<"class">>,
-							    <<"valign">>}],
-							  Groups),
-						     if Pending == in ->
-							    ?XAE(<<"td">>,
-								 [{<<"class">>,
-								   <<"valign">>}],
-								 [?INPUTT(<<"submit">>,
-									  <<"validate",
-									    (ejabberd_web_admin:term_to_id(R#roster.jid))/binary>>,
-									  <<"Validate">>)]);
-							true -> ?X(<<"td">>)
-						     end,
-						     ?XAE(<<"td">>,
-							  [{<<"class">>,
-							    <<"valign">>}],
-							  [?INPUTT(<<"submit">>,
-								   <<"remove",
-								     (ejabberd_web_admin:term_to_id(R#roster.jid))/binary>>,
-								   <<"Remove">>)])])
-					end,
-					SItems)))])]
-	     end,
-    [?XC(<<"h1">>,
-	 (<<(?T(<<"Roster of ">>))/binary, (us_to_list(US))/binary>>))]
-      ++
-      case Res of
-	ok -> [?XREST(<<"Submitted">>)];
-	error -> [?XREST(<<"Bad format">>)];
-	nothing -> []
-      end
-	++
-	[?XAE(<<"form">>,
-	      [{<<"action">>, <<"">>}, {<<"method">>, <<"post">>}],
-	      (FItems ++
-		 [?P, ?INPUT(<<"text">>, <<"newjid">>, <<"">>),
-		  ?C(<<" ">>),
-		  ?INPUTT(<<"submit">>, <<"addjid">>,
-			  <<"Add Jabber ID">>)]))].
-
-build_contact_jid_td(RosterJID) ->
-    ContactJID = jid:make(RosterJID),
-    JIDURI = case {ContactJID#jid.luser,
-		   ContactJID#jid.lserver}
-		 of
-	       {<<"">>, _} -> <<"">>;
-	       {CUser, CServer} ->
-		   case lists:member(CServer, ejabberd_config:get_myhosts()) of
-		     false -> <<"">>;
-		     true ->
-			 <<"/admin/server/", CServer/binary, "/user/",
-			   CUser/binary, "/">>
-		   end
-	     end,
-    case JIDURI of
-      <<>> ->
-	  ?XAC(<<"td">>, [{<<"class">>, <<"valign">>}],
-	       (jid:encode(RosterJID)));
-      URI when is_binary(URI) ->
-	  ?XAE(<<"td">>, [{<<"class">>, <<"valign">>}],
-	       [?AC(JIDURI, (jid:encode(RosterJID)))])
-    end.
-
-user_roster_parse_query(User, Server, Items, Query) ->
-    case lists:keysearch(<<"addjid">>, 1, Query) of
-      {value, _} ->
-	  case lists:keysearch(<<"newjid">>, 1, Query) of
-	    {value, {_, SJID}} ->
-		try jid:decode(SJID) of
-		  JID ->
-		      user_roster_subscribe_jid(User, Server, JID), ok
-		catch _:{bad_jid, _} ->
-			error
-		end;
-	    false -> error
-	  end;
-      false ->
-	  case catch user_roster_item_parse_query(User, Server,
-						  Items, Query)
-	      of
-	    submitted -> ok;
-	    {'EXIT', _Reason} -> error;
-	    _ -> nothing
-	  end
-    end.
-
-user_roster_subscribe_jid(User, Server, JID) ->
-    UJID = jid:make(User, Server),
-    Presence = #presence{from = UJID, to = JID, type = subscribe},
-    out_subscription(Presence),
-    ejabberd_router:route(Presence).
-
-user_roster_item_parse_query(User, Server, Items,
-			     Query) ->
-    lists:foreach(fun (R) ->
-			  JID = R#roster.jid,
-			  case lists:keysearch(<<"validate",
-						 (ejabberd_web_admin:term_to_id(JID))/binary>>,
-					       1, Query)
-			      of
-			    {value, _} ->
-				JID1 = jid:make(JID),
-				UJID = jid:make(User, Server),
-				Pres = #presence{from = UJID, to = JID1,
-						 type = subscribed},
-				out_subscription(Pres),
-				ejabberd_router:route(Pres),
-				throw(submitted);
-			    false ->
-				case lists:keysearch(<<"remove",
-						       (ejabberd_web_admin:term_to_id(JID))/binary>>,
-						     1, Query)
-				    of
-				  {value, _} ->
-				      UJID = jid:make(User, Server),
-				      RosterItem = #roster_item{
-						      jid = jid:make(JID),
-						      subscription = remove},
-				      process_iq_set(
-					#iq{type = set,
-					    from = UJID,
-					    to = UJID,
-					    id = p1_rand:get_string(),
-					    sub_els = [#roster_query{
-							  items = [RosterItem]}]}),
-				      throw(submitted);
-				  false -> ok
-				end
-			  end
-		  end,
-		  Items),
-    nothing.
-
-us_to_list({User, Server}) ->
-    jid:encode({User, Server, <<"">>}).
-
-webadmin_user(Acc, _User, _Server, Lang) ->
-    Acc ++
-      [?XE(<<"h3">>, [?ACT(<<"roster/">>, <<"Roster">>)])].
+process_rosteritems(ActionS, SubsS, AsksS, UsersS, ContactsS) ->
+    LServer = ejabberd_config:get_myname(),
+    Mod = gen_mod:db_mod(LServer, ?MODULE),
+    Mod:process_rosteritems(ActionS, SubsS, AsksS, UsersS, ContactsS).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% @format-begin
+
+webadmin_menu_hostuser(Acc, _Host, _Username, _Lang) ->
+    Acc ++ [{<<"roster">>, <<"Roster">>}].
+
+webadmin_page_hostuser(_, Host, Username, #request{path = [<<"roster">> | RPath]} = R) ->
+    Head = ?H1GL(<<"Roster">>, <<"modules/#mod_roster">>, <<"mod_roster">>),
+    %% Execute twice: first to perform the action, the second to get new roster
+    _ = make_webadmin_roster_table(Host, Username, R, RPath),
+    RV2 = make_webadmin_roster_table(Host, Username, R, RPath),
+    Set = [make_command(add_rosteritem,
+                        R,
+                        [{<<"localuser">>, Username}, {<<"localhost">>, Host}],
+                        []),
+           make_command(push_roster, R, [{<<"user">>, Username}, {<<"host">>, Host}], [])],
+    Get = [make_command(get_roster, R, [], [{only, presentation}]),
+           make_command(delete_rosteritem, R, [], [{only, presentation}]),
+           RV2],
+    {stop, Head ++ Get ++ Set};
+webadmin_page_hostuser(Acc, _, _, _) ->
+    Acc.
+
+make_webadmin_roster_table(Host, Username, R, RPath) ->
+    Contacts =
+        case make_command_raw_value(get_roster, R, [{<<"user">>, Username}, {<<"host">>, Host}])
+        of
+            Cs when is_list(Cs) ->
+                Cs;
+            _ ->
+                []
+        end,
+    Level = 5 + length(RPath),
+    Columns =
+        [<<"jid">>, <<"nick">>, <<"subscription">>, <<"pending">>, <<"groups">>, <<"">>],
+    Rows =
+        lists:map(fun({Jid, Nick, Subscriptions, Pending, Groups}) ->
+                     {JidSplit, ProblematicBin} =
+                         try jid:decode(Jid) of
+                             #jid{} = J ->
+                                 {jid:split(J), <<"">>}
+                         catch
+                             _:{bad_jid, _} ->
+                                 ?INFO_MSG("Error parsing contact of ~s@~s that is invalid JID: ~s",
+                                           [Username, Host, Jid]),
+                                 {{<<"000--error-parsing-jid">>, <<"localhost">>, <<"">>},
+                                  <<", Error parsing JID: ", Jid/binary>>}
+                         end,
+                     {make_command(echo,
+                                   R,
+                                   [{<<"sentence">>, jid:encode(JidSplit)}],
+                                   [{only, raw_and_value},
+                                    {result_links, [{sentence, user, Level, <<"">>}]}]),
+                      ?C(<<Nick/binary, ProblematicBin/binary>>),
+                      ?C(Subscriptions),
+                      ?C(Pending),
+                      ?C(Groups),
+                      make_command(delete_rosteritem,
+                                   R,
+                                   [{<<"localuser">>, Username},
+                                    {<<"localhost">>, Host},
+                                    {<<"user">>, element(1, JidSplit)},
+                                    {<<"host">>, element(2, JidSplit)}],
+                                   [{only, button},
+                                    {style, danger},
+                                    {input_name_append,
+                                     [Username,
+                                      Host,
+                                      element(1, JidSplit),
+                                      element(2, JidSplit)]}])}
+                  end,
+                  lists:keysort(1, Contacts)),
+    Table = make_table(20, RPath, Columns, Rows),
+    ?XE(<<"blockquote">>, [Table]).
+
+webadmin_user(Acc, User, Server, R) ->
+    Acc
+    ++ [make_command(get_roster_count,
+                     R,
+                     [{<<"user">>, User}, {<<"host">>, Server}],
+                     [{result_links,
+                       [{value, arg_host, 4, <<"user/", User/binary, "/roster/">>}]}])].
+%%% @format-end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+-spec has_duplicated_groups([binary()]) -> boolean().
 has_duplicated_groups(Groups) ->
     GroupsPrep = lists:usort([jid:resourceprep(G) || G <- Groups]),
     not (length(GroupsPrep) == length(Groups)).
@@ -1111,19 +1129,16 @@ init_cache(Mod, Host, Opts) ->
 
 -spec cache_opts(gen_mod:opts()) -> [proplists:property()].
 cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_roster_opt:cache_size(Opts),
+    CacheMissed = mod_roster_opt:cache_missed(Opts),
+    LifeTime = mod_roster_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
 -spec use_cache(module(), binary(), roster | roster_version) -> boolean().
 use_cache(Mod, Host, Table) ->
     case erlang:function_exported(Mod, use_cache, 2) of
 	true -> Mod:use_cache(Host, Table);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false -> mod_roster_opt:use_cache(Host)
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].
@@ -1177,7 +1192,7 @@ import_stop(_LServer, _DBType) ->
     ok.
 
 row_length() ->
-    case ejabberd_sql:use_new_schema() of
+    case ejabberd_sql:use_multihost_schema() of
         true -> 10;
         false -> 9
     end.
@@ -1197,25 +1212,91 @@ import(LServer, {sql, _}, DBType, <<"roster_version">>, [LUser, Ver]) ->
     Mod:import(LServer, <<"roster_version">>, [LUser, Ver]).
 
 mod_opt_type(access) ->
-    fun acl:access_rules_validator/1;
-mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
+    econf:acl();
 mod_opt_type(store_current_id) ->
-    fun (B) when is_boolean(B) -> B end;
+    econf:bool();
 mod_opt_type(versioning) ->
-    fun (B) when is_boolean(B) -> B end;
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun (I) when is_integer(I), I > 0 -> I;
-        (infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
+    econf:bool();
+mod_opt_type(db_type) ->
+    econf:db_type(?MODULE);
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
 mod_options(Host) ->
     [{access, all},
      {store_current_id, false},
      {versioning, false},
      {db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+     {use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
+
+mod_doc() ->
+    #{desc =>
+          ?T("This module implements roster management as "
+             "defined in https://tools.ietf.org/html/rfc6121#section-2"
+             "[RFC6121 Section 2]. The module also adds support for "
+             "https://xmpp.org/extensions/xep-0237.html"
+             "[XEP-0237: Roster Versioning]."),
+      opts =>
+          [{access,
+            #{value => ?T("AccessName"),
+              desc =>
+                  ?T("This option can be configured to specify "
+                     "rules to restrict roster management. "
+                     "If the rule returns 'deny' on the requested "
+                     "user name, that user cannot modify their personal "
+                     "roster, i.e. they cannot add/remove/modify contacts "
+                     "or send presence subscriptions. "
+                     "The default value is 'all', i.e. no restrictions.")}},
+           {versioning,
+            #{value => "true | false",
+              desc =>
+                  ?T("Enables/disables Roster Versioning. "
+                     "The default value is 'false'.")}},
+           {store_current_id,
+            #{value => "true | false",
+              desc =>
+                  ?T("If this option is set to 'true', the current "
+                     "roster version number is stored on the database. "
+                     "If set to 'false', the roster version number is "
+                     "calculated on the fly each time. Enabling this "
+                     "option reduces the load for both ejabberd and the database. "
+                     "This option does not affect the client in any way. "
+                     "This option is only useful if option 'versioning' is "
+                     "set to 'true'. The default value is 'false'. "
+                     "IMPORTANT: if you use _`mod_shared_roster`_ or "
+                     " _`mod_shared_roster_ldap`_, you must set the value "
+                     "of the option to 'false'.")}},
+           {db_type,
+            #{value => "mnesia | sql",
+              desc =>
+                  ?T("Same as top-level _`default_db`_ option, but applied to this module only.")}},
+           {use_cache,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`use_cache`_ option, but applied to this module only.")}},
+           {cache_size,
+            #{value => "pos_integer() | infinity",
+              desc =>
+                  ?T("Same as top-level _`cache_size`_ option, but applied to this module only.")}},
+           {cache_missed,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`cache_missed`_ option, but applied to this module only.")}},
+           {cache_life_time,
+            #{value => "timeout()",
+              desc =>
+                  ?T("Same as top-level _`cache_life_time`_ option, but applied to this module only.")}}],
+      example =>
+          ["modules:",
+           "  mod_roster:",
+           "    versioning: true",
+           "    store_current_id: false"]}.

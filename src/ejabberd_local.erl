@@ -5,7 +5,7 @@
 %%% Created : 30 Nov 2002 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -47,8 +47,9 @@
 
 -include("logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
--include("xmpp.hrl").
--include("ejabberd_stacktrace.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+
+-include("translate.hrl").
 
 -record(state, {}).
 
@@ -68,12 +69,20 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [],
 			  []).
 
--spec route(stanza()) -> any().
+-spec route(stanza()) -> ok.
 route(Packet) ->
-    try do_route(Packet)
-    catch ?EX_RULE(E, R, St) ->
-	    ?ERROR_MSG("failed to route packet:~n~s~nReason = ~p",
-		       [xmpp:pp(Packet), {E, {R, ?EX_STACK(St)}}])
+    ?DEBUG("Local route:~n~ts", [xmpp:pp(Packet)]),
+    Type = xmpp:get_type(Packet),
+    To = xmpp:get_to(Packet),
+    if To#jid.luser /= <<"">> ->
+	    ejabberd_sm:route(Packet);
+       is_record(Packet, iq), To#jid.lresource == <<"">> ->
+	    gen_iq_handler:handle(?MODULE, Packet);
+       Type == result; Type == error ->
+	    ok;
+       true ->
+	    ejabberd_hooks:run(local_send_to_resource_hook,
+			       To#jid.lserver, [Packet])
     end.
 
 -spec route_iq(iq(), function()) -> ok.
@@ -91,7 +100,7 @@ bounce_resource_packet(#message{to = #jid{lresource = <<"">>}, type = headline})
     ok;
 bounce_resource_packet(Packet) ->
     Lang = xmpp:get_lang(Packet),
-    Txt = <<"No available resource found">>,
+    Txt = ?T("No available resource found"),
     Err = xmpp:err_item_not_found(Txt, Lang),
     ejabberd_router:route_error(Packet, Err),
     stop.
@@ -106,27 +115,30 @@ get_features(Host) ->
 
 init([]) ->
     process_flag(trap_exit, true),
-    lists:foreach(fun host_up/1, ejabberd_config:get_myhosts()),
+    lists:foreach(fun host_up/1, ejabberd_option:hosts()),
     ejabberd_hooks:add(host_up, ?MODULE, host_up, 10),
     ejabberd_hooks:add(host_down, ?MODULE, host_down, 100),
     gen_iq_handler:start(?MODULE),
     update_table(),
     {ok, #state{}}.
 
-handle_call(_Request, _From, State) ->
-    Reply = ok, {reply, Reply, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
-handle_cast(_Msg, State) -> {noreply, State}.
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
+    {noreply, State}.
 
 handle_info({route, Packet}, State) ->
     route(Packet),
     {noreply, State};
 handle_info(Info, State) ->
-    ?WARNING_MSG("unexpected info: ~p", [Info]),
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
-    lists:foreach(fun host_down/1, ejabberd_config:get_myhosts()),
+    lists:foreach(fun host_down/1, ejabberd_option:hosts()),
     ejabberd_hooks:delete(host_up, ?MODULE, host_up, 10),
     ejabberd_hooks:delete(host_down, ?MODULE, host_down, 100),
     ok.
@@ -137,22 +149,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
--spec do_route(stanza()) -> any().
-do_route(Packet) ->
-    ?DEBUG("local route:~n~s", [xmpp:pp(Packet)]),
-    Type = xmpp:get_type(Packet),
-    To = xmpp:get_to(Packet),
-    if To#jid.luser /= <<"">> ->
-	    ejabberd_sm:route(Packet);
-       is_record(Packet, iq), To#jid.lresource == <<"">> ->
-	    gen_iq_handler:handle(?MODULE, Packet);
-       Type == result; Type == error ->
-	    ok;
-       true ->
-	    ejabberd_hooks:run(local_send_to_resource_hook,
-			       To#jid.lserver, [Packet])
-    end.
-
 -spec update_table() -> ok.
 update_table() ->
     catch mnesia:delete_table(iq_response),

@@ -5,7 +5,7 @@
 %%% Created :  1 Dec 2007 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -36,7 +36,7 @@
 	ServerHost :: binary(),
 	Opts :: [any()]) -> atom().
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 -callback terminate(Host :: host(), ServerHost :: binary()) -> atom().
 
@@ -61,10 +61,13 @@
     {error, stanza_error()}.
 
 -callback get_nodes(Host :: host(),
-	From :: jid:jid())->
+		    Limit :: non_neg_integer() | infinity)->
     [pubsubNode()].
 
 -callback get_nodes(Host :: host())->
+    [pubsubNode()].
+
+-callback get_all_nodes(Host :: host()) ->
     [pubsubNode()].
 
 -callback get_parentnodes(Host :: host(),
@@ -79,8 +82,8 @@
     [{0, [pubsubNode(),...]}].
 
 -callback get_subnodes(Host :: host(),
-	NodeId :: nodeId(),
-	From :: jid:jid()) ->
+		       NodeId :: nodeId(),
+		       Limit :: non_neg_integer() | infinity) ->
     [pubsubNode()].
 
 -callback get_subnodes_tree(Host :: host(),
@@ -96,7 +99,7 @@
 	Parents :: [nodeId()]) ->
     {ok, NodeIdx::nodeIdx()} |
     {error, stanza_error()} |
-    {error, {virtual, {host(), nodeId()}}}.
+    {error, {virtual, {host(), nodeId()} | nodeId()}}.
 
 -callback delete_node(Host :: host(),
 	NodeId :: nodeId()) ->

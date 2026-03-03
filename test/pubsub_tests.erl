@@ -3,7 +3,7 @@
 %%% Created : 16 Nov 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,6 +30,7 @@
 		recv_message/1, my_jid/1, send/2, recv_presence/1, recv/1]).
 
 -include("suite.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 %%%===================================================================
 %%% API
@@ -55,6 +56,7 @@ single_cases() ->
       single_test(test_delete_item),
       single_test(test_purge),
       single_test(test_subscribe),
+      single_test(test_subscribe_max_item_1),
       single_test(test_unsubscribe)]}.
 
 test_features(Config) ->
@@ -85,8 +87,9 @@ test_features(Config) ->
 
 test_vcard(Config) ->
     JID = pubsub_jid(Config),
-    ct:comment("Retreiving vCard from ~s", [jid:encode(JID)]),
-    #iq{type = result, sub_els = [#vcard_temp{}]} =
+    ct:comment("Retrieving vCard from ~s", [jid:encode(JID)]),
+    VCard = mod_pubsub_opt:vcard(?config(server, Config)),
+    #iq{type = result, sub_els = [VCard]} =
 	send_recv(Config, #iq{type = get, to = JID, sub_els = [#vcard_temp{}]}),
     disconnect(Config).
 
@@ -163,6 +166,16 @@ test_subscribe(Config) ->
     delete_node(Config, Node),
     disconnect(Config).
 
+test_subscribe_max_item_1(Config) ->
+    DefaultNodeConfig = get_default_node_config(Config),
+    CustomNodeConfig = set_opts(DefaultNodeConfig,
+				[{max_items, 1}]),
+    Node = create_node(Config, <<>>, CustomNodeConfig),
+    #ps_subscription{type = subscribed} = subscribe_node(Config, Node),
+    [#ps_subscription{node = Node}] = get_subscriptions(Config),
+    delete_node(Config, Node),
+    disconnect(Config).
+
 test_unsubscribe(Config) ->
     Node = create_node(Config, <<>>),
     subscribe_node(Config, Node),
@@ -175,8 +188,8 @@ test_unsubscribe(Config) ->
 test_get_affiliations(Config) ->
     Nodes = lists:sort([create_node(Config, <<>>) || _ <- lists:seq(1, 5)]),
     Affs = get_affiliations(Config),
-    Nodes = lists:sort([Node || #ps_affiliation{node = Node,
-						type = owner} <- Affs]),
+    ?assertEqual(Nodes, lists:sort([Node || #ps_affiliation{node = Node,
+						type = owner} <- Affs])),
     [delete_node(Config, Node) || Node <- Nodes],
     disconnect(Config).
 
@@ -184,7 +197,7 @@ test_get_subscriptions(Config) ->
     Nodes = lists:sort([create_node(Config, <<>>) || _ <- lists:seq(1, 5)]),
     [subscribe_node(Config, Node) || Node <- Nodes],
     Subs = get_subscriptions(Config),
-    Nodes = lists:sort([Node || #ps_subscription{node = Node} <- Subs]),
+    ?assertEqual(Nodes, lists:sort([Node || #ps_subscription{node = Node} <- Subs])),
     [delete_node(Config, Node) || Node <- Nodes],
     disconnect(Config).
 

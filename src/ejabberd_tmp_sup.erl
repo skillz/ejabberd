@@ -1,11 +1,11 @@
 %%%----------------------------------------------------------------------
 %%% File    : ejabberd_tmp_sup.erl
 %%% Author  : Alexey Shchepin <alexey@process-one.net>
-%%% Purpose : Supervisor for temporary processess
+%%% Purpose : Supervisor for temporary processes
 %%% Created : 18 Jul 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -36,4 +36,4 @@ init(Module) ->
     {ok,
      {{simple_one_for_one, 10, 1},
       [{undefined, {Module, start_link, []}, temporary,
-	1000, worker, [Module]}]}}.
+	5000, worker, [Module]}]}}.

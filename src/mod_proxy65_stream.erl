@@ -4,7 +4,7 @@
 %%% Purpose : Bytestream process.
 %%% Created : 12 Oct 2006 by Evgeniy Khramtsov <xram@jabber.ru>
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -38,9 +38,8 @@
 	 wait_for_request/2, wait_for_activation/2,
 	 stream_established/2]).
 
--export([start/2, stop/1, start_link/2, start_link/3, activate/2,
-	 relay/3, accept/1, listen_opt_type/1,
-	 listen_options/0]).
+-export([start/3, stop/1, start_link/3, activate/2,
+	 relay/3, accept/1, listen_options/0]).
 
 -include("mod_proxy65.hrl").
 
@@ -65,29 +64,20 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 
 %%-------------------------------
 
-start({gen_tcp, Socket}, Opts1) ->
-    {[{server_host, Host}], Opts} = lists:partition(
-				      fun({server_host, _}) -> true;
-					 (_) -> false
-				      end, Opts1),
-    p1_fsm:start(?MODULE, [Socket, Host, Opts], []).
+start(gen_tcp, Socket, Opts) ->
+    Host = proplists:get_value(server_host, Opts),
+    p1_fsm:start(?MODULE, [Socket, Host], []).
 
-start_link({gen_tcp, Socket}, Opts1) ->
-    {[{server_host, Host}], Opts} = lists:partition(
-				      fun({server_host, _}) -> true;
-					 (_) -> false
-				      end, Opts1),
-    start_link(Socket, Host, Opts).
+start_link(gen_tcp, Socket, Opts) ->
+    Host = proplists:get_value(server_host, Opts),
+    p1_fsm:start_link(?MODULE, [Socket, Host], []).
 
-start_link(Socket, Host, Opts) ->
-    p1_fsm:start_link(?MODULE, [Socket, Host, Opts], []).
-
-init([Socket, Host, Opts]) ->
+init([Socket, Host]) ->
     process_flag(trap_exit, true),
-    AuthType = gen_mod:get_opt(auth_type, Opts),
-    Shaper = gen_mod:get_opt(shaper, Opts),
-    RecvBuf = gen_mod:get_opt(recbuf, Opts),
-    SendBuf = gen_mod:get_opt(sndbuf, Opts),
+    AuthType = mod_proxy65_opt:auth_type(Host),
+    Shaper = mod_proxy65_opt:shaper(Host),
+    RecvBuf = mod_proxy65_opt:recbuf(Host),
+    SendBuf = mod_proxy65_opt:sndbuf(Host),
     TRef = erlang:send_after(?WAIT_TIMEOUT, self(), stop),
     inet:setopts(Socket, [{recbuf, RecvBuf}, {sndbuf, SendBuf}]),
     {ok, accepting,
@@ -120,8 +110,8 @@ activate({P1, J1}, {P2, J2}) ->
 	  P2 ! {activate, P1, S1, J1, J2},
 	  JID1 = jid:encode(J1),
 	  JID2 = jid:encode(J2),
-	  ?INFO_MSG("(~w:~w) Activated bytestream for ~s "
-		    "-> ~s",
+	  ?INFO_MSG("(~w:~w) Activated bytestream for ~ts "
+		    "-> ~ts",
 		    [P1, P2, JID1, JID2]),
 	  ok;
       _ -> error
@@ -285,35 +275,13 @@ select_auth_method(anonymous, AuthMethods) ->
 
 %% Obviously, we must use shaper with maximum rate.
 find_maxrate(Shaper, JID1, JID2, Host) ->
-    MaxRate1 = case acl:match_rule(Host, Shaper, JID1) of
-                   deny -> none;
-                   R1 -> ejabberd_shaper:new(R1)
-               end,
-    MaxRate2 = case acl:match_rule(Host, Shaper, JID2) of
-                   deny -> none;
-                   R2 -> ejabberd_shaper:new(R2)
-               end,
-    if MaxRate1 == none; MaxRate2 == none -> none;
-       true -> lists:max([MaxRate1, MaxRate2])
-    end.
-
-listen_opt_type(server_host) ->
-    fun iolist_to_binary/1;
-listen_opt_type(auth_type) ->
-    fun (plain) -> plain;
-	(anonymous) -> anonymous
-    end;
-listen_opt_type(recbuf) ->
-    fun (I) when is_integer(I), I > 0 -> I end;
-listen_opt_type(shaper) -> fun acl:shaper_rules_validator/1;
-listen_opt_type(sndbuf) ->
-    fun (I) when is_integer(I), I > 0 -> I end;
-listen_opt_type(accept_interval) ->
-    fun(I) when is_integer(I), I>=0 -> I end.
+    R1 = ejabberd_shaper:match(Host, Shaper, JID1),
+    R2 = ejabberd_shaper:match(Host, Shaper, JID2),
+    R = case ejabberd_shaper:get_max_rate(R1) >= ejabberd_shaper:get_max_rate(R2) of
+	    true -> R1;
+	    false -> R2
+	end,
+    ejabberd_shaper:new(R).
 
 listen_options() ->
-    [{auth_type, anonymous},
-     {recbuf, 65536},
-     {sndbuf, 65536},
-     {accept_interval, 0},
-     {shaper, none}].
+    [].

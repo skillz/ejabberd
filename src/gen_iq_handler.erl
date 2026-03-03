@@ -5,7 +5,7 @@
 %%% Created : 22 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,20 +27,17 @@
 
 -author('alexey@process-one.net').
 
--behaviour(ejabberd_config).
-
 %% API
 -export([add_iq_handler/5, remove_iq_handler/3, handle/1, handle/2,
-	 check_type/1, transform_module_options/1,
-	 opt_type/1, start/1, get_features/2]).
+	 start/1, get_features/2]).
 %% Deprecated functions
 -export([add_iq_handler/6, handle/5, iqdisc/1]).
 -deprecated([{add_iq_handler, 6}, {handle, 5}, {iqdisc, 1}]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("translate.hrl").
--include("ejabberd_stacktrace.hrl").
+
 
 -type component() :: ejabberd_sm | ejabberd_local.
 
@@ -82,7 +79,7 @@ handle(Component,
 	[{_, Module, Function}] ->
 	    process_iq(Host, Module, Function, Packet);
 	[] ->
-	    Txt = <<"No module is handling this query">>,
+	    Txt = ?T("No module is handling this query"),
 	    Err = xmpp:err_service_unavailable(Txt, Lang),
 	    ejabberd_router:route_error(Packet, Err)
     end;
@@ -114,12 +111,14 @@ process_iq(_Host, Module, Function, IQ) ->
 	    ejabberd_router:route(ResIQ);
 	ignore ->
 	    ok
-    catch ?EX_RULE(E, R, St) ->
-	    ?ERROR_MSG("failed to process iq:~n~s~nReason = ~p",
-		       [xmpp:pp(IQ), {E, {R, ?EX_STACK(St)}}]),
-	    Txt = <<"Module failed to handle the query">>,
-	    Err = xmpp:err_internal_server_error(Txt, IQ#iq.lang),
-	    ejabberd_router:route_error(IQ, Err)
+    catch
+        Class:Reason:StackTrace ->
+            ?ERROR_MSG("Failed to process iq:~n~ts~n** ~ts",
+                       [xmpp:pp(IQ),
+                        misc:format_exception(2, Class, Reason, StackTrace)]),
+            Txt = ?T("Module failed to handle the query"),
+            Err = xmpp:err_internal_server_error(Txt, IQ#iq.lang),
+            ejabberd_router:route_error(IQ, Err)
     end.
 
 -spec process_iq(module(), atom(), iq()) -> ignore | iq().
@@ -135,28 +134,9 @@ process_iq(Module, Function, #iq{lang = Lang, sub_els = [El]} = IQ) ->
 	    xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang))
     end.
 
--spec check_type(any()) -> no_queue.
-check_type(_Type) ->
-    ?WARNING_MSG("Option 'iqdisc' is deprecated and has no effect anymore", []),
-    no_queue.
-
 -spec iqdisc(binary() | global) -> no_queue.
 iqdisc(_Host) ->
     no_queue.
-
--spec transform_module_options([{atom(), any()}]) -> [{atom(), any()}].
-
-transform_module_options(Opts) ->
-    lists:map(
-      fun({iqdisc, {queues, N}}) ->
-              {iqdisc, N};
-         (Opt) ->
-              Opt
-      end, Opts).
-
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
-opt_type(iqdisc) -> fun check_type/1;
-opt_type(_) -> [iqdisc].
 
 %%====================================================================
 %% Deprecated API

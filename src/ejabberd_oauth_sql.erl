@@ -5,7 +5,7 @@
 %%% Created : 27 Jul 2016 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,20 +26,50 @@
 
 -module(ejabberd_oauth_sql).
 -behaviour(ejabberd_oauth).
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -export([init/0,
-         store/1,
-         lookup/1,
-         clean/1]).
+	 store/1,
+	 lookup/1,
+	 clean/1,
+	 lookup_client/1,
+	 store_client/1,
+	 remove_client/1, revoke/1]).
+-export([sql_schemas/0]).
 
 -include("ejabberd_oauth.hrl").
 -include("ejabberd_sql_pt.hrl").
--include("jid.hrl").
+-include_lib("xmpp/include/jid.hrl").
 -include("logger.hrl").
 
 init() ->
+    ejabberd_sql_schema:update_schema(
+      ejabberd_config:get_myname(), ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"oauth_token">>,
+                columns =
+                    [#sql_column{name = <<"token">>, type = text},
+                     #sql_column{name = <<"jid">>, type = text},
+                     #sql_column{name = <<"scope">>, type = text},
+                     #sql_column{name = <<"expire">>, type = bigint}],
+                indices = [#sql_index{
+                              columns = [<<"token">>],
+                              unique = true}]},
+             #sql_table{
+                name = <<"oauth_client">>,
+                columns =
+                    [#sql_column{name = <<"client_id">>, type = text},
+                     #sql_column{name = <<"client_name">>, type = text},
+                     #sql_column{name = <<"grant_type">>, type = text},
+                     #sql_column{name = <<"options">>, type = text}],
+                indices = [#sql_index{
+                              columns = [<<"client_id">>],
+                              unique = true}]}]}].
 
 store(R) ->
     Token = R#oauth_token.token,
@@ -76,8 +106,69 @@ lookup(Token) ->
             error
     end.
 
+revoke(Token) ->
+    case ejabberd_sql:sql_query(
+	ejabberd_config:get_myname(),
+	?SQL("delete from oauth_token where token=%(Token)s")) of
+	{error, _} ->
+	    {error, <<"db error">>};
+	_ ->
+	    ok
+    end.
+
 clean(TS) ->
     ejabberd_sql:sql_query(
       ejabberd_config:get_myname(),
       ?SQL("delete from oauth_token where expire < %(TS)d")).
 
+lookup_client(ClientID) ->
+    case ejabberd_sql:sql_query(
+           ejabberd_config:get_myname(),
+           ?SQL("select @(client_name)s, @(grant_type)s, @(options)s"
+                " from oauth_client where client_id=%(ClientID)s")) of
+        {selected, [{ClientName, SGrantType, SOptions}]} ->
+            GrantType =
+                case SGrantType of
+                    <<"password">> -> password;
+                    <<"implicit">> -> implicit
+                end,
+            case misc:base64_to_term(SOptions) of
+                {term, Options} ->
+                    {ok, #oauth_client{client_id = ClientID,
+                                       client_name = ClientName,
+                                       grant_type = GrantType,
+                                       options = Options}};
+                _ ->
+                    error
+            end;
+        _ ->
+            error
+    end.
+
+store_client(#oauth_client{client_id = ClientID,
+                           client_name = ClientName,
+                           grant_type = GrantType,
+                           options = Options}) ->
+    SGrantType =
+        case GrantType of
+            password -> <<"password">>;
+            implicit -> <<"implicit">>
+        end,
+    SOptions = misc:term_to_base64(Options),
+    case ?SQL_UPSERT(
+	    ejabberd_config:get_myname(),
+	    "oauth_client",
+	    ["!client_id=%(ClientID)s",
+	     "client_name=%(ClientName)s",
+	     "grant_type=%(SGrantType)s",
+	     "options=%(SOptions)s"]) of
+	ok ->
+	    ok;
+	_ ->
+	    {error, db_failure}
+    end.
+
+remove_client(Client) ->
+    ejabberd_sql:sql_query(
+      ejabberd_config:get_myname(),
+      ?SQL("delete from oauth_client where client=%(Client)s")).

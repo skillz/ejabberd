@@ -5,7 +5,7 @@
 %%% Created : 11 Aug 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -23,6 +23,8 @@
 %%%
 %%%----------------------------------------------------------------------
 
+%%; definitions
+
 %%% Implements a small subset of XEP-0133: Service Administration
 %%% Version 1.1 (2005-08-19)
 
@@ -35,7 +37,7 @@
 -export([start/2, stop/1, reload/3, export/1, import_info/0,
 	 import_start/2, import/5, announce/1, send_motd/1, disco_identity/5,
 	 disco_features/5, disco_items/5, depends/2,
-	 send_announcement_to_all/3, announce_commands/4,
+	 send_announcement_to_all/3, announce_commands/4, mod_doc/0,
 	 announce_items/4, mod_opt_type/1, mod_options/1, clean_cache/1]).
 -export([init/1, handle_call/3, handle_cast/2,
 	 handle_info/2, terminate/2, code_change/3]).
@@ -49,10 +51,26 @@
 	 announce_all_hosts_motd_update/1,
 	 announce_motd_delete/1,
 	 announce_all_hosts_motd_delete/1]).
+%% ejabberd_commands
+-export([announce_send_all/3,
+         announce_send_online/3,
+         get_stored_motd/1,
+         announce_motd_set_online/3,
+         announce_motd_update/3,
+         announce_motd_delete_api/1,
+         get_commands_spec/0]).
+%% WebAdmin
+-export([webadmin_menu/3, webadmin_page/3]).
+
+-import(ejabberd_web_admin, [make_command/4, make_command/2]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+-include("ejabberd_commands.hrl").
+-include("ejabberd_http.hrl").
+-include("ejabberd_web_admin.hrl").
 -include("mod_announce.hrl").
+-include("translate.hrl").
 
 -callback init(binary(), gen_mod:opts()) -> any().
 -callback import(binary(), binary(), [binary()]) -> ok.
@@ -76,17 +94,33 @@
 tokenize(Node) -> str:tokens(Node, <<"/#">>).
 
 %%====================================================================
-%% gen_mod callbacks
-%%====================================================================
+%%; gen_mod callbacks
+
 start(Host, Opts) ->
+    case gen_mod:is_loaded_elsewhere(Host, ?MODULE) of
+        false ->
+            ejabberd_commands:register_commands(?MODULE, get_commands_spec());
+        true ->
+            ok
+    end,
+    ejabberd_hooks:add(webadmin_menu_host, Host, ?MODULE, webadmin_menu, 50),
+    ejabberd_hooks:add(webadmin_page_host, Host, ?MODULE, webadmin_page, 50),
     gen_mod:start_child(?MODULE, Host, Opts).
 
 stop(Host) ->
+    case gen_mod:is_loaded_elsewhere(Host, ?MODULE) of
+        false ->
+            ejabberd_commands:unregister_commands(get_commands_spec());
+        true ->
+            ok
+    end,
+    ejabberd_hooks:delete(webadmin_menu_host, Host, ?MODULE, webadmin_menu, 50),
+    ejabberd_hooks:delete(webadmin_page_host, Host, ?MODULE, webadmin_page, 50),
     gen_mod:stop_child(?MODULE, Host).
 
 reload(Host, NewOpts, OldOpts) ->
-    NewMod = gen_mod:db_mod(Host, NewOpts, ?MODULE),
-    OldMod = gen_mod:db_mod(Host, OldOpts, ?MODULE),
+    NewMod = gen_mod:db_mod(NewOpts, ?MODULE),
+    OldMod = gen_mod:db_mod(OldOpts, ?MODULE),
     if NewMod /= OldMod ->
 	    NewMod:init(Host, NewOpts);
        true ->
@@ -98,11 +132,12 @@ depends(_Host, _Opts) ->
     [{mod_adhoc, hard}].
 
 %%====================================================================
-%% gen_server callbacks
-%%====================================================================
-init([Host, Opts]) ->
+%%; gen_server callbacks
+
+init([Host|_]) ->
     process_flag(trap_exit, true),
-    Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
+    Opts = gen_mod:get_module_opts(Host, ?MODULE),
+    Mod = gen_mod:db_mod(Opts, ?MODULE),
     Mod:init(Host, Opts),
     init_cache(Mod, Host, Opts),
     ejabberd_hooks:add(local_send_to_resource_hook, Host,
@@ -116,7 +151,8 @@ init([Host, Opts]) ->
 		       ?MODULE, send_motd, 50),
     {ok, #state{host = Host}}.
 
-handle_call(_Call, _From, State) ->
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
     {noreply, State}.
 
 handle_cast({F, #message{from = From, to = To} = Pkt}, State) when is_atom(F) ->
@@ -142,12 +178,12 @@ handle_cast({F, #message{from = From, to = To} = Pkt}, State) when is_atom(F) ->
     end,
     {noreply, State};
 handle_cast(Msg, State) ->
-    ?WARNING_MSG("unexpected cast: ~p", [Msg]),
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 
 handle_info(Info, State) ->
-    ?WARNING_MSG("unexpected info: ~p", [Info]),
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, #state{host = Host}) ->
@@ -162,7 +198,9 @@ terminate(_Reason, #state{host = Host}) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%% Announcing via messages to a custom resource
+%%====================================================================
+%%; Announcing via messages to a custom resource
+
 -spec announce(stanza()) -> ok | stop.
 announce(#message{to = #jid{luser = <<>>} = To} = Packet) ->
     Proc = gen_mod:get_module_proc(To#jid.lserver, ?MODULE),
@@ -197,8 +235,12 @@ announce(#message{to = #jid{luser = <<>>} = To} = Packet) ->
 announce(_Packet) ->
     ok.
 
-%%-------------------------------------------------------------------------
-%% Announcing via ad-hoc commands
+%%====================================================================
+%%; Announcing via ad-hoc commands
+
+%%====================================================================
+%%; -- disco identity
+
 -define(INFO_COMMAND(Lang, Node),
 	[#identity{category = <<"automation">>,
 		   type = <<"command-node">>,
@@ -231,12 +273,13 @@ disco_identity(Acc, _From, _To, Node, Lang) ->
 	    Acc
     end.
 
-%%-------------------------------------------------------------------------
+%%====================================================================
+%%; -- disco features
 
 -define(INFO_RESULT(Allow, Feats, Lang),
 	case Allow of
 	    deny ->
-		{error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+		{error, xmpp:err_forbidden(?T("Access denied by service policy"), Lang)};
 	    allow ->
 		{result, Feats}
 	end).
@@ -251,7 +294,7 @@ disco_features(Acc, From, #jid{lserver = LServer} = _To, <<"announce">>, Lang) -
 	    case {acl:match_rule(LServer, Access1, From),
 		  acl:match_rule(global, Access2, From)} of
 		{deny, deny} ->
-		    Txt = <<"Access denied by service policy">>,
+		    Txt = ?T("Access denied by service policy"),
 		    {error, xmpp:err_forbidden(Txt, Lang)};
 		_ ->
 		    {result, []}
@@ -293,7 +336,9 @@ disco_features(Acc, From, #jid{lserver = LServer} = _To, Node, Lang) ->
 	    end
     end.
 
-%%-------------------------------------------------------------------------
+%%====================================================================
+%%; -- disco items
+
 -define(NODE_TO_ITEM(Lang, Server, Node),
 	#disco_item{jid = jid:make(Server),
 		    node = Node,
@@ -302,7 +347,7 @@ disco_features(Acc, From, #jid{lserver = LServer} = _To, Node, Lang) ->
 -define(ITEMS_RESULT(Allow, Items, Lang),
 	case Allow of
 	    deny ->
-		{error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+		{error, xmpp:err_forbidden(?T("Access denied by service policy"), Lang)};
 	    allow ->
 		{result, Items}
 	end).
@@ -371,7 +416,9 @@ disco_items(Acc, From, #jid{lserver = LServer} = _To, Node, Lang) ->
 	    end
     end.
 
-%%-------------------------------------------------------------------------
+%%====================================================================
+%%; -- announce items
+
 -spec announce_items(empty | {error, stanza_error()} | {result, [disco_item()]},
 			jid(), jid(), binary()) -> {error, stanza_error()} |
 						   {result, [disco_item()]} |
@@ -410,13 +457,14 @@ announce_items(Acc, From, #jid{lserver = LServer, server = Server} = _To, Lang) 
 	    {result, Items ++ Nodes1 ++ Nodes2}
     end.
 
-%%-------------------------------------------------------------------------
+%%====================================================================
+%%; -- commands
 
 commands_result(Allow, From, To, Request) ->
     case Allow of
 	deny ->
 	    Lang = Request#adhoc_command.lang,
-	    {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+	    {error, xmpp:err_forbidden(?T("Access denied by service policy"), Lang)};
 	allow ->
 	    announce_commands(From, To, Request)
     end.
@@ -468,25 +516,28 @@ announce_commands(From, To,
 				 sid = SID,
 				 xdata = XData,
 				 action = Action} = Request) ->
-    ActionIsExecute = Action == execute orelse Action == complete,
     if Action == cancel ->
 	    %% User cancels request
 	    #adhoc_command{status = canceled, lang = Lang, node = Node,
 			   sid = SID};
-       XData == undefined, ActionIsExecute ->
+       XData == undefined andalso Action == execute ->
 	    %% User requests form
 	    Form = generate_adhoc_form(Lang, Node, To#jid.lserver),
-	    #adhoc_command{status = executing, lang = Lang, node = Node,
-			   sid = SID, xdata = Form};
-       XData /= undefined, ActionIsExecute ->
-	    handle_adhoc_form(From, To, Request);
+	    xmpp_util:make_adhoc_response(
+	      #adhoc_command{status = executing, lang = Lang, node = Node,
+			     sid = SID, xdata = Form});
+       XData /= undefined andalso (Action == execute orelse Action == complete) ->
+	    case handle_adhoc_form(From, To, Request) of
+		ok ->
+		    #adhoc_command{lang = Lang, node = Node, sid = SID,
+				   status = completed};
+		{error, _} = Err ->
+		    Err
+	    end;
        true ->
-	    Txt = <<"Unexpected action">>,
+	    Txt = ?T("Unexpected action"),
 	    {error, xmpp:err_bad_request(Txt, Lang)}
     end.
-
--define(TVFIELD(Type, Var, Val),
-	#xdata_field{type = Type, var = Var, values = vvaluel(Val)}).
 
 vvaluel(Val) ->
     case Val of
@@ -494,12 +545,15 @@ vvaluel(Val) ->
         _ -> [Val]
     end.
 
+%%====================================================================
+%%; -- adhoc form
+
 generate_adhoc_form(Lang, Node, ServerHost) ->
     LNode = tokenize(Node),
-    {OldSubject, OldBody} = if (LNode == ?NS_ADMINL("edit-motd")) 
+    {OldSubject, OldBody} = if (LNode == ?NS_ADMINL("edit-motd"))
 			       or (LNode == ?NS_ADMINL("edit-motd-allhosts")) ->
 				    get_stored_motd(ServerHost);
-			       true -> 
+			       true ->
 				    {<<>>, <<>>}
 			    end,
     Fs = if (LNode == ?NS_ADMINL("delete-motd"))
@@ -507,16 +561,16 @@ generate_adhoc_form(Lang, Node, ServerHost) ->
 		 [#xdata_field{type = boolean,
 			       var = <<"confirm">>,
 			       label = translate:translate(
-					 Lang, <<"Really delete message of the day?">>),
+					 Lang, ?T("Really delete message of the day?")),
 			       values = [<<"true">>]}];
 	    true ->
 		 [#xdata_field{type = 'text-single',
 			       var = <<"subject">>,
-			       label = translate:translate(Lang, <<"Subject">>),
+			       label = translate:translate(Lang, ?T("Subject")),
 			       values = vvaluel(OldSubject)},
 		  #xdata_field{type = 'text-multi',
 			       var = <<"body">>,
-			       label = translate:translate(Lang, <<"Message body">>),
+			       label = translate:translate(Lang, ?T("Message body")),
 			       values = vvaluel(OldBody)}]
 	 end,
     #xdata{type = form,
@@ -536,7 +590,7 @@ join_lines([], Acc) ->
 
 handle_adhoc_form(From, #jid{lserver = LServer} = To,
 		  #adhoc_command{lang = Lang, node = Node,
-				 sid = SessionID, xdata = XData}) ->
+				 xdata = XData}) ->
     Confirm = case xmpp_util:get_xdata_values(<<"confirm">>, XData) of
 		  [<<"true">>] -> true;
 		  [<<"1">>] -> true;
@@ -544,8 +598,6 @@ handle_adhoc_form(From, #jid{lserver = LServer} = To,
 	      end,
     Subject = join_lines(xmpp_util:get_xdata_values(<<"subject">>, XData)),
     Body = join_lines(xmpp_util:get_xdata_values(<<"body">>, XData)),
-    Response = #adhoc_command{lang = Lang, node = Node, sid = SessionID,
-			      status = completed},
     Packet = #message{from = From,
 		      to = To,
 		      type = headline,
@@ -555,81 +607,72 @@ handle_adhoc_form(From, #jid{lserver = LServer} = To,
     case {Node, Body} of
 	{?NS_ADMIN_DELETE_MOTD, _} ->
 	    if	Confirm ->
-		    gen_server:cast(Proc, {announce_motd_delete, Packet}),
-		    Response;
+		    gen_server:cast(Proc, {announce_motd_delete, Packet});
 		true ->
-		    Response
+		    ok
 	    end;
 	{?NS_ADMIN_DELETE_MOTD_ALLHOSTS, _} ->
 	    if	Confirm ->
-		    gen_server:cast(Proc, {announce_all_hosts_motd_delete, Packet}),
-		    Response;
+		    gen_server:cast(Proc, {announce_all_hosts_motd_delete, Packet});
 		true ->
-		    Response
+		    ok
 	    end;
 	{_, <<>>} ->
 	    %% An announce message with no body is definitely an operator error.
 	    %% Throw an error and give him/her a chance to send message again.
 	    {error, xmpp:err_not_acceptable(
-		      <<"No body provided for announce message">>, Lang)};
+		      ?T("No body provided for announce message"), Lang)};
 	%% Now send the packet to ?MODULE.
 	%% We don't use direct announce_* functions because it
 	%% leads to large delay in response and <iq/> queries processing
 	{?NS_ADMIN_ANNOUNCE, _} ->
-	    gen_server:cast(Proc, {announce_online, Packet}),
-	    Response;
-	{?NS_ADMIN_ANNOUNCE_ALLHOSTS, _} ->	    
-	    gen_server:cast(Proc, {announce_all_hosts_online, Packet}),
-	    Response;
+	    gen_server:cast(Proc, {announce_online, Packet});
+	{?NS_ADMIN_ANNOUNCE_ALLHOSTS, _} ->
+	    gen_server:cast(Proc, {announce_all_hosts_online, Packet});
 	{?NS_ADMIN_ANNOUNCE_ALL, _} ->
-	    gen_server:cast(Proc, {announce_all, Packet}),
-	    Response;
-	{?NS_ADMIN_ANNOUNCE_ALL_ALLHOSTS, _} ->	    
-	    gen_server:cast(Proc, {announce_all_hosts_all, Packet}),
-	    Response;
+	    gen_server:cast(Proc, {announce_all, Packet});
+	{?NS_ADMIN_ANNOUNCE_ALL_ALLHOSTS, _} ->
+	    gen_server:cast(Proc, {announce_all_hosts_all, Packet});
 	{?NS_ADMIN_SET_MOTD, _} ->
-	    gen_server:cast(Proc, {announce_motd, Packet}),
-	    Response;
-	{?NS_ADMIN_SET_MOTD_ALLHOSTS, _} ->	    
-	    gen_server:cast(Proc, {announce_all_hosts_motd, Packet}),
-	    Response;
+	    gen_server:cast(Proc, {announce_motd, Packet});
+	{?NS_ADMIN_SET_MOTD_ALLHOSTS, _} ->
+	    gen_server:cast(Proc, {announce_all_hosts_motd, Packet});
 	{?NS_ADMIN_EDIT_MOTD, _} ->
-	    gen_server:cast(Proc, {announce_motd_update, Packet}),
-	    Response;
-	{?NS_ADMIN_EDIT_MOTD_ALLHOSTS, _} ->	    
-	    gen_server:cast(Proc, {announce_all_hosts_motd_update, Packet}),
-	    Response;
+	    gen_server:cast(Proc, {announce_motd_update, Packet});
+	{?NS_ADMIN_EDIT_MOTD_ALLHOSTS, _} ->
+	    gen_server:cast(Proc, {announce_all_hosts_motd_update, Packet});
 	Junk ->
 	    %% This can't happen, as we haven't registered any other
 	    %% command nodes.
-	    ?ERROR_MSG("got unexpected node/body = ~p", [Junk]),
+	    ?ERROR_MSG("Unexpected node/body = ~p", [Junk]),
 	    {error, xmpp:err_internal_server_error()}
     end.
 
 get_title(Lang, <<"announce">>) ->
-    translate:translate(Lang, <<"Announcements">>);
+    translate:translate(Lang, ?T("Announcements"));
 get_title(Lang, ?NS_ADMIN_ANNOUNCE_ALL) ->
-    translate:translate(Lang, <<"Send announcement to all users">>);
+    translate:translate(Lang, ?T("Send announcement to all users"));
 get_title(Lang, ?NS_ADMIN_ANNOUNCE_ALL_ALLHOSTS) ->
-    translate:translate(Lang, <<"Send announcement to all users on all hosts">>);
+    translate:translate(Lang, ?T("Send announcement to all users on all hosts"));
 get_title(Lang, ?NS_ADMIN_ANNOUNCE) ->
-    translate:translate(Lang, <<"Send announcement to all online users">>);
+    translate:translate(Lang, ?T("Send announcement to all online users"));
 get_title(Lang, ?NS_ADMIN_ANNOUNCE_ALLHOSTS) ->
-    translate:translate(Lang, <<"Send announcement to all online users on all hosts">>);
+    translate:translate(Lang, ?T("Send announcement to all online users on all hosts"));
 get_title(Lang, ?NS_ADMIN_SET_MOTD) ->
-    translate:translate(Lang, <<"Set message of the day and send to online users">>);
+    translate:translate(Lang, ?T("Set message of the day and send to online users"));
 get_title(Lang, ?NS_ADMIN_SET_MOTD_ALLHOSTS) ->
-    translate:translate(Lang, <<"Set message of the day on all hosts and send to online users">>);
+    translate:translate(Lang, ?T("Set message of the day on all hosts and send to online users"));
 get_title(Lang, ?NS_ADMIN_EDIT_MOTD) ->
-    translate:translate(Lang, <<"Update message of the day (don't send)">>);
+    translate:translate(Lang, ?T("Update message of the day (don't send)"));
 get_title(Lang, ?NS_ADMIN_EDIT_MOTD_ALLHOSTS) ->
-    translate:translate(Lang, <<"Update message of the day on all hosts (don't send)">>);
+    translate:translate(Lang, ?T("Update message of the day on all hosts (don't send)"));
 get_title(Lang, ?NS_ADMIN_DELETE_MOTD) ->
-    translate:translate(Lang, <<"Delete message of the day">>);
+    translate:translate(Lang, ?T("Delete message of the day"));
 get_title(Lang, ?NS_ADMIN_DELETE_MOTD_ALLHOSTS) ->
-    translate:translate(Lang, <<"Delete message of the day on all hosts">>).
+    translate:translate(Lang, ?T("Delete message of the day on all hosts")).
 
-%%-------------------------------------------------------------------------
+%%====================================================================
+%%; -- ad-hoc commands implementation
 
 announce_all(#message{to = To} = Packet) ->
     Local = jid:make(To#jid.server),
@@ -669,7 +712,7 @@ announce_motd(#message{to = To} = Packet) ->
     announce_motd(To#jid.lserver, Packet).
 
 announce_all_hosts_motd(Packet) ->
-    Hosts = ejabberd_config:get_myhosts(),
+    Hosts = ejabberd_option:hosts(),
     [announce_motd(Host, Packet) || Host <- Hosts].
 
 announce_motd(Host, Packet) ->
@@ -684,7 +727,7 @@ announce_motd_update(#message{to = To} = Packet) ->
     announce_motd_update(To#jid.lserver, Packet).
 
 announce_all_hosts_motd_update(Packet) ->
-    Hosts = ejabberd_config:get_myhosts(),
+    Hosts = ejabberd_option:hosts(),
     [announce_motd_update(Host, Packet) || Host <- Hosts].
 
 announce_motd_update(LServer, Packet) ->
@@ -702,7 +745,7 @@ announce_all_hosts_motd_delete(_Packet) ->
       fun(Host) ->
 	      Mod = gen_mod:db_mod(Host, ?MODULE),
 	      delete_motd(Mod, Host)
-      end, ejabberd_config:get_myhosts()).
+      end, ejabberd_option:hosts()).
 
 -spec send_motd({presence(), ejabberd_c2s:state()}) -> {presence(), ejabberd_c2s:state()}.
 send_motd({_, #{pres_last := _}} = Acc) ->
@@ -714,7 +757,7 @@ send_motd({#presence{type = available},
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     case get_motd(Mod, LServer) of
 	{ok, Packet} ->
-	    CodecOpts = ejabberd_config:codec_options(LServer),
+	    CodecOpts = ejabberd_config:codec_options(),
 	    try xmpp:decode(Packet, ?NS_CLIENT, CodecOpts) of
 		Msg ->
 		    case is_motd_user(Mod, LUser, LServer) of
@@ -727,7 +770,7 @@ send_motd({#presence{type = available},
 			    ok
 		    end
 	    catch _:{xmpp_codec, Why} ->
-		    ?ERROR_MSG("failed to decode motd packet ~p: ~s",
+		    ?ERROR_MSG("Failed to decode motd packet ~p: ~ts",
 			       [Packet, xmpp:format_error(Why)])
 	    end;
 	_ ->
@@ -806,12 +849,12 @@ get_stored_motd(LServer) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     case get_motd(Mod, LServer) of
         {ok, Packet} ->
-	    CodecOpts = ejabberd_config:codec_options(LServer),
+	    CodecOpts = ejabberd_config:codec_options(),
 	    try xmpp:decode(Packet, ?NS_CLIENT, CodecOpts) of
 		#message{body = Body, subject = Subject} ->
 		    {xmpp:get_text(Subject), xmpp:get_text(Body)}
 	    catch _:{xmpp_codec, Why} ->
-		    ?ERROR_MSG("failed to decode motd packet ~p: ~s",
+		    ?ERROR_MSG("Failed to decode motd packet ~p: ~ts",
 			       [Packet, xmpp:format_error(Why)])
 	    end;
         _ ->
@@ -835,7 +878,7 @@ send_announcement_to_all(Host, SubjectS, BodyS) ->
 -spec get_access(global | binary()) -> atom().
 
 get_access(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, access).
+    mod_announce_opt:access(Host).
 
 -spec add_store_hint(stanza()) -> stanza().
 add_store_hint(El) ->
@@ -844,8 +887,153 @@ add_store_hint(El) ->
 -spec route_forbidden_error(stanza()) -> ok.
 route_forbidden_error(Packet) ->
     Lang = xmpp:get_lang(Packet),
-    Err = xmpp:err_forbidden(<<"Access denied by service policy">>, Lang),
+    Err = xmpp:err_forbidden(?T("Access denied by service policy"), Lang),
     ejabberd_router:route_error(Packet, Err).
+
+
+%%====================================================================
+%%; Announcing via API commands
+
+%% @format-begin
+
+-spec get_commands_spec() -> [ejabberd_commands()].
+get_commands_spec() ->
+    HostAll = "If HOST is `all`, send to all hosts. ",
+    BodyNew = "You can use ' \\n ' in the message body to write a newline.",
+    [#ejabberd_commands{name = announce_send_all,
+                        tags = [announce],
+                        desc = "Send announcement to all users",
+                        longdesc = HostAll ++ BodyNew,
+                        module = ?MODULE,
+                        function = announce_send_all,
+                        note = "added in 25.10",
+                        args = [{host, binary}, {subject, binary}, {body, binary}],
+                        result = {res, rescode}},
+     #ejabberd_commands{name = announce_send_online,
+                        tags = [announce],
+                        desc = "Send announcement to online users",
+                        longdesc = HostAll ++ BodyNew,
+                        module = ?MODULE,
+                        function = announce_send_online,
+                        note = "added in 25.10",
+                        args = [{host, binary}, {subject, binary}, {body, binary}],
+                        result = {res, rescode}},
+     #ejabberd_commands{name = announce_motd_get,
+                        tags = [announce],
+                        desc = "Get Message Of The Day",
+                        longdesc = BodyNew,
+                        module = ?MODULE,
+                        function = get_stored_motd,
+                        note = "added in 25.10",
+                        args = [{host, binary}],
+                        result = {motd, {tuple, [{subject, string}, {body, string}]}}},
+     #ejabberd_commands{name = announce_motd_set_online,
+                        tags = [announce],
+                        desc = "Set Message Of The Day and send to online users",
+                        longdesc = HostAll ++ BodyNew,
+                        module = ?MODULE,
+                        function = announce_motd_set_online,
+                        note = "added in 25.10",
+                        args = [{host, binary}, {subject, binary}, {body, binary}],
+                        result = {res, rescode}},
+     #ejabberd_commands{name = announce_motd_update,
+                        tags = [announce],
+                        desc = "Update Message Of The Day",
+                        longdesc = HostAll ++ BodyNew,
+                        module = ?MODULE,
+                        function = announce_motd_update,
+                        note = "added in 25.10",
+                        args = [{host, binary}, {subject, binary}, {body, binary}],
+                        result = {res, rescode}},
+     #ejabberd_commands{name = announce_motd_delete,
+                        tags = [announce],
+                        desc = "Delete Message Of The Day",
+                        longdesc = HostAll,
+                        module = ?MODULE,
+                        function = announce_motd_delete_api,
+                        note = "added in 25.10",
+                        args = [{host, binary}],
+                        result = {res, rescode}}].
+
+announce_send_all(<<"all">>, Subject, Body) ->
+    Host = hd(ejabberd_option:hosts()),
+    announce_all_hosts_all(make_packet(Host, Body, Subject));
+announce_send_all(Host, Subject, Body) ->
+    announce_all(make_packet(Host, Body, Subject)).
+
+announce_send_online(<<"all">>, Subject, Body) ->
+    Host = hd(ejabberd_option:hosts()),
+    announce_all_hosts_online(make_packet(Host, Body, Subject));
+announce_send_online(Host, Subject, Body) ->
+    announce_online(make_packet(Host, Body, Subject)).
+
+announce_motd_set_online(<<"all">>, Subject, Body) ->
+    Host = hd(ejabberd_option:hosts()),
+    announce_all_hosts_motd(make_packet(Host, Body, Subject));
+announce_motd_set_online(Host, Subject, Body) ->
+    announce_motd(make_packet(Host, Body, Subject)).
+
+announce_motd_update(<<"all">>, Subject, Body) ->
+    Host = hd(ejabberd_option:hosts()),
+    [{ok, _} | _] = announce_all_hosts_motd_update(make_packet(Host, Body, Subject)),
+    ok;
+announce_motd_update(Host, Subject, Body) ->
+    {ok, _} = announce_motd_update(make_packet(Host, Body, Subject)),
+    ok.
+
+announce_motd_delete_api(<<"all">>) ->
+    Host = hd(ejabberd_option:hosts()),
+    announce_all_hosts_motd_delete(make_packet(Host));
+announce_motd_delete_api(Host) ->
+    announce_motd_delete(make_packet(Host)).
+
+make_packet(Host) ->
+    From = To = jid:make(Host),
+    #message{from = From, to = To}.
+
+make_packet(Host, Body, Subject) ->
+    From = To = jid:make(Host),
+    Body2 = binary:replace(Body, <<"\\n">>, <<"\n">>, [global]),
+    #message{from = From,
+             to = To,
+             type = headline,
+             body = xmpp:mk_text(Body2),
+             subject = xmpp:mk_text(Subject)}.
+
+%%====================================================================
+%%; Announcing via WebAdmin
+
+webadmin_menu(Acc, _Host, Lang) ->
+    [{<<"announce">>, translate:translate(Lang, ?T("Announcements"))} | Acc].
+
+webadmin_page(_,
+              Host,
+              #request{us = _US,
+                       path = [<<"announce">>],
+                       lang = Lang} =
+                  R) ->
+    PageTitle = translate:translate(Lang, ?T("Announcements")),
+    Head = ?H1GL(PageTitle, <<"modules/#mod_announce">>, <<"mod_announce">>),
+    Ann = [?X(<<"hr">>),
+           ?XE(<<"blockquote">>,
+               [make_command(announce_send_all, R, [{<<"host">>, Host}], []),
+                make_command(announce_send_online, R, [{<<"host">>, Host}], [])])],
+    SetMotd =
+        [make_command(announce_motd_set_online, R, [{<<"host">>, Host}], []),
+         make_command(announce_motd_update, R, [{<<"host">>, Host}], []),
+         make_command(announce_motd_delete, R, [{<<"host">>, Host}], [{style, danger}])],
+    GetMotd = [make_command(announce_motd_get, R, [{<<"host">>, Host}], [])],
+    Motd =
+        [?X(<<"hr">>),
+         ?XAC(<<"h2">>, [{<<"id">>, <<"motd">>}], <<"Message Of The Day">>),
+         ?XE(<<"blockquote">>, GetMotd ++ SetMotd)],
+    {stop, Head ++ Ann ++ Motd};
+webadmin_page(Acc, _, _) ->
+    Acc.
+%% @format-end
+
+%%====================================================================
+%%; Cache management
 
 -spec init_cache(module(), binary(), gen_mod:opts()) -> ok.
 init_cache(Mod, Host, Opts) ->
@@ -859,19 +1047,16 @@ init_cache(Mod, Host, Opts) ->
 
 -spec cache_opts(gen_mod:opts()) -> [proplists:property()].
 cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_announce_opt:cache_size(Opts),
+    CacheMissed = mod_announce_opt:cache_missed(Opts),
+    LifeTime = mod_announce_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
 -spec use_cache(module(), binary()) -> boolean().
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false -> mod_announce_opt:use_cache(Host)
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].
@@ -887,7 +1072,10 @@ clean_cache(LServer) ->
       ?MOTD_CACHE,
       fun({_, S}, _) -> S /= LServer end).
 
-%%-------------------------------------------------------------------------
+
+%%====================================================================
+%%; ejd2sql callbacks
+
 export(LServer) ->
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     Mod:export(LServer).
@@ -903,19 +1091,98 @@ import(LServer, {sql, _}, DBType, Tab, List) ->
     Mod = gen_mod:db_mod(DBType, ?MODULE),
     Mod:import(LServer, Tab, List).
 
-mod_opt_type(access) -> fun acl:access_rules_validator/1;
-mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun (I) when is_integer(I), I > 0 -> I;
-        (infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
+%%====================================================================
+%%; Options and Documentation
+
+mod_opt_type(access) ->
+    econf:acl();
+mod_opt_type(db_type) ->
+    econf:db_type(?MODULE);
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
 mod_options(Host) ->
     [{access, none},
      {db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+     {use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
+
+mod_doc() ->
+    #{desc =>
+          [?T("This module enables configured users to broadcast "
+              "announcements and to set the message of the day (MOTD). "
+              "Configured users can perform these actions with an XMPP "
+              "client either using Ad-Hoc Commands or sending messages "
+              "to specific JIDs. Equivalent API commands are also available."), "",
+	   ?T("NOTE: This module can be resource intensive on large "
+	      "deployments as it may broadcast a lot of messages. This module "
+	      "should be disabled for instances of ejabberd with hundreds of "
+	      "thousands users."), "",
+           ?T("To send announcements using "
+              "https://xmpp.org/extensions/xep-0050.html[XEP-0050: Ad-Hoc Commands], "
+              "this module requires _`mod_adhoc`_ (to execute the commands), "
+              "and recommends _`mod_disco`_ (to discover the commands)."), "",
+           ?T("To send announcements by sending messages to specific JIDs, these are the destination JIDs:"), "",
+           "- 'example.org/announce/all':",
+           ?T("Send the message to all registered users in that vhost. If the user is "
+              "online and connected to several resources, only the resource "
+              "with the highest priority will receive the message. "
+              "If the registered user is not connected, the message is "
+              "stored offline in assumption that offline storage (see _`mod_offline`_) "
+              "is enabled."),
+           "- 'example.org/announce/online':",
+           ?T("Send the message to all connected users. If the user is "
+              "online and connected to several resources, all resources will "
+              "receive the message."),
+           "- 'example.org/announce/motd':",
+           ?T("Set the message of the day (MOTD) that is sent "
+              "to users when they login. Also sends the message to all "
+              "connected users (similar to 'announce/online')."),
+           "- 'example.org/announce/motd/update':",
+           ?T("Set the message of the day (MOTD) that is sent to users "
+              "when they login. This does not send the message to any currently connected user."),
+           "- 'example.org/announce/motd/delete':",
+           ?T("Remove the existing message of the day (MOTD) by sending a message to this JID."), "",
+           ?T("There are similar destination JIDs to apply to all virtual hosts in ejabberd:"), "",
+           "- 'example.org/announce/all-hosts/all': send to all registered accounts",
+           "- 'example.org/announce/all-hosts/online': send to online sessions",
+           "- 'example.org/announce/all-hosts/motd': set MOTD and send to online",
+           "- 'example.org/announce/all-hosts/motd/update': update MOTD",
+           "- 'example.org/announce/all-hosts/motd/delete': delete MOTD"],
+      opts =>
+          [{access,
+            #{value => ?T("AccessName"),
+              desc =>
+                  ?T("This option specifies who is allowed to send announcements "
+                     "and to set the message of the day. The default value is 'none' "
+                     "(i.e. nobody is able to send such messages).")}},
+           {db_type,
+            #{value => "mnesia | sql",
+              desc =>
+                  ?T("Same as top-level _`default_db`_ option, but applied to this module only.")}},
+           {use_cache,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`use_cache`_ option, but applied to this module only.")}},
+           {cache_size,
+            #{value => "pos_integer() | infinity",
+              desc =>
+                  ?T("Same as top-level _`cache_size`_ option, but applied to this module only.")}},
+           {cache_missed,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`cache_missed`_ option, but applied to this module only.")}},
+           {cache_life_time,
+            #{value => "timeout()",
+              desc =>
+                  ?T("Same as top-level _`cache_life_time`_ option, but applied to this module only.")}}]}.
+
+%%% vim: set foldmethod=marker foldmarker=%%;,%%=:

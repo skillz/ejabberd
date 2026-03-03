@@ -1,11 +1,11 @@
 %%%----------------------------------------------------------------------
 %%% File    : mod_push_sql.erl
 %%% Author  : Evgeniy Khramtsov <ekhramtsov@process-one.net>
-%%% Purpose : 
+%%% Purpose :
 %%% Created : 26 Oct 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2017-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2017-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -25,14 +25,14 @@
 
 -module(mod_push_sql).
 -behaviour(mod_push).
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 %% API
 -export([init/2, store_session/6, lookup_session/4, lookup_session/3,
 	 lookup_sessions/3, lookup_sessions/2, lookup_sessions/1,
 	 delete_session/3, delete_old_sessions/2, export/1]).
+-export([sql_schemas/0]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
 -include("mod_push.hrl").
@@ -40,8 +40,31 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"push_session">>,
+                columns =
+                    [#sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"timestamp">>, type = bigint},
+                     #sql_column{name = <<"service">>, type = text},
+                     #sql_column{name = <<"node">>, type = text},
+                     #sql_column{name = <<"xml">>, type = text}],
+                indices = [#sql_index{
+                              columns = [<<"server_host">>, <<"username">>,
+                                         <<"timestamp">>],
+                              unique = true},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"username">>,
+                                         <<"service">>, <<"node">>],
+                              unique = true}]}]}].
 
 store_session(LUser, LServer, NowTS, PushJID, Node, XData) ->
     XML = encode_xdata(XData),
@@ -53,7 +76,7 @@ store_session(LUser, LServer, NowTS, PushJID, Node, XData) ->
     case ?SQL_UPSERT(LServer, "push_session",
 		     ["!username=%(LUser)s",
                       "!server_host=%(LServer)s",
-		      "!timestamp=%(TS)d",
+		      "timestamp=%(TS)d",
 		      "!service=%(Service)s",
 		      "!node=%(Node)s",
 		      "xml=%(XML)s"]) of
@@ -214,7 +237,7 @@ enforce_max_sessions(_LUser, _LServer, infinity) ->
 enforce_max_sessions(LUser, LServer, MaxSessions) ->
     case lookup_sessions(LUser, LServer) of
 	{ok, Sessions} when length(Sessions) >= MaxSessions ->
-	    ?INFO_MSG("Disabling old push session(s) of ~s@~s",
+	    ?INFO_MSG("Disabling old push session(s) of ~ts@~ts",
 		      [LUser, LServer]),
 	    Sessions1 = lists:sort(fun({TS1, _, _, _}, {TS2, _, _, _}) ->
 					   TS1 >= TS2
@@ -234,13 +257,13 @@ decode_xdata(XML, LUser, LServer) ->
 	#xmlel{} = El ->
 	    try xmpp:decode(El)
 	    catch _:{xmpp_codec, Why} ->
-		    ?ERROR_MSG("Failed to decode ~s for user ~s@~s "
-			       "from table 'push_session': ~s",
+		    ?ERROR_MSG("Failed to decode ~ts for user ~ts@~ts "
+			       "from table 'push_session': ~ts",
 			       [XML, LUser, LServer, xmpp:format_error(Why)]),
 		    undefined
 	    end;
 	Err ->
-	    ?ERROR_MSG("Failed to decode ~s for user ~s@~s from "
+	    ?ERROR_MSG("Failed to decode ~ts for user ~ts@~ts from "
 		       "table 'push_session': ~p",
 		       [XML, LUser, LServer, Err]),
 	    undefined

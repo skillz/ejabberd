@@ -1,11 +1,11 @@
 %%%----------------------------------------------------------------------
 %%% File    : ejabberd_cluster_mnesia.erl
 %%% Author  : Christophe Romain <christophe.romain@process-one.net>
-%%% Purpose : Ejabberd clustering management via Mnesia
+%%% Purpose : ejabberd clustering management via Mnesia
 %%% Created : 7 Oct 2015 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -136,7 +136,7 @@ replicate_database(Node) ->
     mnesia:change_table_copy_type(schema, node(), disc_copies),
     lists:foreach(
         fun(Table) ->
-            Type = ejabberd_cluster:call(Node, mnesia, table_info, [Table, storage_type]),
+            Type = rpc:call(Node, mnesia, table_info, [Table, storage_type]),
             mnesia:add_table_copy(Table, node(), Type)
         end, mnesia:system_info(tables)--[schema]).
 

@@ -13,42 +13,16 @@
 #POLL=true
 
 #.
-#' SMP: SMP support ([enable|auto|disable])
-#
-# Explanation in Erlang/OTP documentation:
-# enable: starts the Erlang runtime system with SMP support enabled.
-#   This may fail if no runtime system with SMP support is available.
-# auto: starts the Erlang runtime system with SMP support enabled if it
-#   is available and more than one logical processor are detected.
-# disable: starts a runtime system without SMP support.
-#
-# Default: auto
-#
-#SMP=auto
-
-#.
 #' ERL_MAX_PORTS: Maximum number of simultaneously open Erlang ports
 #
 # ejabberd consumes two or three ports for every connection, either
-# from a client or from another Jabber server. So take this into
+# from a client or from another XMPP server. So take this into
 # account when setting this limit.
 #
 # Default: 65536 (or 8196 on Windows)
 # Maximum: 268435456
 #
 #ERL_MAX_PORTS=65536
-
-#.
-#' FIREWALL_WINDOW: Range of allowed ports to pass through a firewall
-#
-# If Ejabberd is configured to run in cluster, and a firewall is blocking ports,
-# it's possible to make Erlang use a defined range of port (instead of dynamic
-# ports) for node communication.
-#
-# Default: not defined
-# Example: 4200-4210
-#
-#FIREWALL_WINDOW=
 
 #.
 #' INET_DIST_INTERFACE: IP address where this Erlang node listens other nodes
@@ -61,12 +35,40 @@
 #INET_DIST_INTERFACE=127.0.0.1
 
 #.
-#' ERL_EPMD_ADDRESS: IP addresses where epmd listens for connections
+#' ERL_DIST_PORT: Port number for Erlang distribution
 #
-# IMPORTANT: This option works only in Erlang/OTP R14B03 and newer.
+# For Erlang distribution, clustering and ejabberdctl usage, the
+# Erlang VM listens in a random TCP port number, and the Erlang Port
+# Mapper Daemon (EPMD) is spawned and used to determine this port
+# number.
+#
+# ERL_DIST_PORT can define this port number.  In that case, EPMD is
+# not spawned during ejabberd startup, and ERL_EPMD_ADDRESS is
+# ignored. ERL_DIST_PORT must be set to the same port number during
+# ejabberd startup and when calling ejabberdctl.  This feature
+# requires at least Erlang/OTP 23.1.
+#
+# Default: not defined
+#
+#ERL_DIST_PORT=5210
+
+#.
+#' FIREWALL_WINDOW: Range of allowed ports to pass through a firewall
+#
+# If ejabberd is configured to run in cluster, and a firewall is blocking ports,
+# it's possible to make Erlang use a defined range of port (instead of dynamic
+# ports) for node communication.
+#
+# Default: not defined
+# Example: 4200-4210
+#
+#FIREWALL_WINDOW=
+
+#.
+#' ERL_EPMD_ADDRESS: IP addresses where EPMD listens for connections
 #
 # This environment variable may be set to a comma-separated
-# list of IP addresses, in which case the epmd daemon
+# list of IP addresses, in which case the EPMD daemon
 # will listen only on the specified address(es) and on the
 # loopback address (which is implicitly added to the list if it
 # has not been specified). The default behaviour is to listen on
@@ -106,10 +108,11 @@
 #.
 #' ERL_OPTIONS: Additional Erlang options
 #
-# The next variable allows to specify additional options passed to erlang while
-# starting ejabberd. Some useful options are -noshell, -detached, -heart. When
-# ejabberd is started from an init.d script options -noshell and -detached are
-# added implicitly. See erl(1) for more info.
+# The next variable allows to specify additional options passed to
+# all commands using erlang interpreter. This applies to starting
+# ejabberd server itself but also auxiliary commands like for example
+# starting debug shell. See erl(1) for list of commands that can be
+# used here.
 #
 # It might be useful to add "-pa /usr/local/lib/ejabberd/ebin" if you
 # want to add local modules in this path.
@@ -117,6 +120,20 @@
 # Default: ""
 #
 #ERL_OPTIONS=""
+
+#.
+#' EJABBERD_OPTS: Additional Erlang options to start ejabberd
+#
+# The next variable allows to specify additional options passed to erlang while
+# starting ejabberd. Some useful options are -noshell, -detached, -heart. When
+# ejabberd is started from an init.d script options -noshell and -detached are
+# added implicitly. See erl(1) for more info.
+#
+# For example you can use value "-heart -env HEART_BEAT_TIMEOUT 120 -env ERL_CRASH_DUMP_SECONDS 60"
+#
+# Default: ""
+#
+#EJABBERD_OPTS=""
 
 #.
 #' ERLANG_NODE: Erlang node name
@@ -180,6 +197,17 @@
 # Default: $CONTRIB_MODULES_PATH/conf
 #
 #CONTRIB_MODULES_CONF_DIR=/etc/ejabberd/modules
+
+#.
+#' CTL_OVER_HTTP: Path to ejabberdctl HTTP listener socket
+#
+# To speedup ejabberdctl execution time for ejabberd commands,
+# you can setup an ejabberd_http listener with ejabberd_ctl handling requests,
+# listening in a unix domain socket.
+#
+# Default: disabled
+#
+#CTL_OVER_HTTP=sockets/ctl_over_http.sock
 
 #.
 #'

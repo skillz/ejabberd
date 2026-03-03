@@ -1,11 +1,11 @@
 %%%----------------------------------------------------------------------
 %%% File    : ejabberd_auth_ldap.erl
 %%% Author  : Alexey Shchepin <alexey@process-one.net>
-%%% Purpose : Authentification via LDAP
+%%% Purpose : Authentication via LDAP
 %%% Created : 12 Dec 2004 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -25,8 +25,6 @@
 
 -module(ejabberd_auth_ldap).
 
--behaviour(ejabberd_config).
-
 -author('alexey@process-one.net').
 
 -behaviour(gen_server).
@@ -40,7 +38,7 @@
 	 check_password/4, user_exists/2,
 	 get_users/2, count_users/2,
 	 store_type/1, plain_password_required/1,
-	 opt_type/1]).
+	 reload/1]).
 
 -include("logger.hrl").
 
@@ -60,16 +58,19 @@
          uids = []              :: [{binary()} | {binary(), binary()}],
          ufilter = <<"">>       :: binary(),
          sfilter = <<"">>       :: binary(),
-	 lfilter                :: {any(), any()} | undefined,
          deref_aliases = never  :: never | searching | finding | always,
          dn_filter              :: binary() | undefined,
          dn_filter_attrs = []   :: [binary()]}).
 
-handle_cast(_Request, State) -> {noreply, State}.
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
+    {noreply, State}.
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
-handle_info(_Info, State) -> {noreply, State}.
+handle_info(Info, State) ->
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
+    {noreply, State}.
 
 -define(LDAP_SEARCH_TIMEOUT, 5).
 
@@ -85,8 +86,10 @@ start(Host) ->
 
 stop(Host) ->
     Proc = gen_mod:get_module_proc(Host, ?MODULE),
-    supervisor:terminate_child(ejabberd_backend_sup, Proc),
-    supervisor:delete_child(ejabberd_backend_sup, Proc).
+    case supervisor:terminate_child(ejabberd_backend_sup, Proc) of
+	ok -> supervisor:delete_child(ejabberd_backend_sup, Proc);
+	Err -> Err
+    end.
 
 start_link(Host) ->
     Proc = gen_mod:get_module_proc(Host, ?MODULE),
@@ -107,32 +110,35 @@ init(Host) ->
 			  State#state.password, State#state.tls_options),
     {ok, State}.
 
+reload(Host) ->
+    stop(Host),
+    start(Host).
+
 plain_password_required(_) -> true.
 
 store_type(_) -> external.
 
 check_password(User, AuthzId, Server, Password) ->
     if AuthzId /= <<>> andalso AuthzId /= User ->
-	    false;
+	    {nocache, false};
+       Password == <<"">> ->
+	    {nocache, false};
        true ->
-	    if Password == <<"">> -> false;
-	       true ->
-		    case catch check_password_ldap(User, Server, Password) of
-		      {'EXIT', _} -> false;
-		      Result -> Result
-		    end
+	    case catch check_password_ldap(User, Server, Password) of
+		{'EXIT', _} -> {nocache, false};
+		Result -> {cache, Result}
 	    end
     end.
 
 set_password(User, Server, Password) ->
     {ok, State} = eldap_utils:get_state(Server, ?MODULE),
     case find_user_dn(User, State) of
-      false -> {error, notfound};
+      false -> {cache, {error, db_failure}};
       DN ->
 	    case eldap_pool:modify_passwd(State#state.eldap_id, DN,
 					  Password) of
-		ok -> ok;
-		_Err -> {error, db_failure}
+		ok -> {cache, {ok, Password}};
+		_Err -> {nocache, {error, db_failure}}
 	    end
     end.
 
@@ -145,11 +151,10 @@ get_users(Server, []) ->
 count_users(Server, Opts) ->
     length(get_users(Server, Opts)).
 
-%% @spec (User, Server) -> true | false | {error, Error}
 user_exists(User, Server) ->
     case catch user_exists_ldap(User, Server) of
-      {'EXIT', _Error} -> {error, db_failure};
-      Result -> Result
+	{'EXIT', _Error} -> {nocache, {error, db_failure}};
+	Result -> {cache, Result}
     end.
 
 %%%----------------------------------------------------------------------
@@ -228,8 +233,9 @@ handle_call(get_state, _From, State) ->
     {reply, {ok, State}, State};
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State};
-handle_call(_Request, _From, State) ->
-    {reply, bad_request, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
 find_user_dn(User, State) ->
     ResAttrs = result_attrs(State),
@@ -246,17 +252,10 @@ find_user_dn(User, State) ->
 				     [#eldap_entry{attributes = Attrs,
 						   object_name = DN}
 				      | _]} ->
-		dn_filter(DN, Attrs, State);
+		is_valid_dn(DN, Attrs, State);
 	    _ -> false
 	  end;
       _ -> false
-    end.
-
-%% apply the dn filter and the local filter:
-dn_filter(DN, Attrs, State) ->
-    case check_local_filter(Attrs, State) of
-      false -> false;
-      true -> is_valid_dn(DN, Attrs, State)
     end.
 
 %% Check that the DN is valid, based on the dn filter
@@ -294,30 +293,6 @@ is_valid_dn(DN, Attrs, State) ->
       _ -> false
     end.
 
-%% The local filter is used to check an attribute in ejabberd
-%% and not in LDAP to limit the load on the LDAP directory.
-%% A local rule can be either:
-%%    {equal, {"accountStatus",["active"]}}
-%%    {notequal, {"accountStatus",["disabled"]}}
-%% {ldap_local_filter, {notequal, {"accountStatus",["disabled"]}}}
-check_local_filter(_Attrs,
-		   #state{lfilter = undefined}) ->
-    true;
-check_local_filter(Attrs,
-		   #state{lfilter = LocalFilter}) ->
-    {Operation, FilterMatch} = LocalFilter,
-    local_filter(Operation, Attrs, FilterMatch).
-
-local_filter(equal, Attrs, FilterMatch) ->
-    {Attr, Value} = FilterMatch,
-    case lists:keysearch(Attr, 1, Attrs) of
-      false -> false;
-      {value, {Attr, Value}} -> true;
-      _ -> false
-    end;
-local_filter(notequal, Attrs, FilterMatch) ->
-    not local_filter(equal, Attrs, FilterMatch).
-
 result_attrs(#state{uids = UIDs,
 		    dn_filter_attrs = DNFilterAttrs}) ->
     lists:foldl(fun ({UID}, Acc) -> [UID | Acc];
@@ -329,25 +304,21 @@ result_attrs(#state{uids = UIDs,
 %%% Auxiliary functions
 %%%----------------------------------------------------------------------
 parse_options(Host) ->
-    Cfg = eldap_utils:get_config(Host, []),
+    Cfg = ?eldap_config(ejabberd_option, Host),
     Eldap_ID = misc:atom_to_binary(gen_mod:get_module_proc(Host, ?MODULE)),
     Bind_Eldap_ID = misc:atom_to_binary(
                       gen_mod:get_module_proc(Host, bind_ejabberd_auth_ldap)),
-    UIDsTemp = ejabberd_config:get_option(
-		 {ldap_uids, Host}, [{<<"uid">>, <<"%u">>}]),
+    UIDsTemp = ejabberd_option:ldap_uids(Host),
     UIDs = eldap_utils:uids_domain_subst(Host, UIDsTemp),
     SubFilter =	eldap_utils:generate_subfilter(UIDs),
-    UserFilter = case ejabberd_config:get_option({ldap_filter, Host}, <<"">>) of
+    UserFilter = case ejabberd_option:ldap_filter(Host) of
                      <<"">> ->
 			 SubFilter;
                      F ->
                          <<"(&", SubFilter/binary, F/binary, ")">>
                  end,
-    SearchFilter = eldap_filter:do_sub(UserFilter,
-				       [{<<"%u">>, <<"*">>}]),
-    {DNFilter, DNFilterAttrs} =
-        ejabberd_config:get_option({ldap_dn_filter, Host}, {undefined, []}),
-    LocalFilter = ejabberd_config:get_option({ldap_local_filter, Host}),
+    SearchFilter = eldap_filter:do_sub(UserFilter, [{<<"%u">>, <<"*">>}]),
+    {DNFilter, DNFilterAttrs} = ejabberd_option:ldap_dn_filter(Host),
     #state{host = Host, eldap_id = Eldap_ID,
            bind_eldap_id = Bind_Eldap_ID,
            servers = Cfg#eldap_config.servers,
@@ -359,19 +330,5 @@ parse_options(Host) ->
            base = Cfg#eldap_config.base,
            deref_aliases = Cfg#eldap_config.deref_aliases,
 	   uids = UIDs, ufilter = UserFilter,
-	   sfilter = SearchFilter, lfilter = LocalFilter,
+	   sfilter = SearchFilter,
 	   dn_filter = DNFilter, dn_filter_attrs = DNFilterAttrs}.
-
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
-opt_type(ldap_dn_filter) ->
-    fun ([{DNF, DNFA}]) ->
-	    NewDNFA = case DNFA of
-			undefined -> [];
-			_ -> [iolist_to_binary(A) || A <- DNFA]
-		      end,
-	    NewDNF = eldap_utils:check_filter(DNF),
-	    {NewDNF, NewDNFA}
-    end;
-opt_type(ldap_local_filter) -> fun (V) -> V end;
-opt_type(_) ->
-    [ldap_dn_filter, ldap_local_filter].

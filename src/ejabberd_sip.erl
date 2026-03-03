@@ -1,11 +1,11 @@
 %%%-------------------------------------------------------------------
 %%% File    : ejabberd_sip.erl
 %%% Author  : Evgeny Khramtsov <ekhramtsov@process-one.net>
-%%% Purpose : 
+%%% Purpose :
 %%% Created : 30 Apr 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2013-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2013-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -28,9 +28,9 @@
 
 -ifndef(SIP).
 -include("logger.hrl").
--export([accept/1, start/2, start_link/2, listen_options/0]).
+-export([accept/1, start/3, start_link/3, listen_options/0]).
 fail() ->
-    ?CRITICAL_MSG("Listening module ~s is not available: "
+    ?CRITICAL_MSG("Listening module ~ts is not available: "
 		  "ejabberd is not compiled with SIP support",
 		  [?MODULE]),
     erlang:error(sip_not_compiled).
@@ -38,15 +38,15 @@ accept(_) ->
     fail().
 listen_options() ->
     fail().
-start(_, _) ->
+start(_, _, _) ->
     fail().
-start_link(_, _) ->
+start_link(_, _, _) ->
     fail().
 -else.
 %% API
--export([tcp_init/2, udp_init/2, udp_recv/5, start/2,
-	 start_link/2, accept/1, listen_options/0]).
-
+-export([tcp_init/2, udp_init/2, udp_recv/5, start/3,
+	 start_link/3, accept/1]).
+-export([listen_opt_type/1, listen_options/0]).
 
 %%%===================================================================
 %%% API
@@ -62,10 +62,10 @@ udp_init(Socket, Opts) ->
 udp_recv(Sock, Addr, Port, Data, Opts) ->
     esip_socket:udp_recv(Sock, Addr, Port, Data, Opts).
 
-start(Opaque, Opts) ->
-    esip_socket:start(Opaque, Opts).
+start(SockMod, Socket, Opts) ->
+    esip_socket:start({SockMod, Socket}, Opts).
 
-start_link({gen_tcp, Sock}, Opts) ->
+start_link(gen_tcp, Sock, Opts) ->
     esip_socket:start_link(Sock, Opts).
 
 accept(_) ->
@@ -80,14 +80,12 @@ set_certfile(Opts) ->
 		{ok, CertFile} ->
 		    [{certfile, CertFile}|Opts];
 		error ->
-		    case ejabberd_config:get_option({domain_certfile, ejabberd_config:get_myname()}) of
-			undefined ->
-			    Opts;
-			CertFile ->
-			    [{certfile, CertFile}|Opts]
-		    end
+		    Opts
 	    end
     end.
+
+listen_opt_type(certfile) ->
+    econf:pem().
 
 listen_options() ->
     [{tls, false},

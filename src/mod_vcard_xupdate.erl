@@ -5,7 +5,7 @@
 %%% Created : 9 Mar 2007 by Igor Goryachev <igor@goryachev.org>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,18 +26,17 @@
 -module(mod_vcard_xupdate).
 -behaviour(gen_mod).
 
--protocol({xep, 398, '0.2.0'}).
-
 %% gen_mod callbacks
 -export([start/2, stop/1, reload/3]).
 
--export([update_presence/1, vcard_set/1, remove_user/2,
+-export([update_presence/1, vcard_set/1, remove_user/2, mod_doc/0,
 	 user_send_packet/1, mod_opt_type/1, mod_options/1, depends/2]).
 %% API
 -export([compute_hash/1]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+-include("translate.hrl").
 
 -define(VCARD_XUPDATE_CACHE, vcard_xupdate_cache).
 
@@ -47,22 +46,13 @@
 
 start(Host, Opts) ->
     init_cache(Host, Opts),
-    ejabberd_hooks:add(c2s_self_presence, Host, ?MODULE,
-		       update_presence, 100),
-    ejabberd_hooks:add(user_send_packet, Host, ?MODULE,
-		       user_send_packet, 50),
-    ejabberd_hooks:add(vcard_iq_set, Host, ?MODULE, vcard_set,
-		       90),
-    ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50).
+    {ok, [{hook, c2s_self_presence, update_presence, 100},
+          {hook, user_send_packet, user_send_packet, 50},
+          {hook, vcard_iq_set, vcard_set, 90},
+          {hook, remove_user, remove_user, 50}]}.
 
-stop(Host) ->
-    ejabberd_hooks:delete(c2s_self_presence, Host,
-			  ?MODULE, update_presence, 100),
-    ejabberd_hooks:delete(user_send_packet, Host, ?MODULE,
-			  user_send_packet, 50),
-    ejabberd_hooks:delete(vcard_iq_set, Host, ?MODULE,
-			  vcard_set, 90),
-    ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50).
+stop(_Host) ->
+    ok.
 
 reload(Host, NewOpts, _OldOpts) ->
     init_cache(Host, NewOpts).
@@ -106,8 +96,8 @@ user_send_packet(Acc) ->
 
 -spec vcard_set(iq()) -> iq().
 vcard_set(#iq{from = #jid{luser = LUser, lserver = LServer}} = IQ) ->
-    ets_cache:delete(?VCARD_XUPDATE_CACHE, {LUser, LServer}),
-    ejabberd_sm:force_update_presence({LUser, LServer}),
+    ets_cache:delete(?VCARD_XUPDATE_CACHE, {LUser, LServer}, ejabberd_cluster:get_nodes()),
+    ejabberd_sm:reset_vcard_xupdate_resend_presence({LUser, LServer}),
     IQ;
 vcard_set(Acc) ->
     Acc.
@@ -116,7 +106,7 @@ vcard_set(Acc) ->
 remove_user(User, Server) ->
     LUser = jid:nodeprep(User),
     LServer = jid:nameprep(Server),
-    ets_cache:delete(?VCARD_XUPDATE_CACHE, {LUser, LServer}).
+    ets_cache:delete(?VCARD_XUPDATE_CACHE, {LUser, LServer}, ejabberd_cluster:get_nodes()).
 
 %%====================================================================
 %% Storage
@@ -158,17 +148,14 @@ init_cache(Host, Opts) ->
 
 -spec cache_opts(gen_mod:opts()) -> [proplists:property()].
 cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_vcard_xupdate_opt:cache_size(Opts),
+    CacheMissed = mod_vcard_xupdate_opt:cache_missed(Opts),
+    LifeTime = mod_vcard_xupdate_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
 -spec use_cache(binary()) -> boolean().
 use_cache(Host) ->
-    gen_mod:get_module_opt(Host, ?MODULE, use_cache).
+    mod_vcard_xupdate_opt:use_cache(Host).
 
 -spec compute_hash(xmlel()) -> binary() | external.
 compute_hash(VCard) ->
@@ -191,15 +178,65 @@ compute_hash(VCard) ->
 %%====================================================================
 %% Options
 %%====================================================================
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun (I) when is_integer(I), I > 0 -> I;
-        (infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
 mod_options(Host) ->
-    [{use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+    [{use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
+
+mod_doc() ->
+    #{desc =>
+          [?T("The user's client can store an avatar in the "
+              "user vCard. The vCard-Based Avatars protocol "
+              "(https://xmpp.org/extensions/xep-0153.html[XEP-0153]) "
+              "provides a method for clients to inform the contacts "
+              "what is the avatar hash value. However, simple or small "
+              "clients may not implement that protocol."), "",
+           ?T("If this module is enabled, all the outgoing client presence "
+              "stanzas get automatically the avatar hash on behalf of the "
+              "client. So, the contacts receive the presence stanzas with "
+              "the 'Update Data' described in "
+              "https://xmpp.org/extensions/xep-0153.html[XEP-0153] as if the "
+              "client would had inserted it itself. If the client had already "
+              "included such element in the presence stanza, it is replaced "
+              "with the element generated by ejabberd."), "",
+           ?T("By enabling this module, each vCard modification produces "
+              "a hash recalculation, and each presence sent by a client "
+              "produces hash retrieval and a presence stanza rewrite. "
+              "For this reason, enabling this module will introduce a "
+              "computational overhead in servers with clients that change "
+              "frequently their presence. However, the overhead is significantly "
+              "reduced by the use of caching, so you probably don't want "
+              "to set 'use_cache' to 'false'."), "",
+           ?T("The module depends on _`mod_vcard`_."), "",
+           ?T("NOTE: Nowadays https://xmpp.org/extensions/xep-0153.html"
+              "[XEP-0153] is used mostly as \"read-only\", i.e. modern "
+              "clients don't publish their avatars inside vCards. Thus "
+              "in the majority of cases the module is only used along "
+              "with _`mod_avatar`_ for providing backward compatibility.")],
+      opts =>
+          [{use_cache,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`use_cache`_ option, but applied to this module only.")}},
+           {cache_size,
+            #{value => "pos_integer() | infinity",
+              desc =>
+                  ?T("Same as top-level _`cache_size`_ option, but applied to this module only.")}},
+           {cache_missed,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`cache_missed`_ option, but applied to this module only.")}},
+           {cache_life_time,
+            #{value => "timeout()",
+              desc =>
+                  ?T("Same as top-level _`cache_life_time`_ option, but applied to this module only.")}}]}.

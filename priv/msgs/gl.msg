@@ -1,21 +1,21 @@
-%% -*- coding: latin-1 -*-
+%% Generated automatically
+%% DO NOT EDIT: run `make translations` instead
+%% To improve translations please read:
+%%   https://docs.ejabberd.im/developer/extending-ejabberd/localization/
+
 {" has set the subject to: "," puxo o asunto: "}.
+{"A friendly name for the node","Un nome sinxelo para o nodo"}.
 {"A password is required to enter this room","Necesítase contrasinal para entrar nesta sala"}.
 {"Accept","Aceptar"}.
-{"Access Configuration","Configuración de accesos"}.
-{"Access Control List Configuration","Configuración da Lista de Control de Acceso"}.
-{"Access Control Lists","Listas de Control de Acceso"}.
 {"Access denied by service policy","Acceso denegado pola política do servizo"}.
-{"Access Rules","Regras de Acceso"}.
 {"Action on user","Acción no usuario"}.
-{"Add Jabber ID","Engadir ID Jabber"}.
-{"Add New","Engadir novo"}.
 {"Add User","Engadir usuario"}.
 {"Administration of ","Administración de "}.
 {"Administration","Administración"}.
 {"Administrator privileges required","Necesítase privilexios de administrador"}.
 {"All activity","Toda a actividade"}.
 {"All Users","Todos os usuarios"}.
+{"Allow this Jabber ID to subscribe to this pubsub node?","Desexas permitir a este JabberID que se subscriba a este nodo PubSub?"}.
 {"Allow users to change the subject","Permitir aos usuarios cambiar o asunto"}.
 {"Allow users to query other users","Permitir aos usuarios consultar a outros usuarios"}.
 {"Allow users to send invites","Permitir aos usuarios enviar invitacións"}.
@@ -23,6 +23,7 @@
 {"Allow visitors to change nickname","Permitir aos visitantes cambiarse o alcume"}.
 {"Allow visitors to send private messages to","Permitir aos visitantes enviar mensaxes privadas a"}.
 {"Allow visitors to send status text in presence updates","Permitir aos visitantes enviar texto de estado nas actualizacións depresenza"}.
+{"Allow visitors to send voice requests","Permitir aos visitantes enviar peticións de voz"}.
 {"Announcements","Anuncios"}.
 {"April","Abril"}.
 {"August","Agosto"}.
@@ -50,7 +51,6 @@
 {"Chatroom is stopped","Detívose a sala"}.
 {"Chatrooms","Salas de charla"}.
 {"Choose a username and password to register with this server","Escolle un nome de usuario e contrasinal para rexistrarche neste servidor"}.
-{"Choose modules to stop","Selecciona módulos a deter"}.
 {"Choose storage type of tables","Selecciona tipo de almacenamento das táboas"}.
 {"Choose whether to approve this entity's subscription.","Decidir se aprobar a subscripción desta entidade."}.
 {"City","Cidade"}.
@@ -58,26 +58,20 @@
 {"Conference room does not exist","A sala de conferencias non existe"}.
 {"Configuration of room ~s","Configuración para a sala ~s"}.
 {"Configuration","Configuración"}.
-{"Connected Resources:","Recursos conectados:"}.
 {"Country","País"}.
-{"CPU Time:","Tempo da CPU:"}.
 {"Database failure","Erro na base de datos"}.
-{"Database Tables at ~p","Táboas da base de datos en ~p"}.
 {"Database Tables Configuration at ","Configuración de táboas da base de datos en "}.
 {"Database","Base de datos"}.
 {"December","Decembro"}.
 {"Default users as participants","Os usuarios son participantes por defecto"}.
 {"Delete message of the day on all hosts","Borrar a mensaxe do día en todos os dominios"}.
 {"Delete message of the day","Borrar mensaxe do dia"}.
-{"Delete Selected","Eliminar os seleccionados"}.
 {"Delete User","Borrar usuario"}.
-{"Description:","Descrición:"}.
+{"Deliver event notifications","Entregar notificacións de eventos"}.
+{"Deliver payloads with event notifications","Enviar payloads xunto coas notificacións de eventos"}.
 {"Disc only copy","Copia en disco soamente"}.
-{"Displayed Groups:","Mostrar grupos:"}.
-{"Don't tell your password to anybody, not even the administrators of the Jabber server.","Non digas o teu contrasinal a ninguén, nin sequera os administradores do servidor Jabber."}.
 {"Dump Backup to Text File at ","Exporta copia de seguridade a ficheiro de texto en "}.
 {"Dump to Text File","Exportar a ficheiro de texto"}.
-{"Duplicated groups are not allowed by RFC6121","Os grupos duplicados non están permitidos por RFC6121"}.
 {"Edit Properties","Editar Propiedades"}.
 {"Either approve or decline the voice request.","Aproba ou rexeita a petición de voz."}.
 {"ejabberd MUC module","Módulo de MUC para ejabberd"}.
@@ -86,21 +80,18 @@
 {"ejabberd SOCKS5 Bytestreams module","Módulo SOCKS5 Bytestreams para ejabberd"}.
 {"ejabberd vCard module","Módulo vCard para ejabberd"}.
 {"ejabberd Web Admin","ejabberd Administrador Web"}.
-{"Elements","Elementos"}.
 {"Email","Email"}.
-{"Empty password","Contrasinal baleiro"}.
 {"Enable logging","Gardar históricos"}.
+{"Enable message archiving","Activar o almacenamento de mensaxes"}.
 {"Enabling push without 'node' attribute is not supported","Non se admite a activación do empuxe sen o atributo 'nodo'"}.
 {"End User Session","Pechar sesión de usuario"}.
-{"Enter list of {Module, [Options]}","Introduce lista de {Módulo, [Opcións]}"}.
 {"Enter nickname you want to register","Introduce o alcume que queiras rexistrar"}.
 {"Enter path to backup file","Introduce ruta ao ficheiro de copia de seguridade"}.
 {"Enter path to jabberd14 spool dir","Introduce a ruta ao directorio de jabberd14 spools"}.
 {"Enter path to jabberd14 spool file","Introduce ruta ao ficheiro jabberd14 spool"}.
 {"Enter path to text file","Introduce ruta ao ficheiro de texto"}.
 {"Enter the text you see","Introduza o texto que ves"}.
-{"Erlang Jabber Server","Servidor Jabber en Erlang"}.
-{"Error","Erro"}.
+{"Exclude Jabber IDs from CAPTCHA challenge","Excluír Jabber IDs das probas de CAPTCHA"}.
 {"Export all tables as SQL queries to a file:","Exportar todas as táboas a un ficheiro SQL:"}.
 {"Export data of all users in the server to PIEFXIS files (XEP-0227):","Exportar datos de todos os usuarios do servidor a ficheros PIEFXIS (XEP-0227):"}.
 {"Export data of users in a host to PIEFXIS files (XEP-0227):","Exportar datos dos usuarios dun dominio a ficheiros PIEFXIS (XEP-0227):"}.
@@ -114,26 +105,20 @@
 {"Family Name","Apelido"}.
 {"February","Febreiro"}.
 {"File larger than ~w bytes","O ficheiro é maior que ~w bytes"}.
-{"Fill in the form to search for any matching Jabber User (Add * to the end of field to match substring)","Enche o formulario para buscar usuarios Jabber (Engade * ao final dun campo para buscar subcadenas)"}.
 {"Friday","Venres"}.
-{"From ~s","De ~s"}.
-{"From","De"}.
 {"Full Name","Nome completo"}.
 {"Get Number of Online Users","Ver número de usuarios conectados"}.
 {"Get Number of Registered Users","Ver número de usuarios rexistrados"}.
 {"Get User Last Login Time","Ver data da última conexión de usuario"}.
-{"Get User Password","Ver contrasinal de usuario"}.
 {"Get User Statistics","Ver estatísticas de usuario"}.
 {"Given Name","Nome"}.
-{"Group ","Grupo "}.
-{"Groups","Grupos"}.
+{"Grant voice to this person?","¿Conceder voz a esta persoa?"}.
 {"has been banned","foi bloqueado"}.
 {"has been kicked because of a system shutdown","foi expulsado porque o sistema vaise a deter"}.
 {"has been kicked because of an affiliation change","foi expulsado debido a un cambio de afiliación"}.
 {"has been kicked because the room has been changed to members-only","foi expulsado, porque a sala cambiouse a só-membros"}.
 {"has been kicked","foi expulsado"}.
 {"Host unknown","Dominio descoñecido"}.
-{"Host","Host"}.
 {"If you don't see the CAPTCHA image here, visit the web page.","Si non ves a imaxe CAPTCHA aquí, visita a páxina web."}.
 {"Import Directory","Importar directorio"}.
 {"Import File","Importar ficheiro"}.
@@ -145,7 +130,6 @@
 {"Import Users From jabberd14 Spool Files","Importar usuarios de ficheiros spool de jabberd-1.4"}.
 {"Improper domain part of 'from' attribute","Parte de dominio impropio no atributo 'from'"}.
 {"Improper message type","Tipo de mensaxe incorrecta"}.
-{"Incoming s2s Connections:","Conexións S2S saíntes:"}.
 {"Incorrect CAPTCHA submit","O CAPTCHA proporcionado é incorrecto"}.
 {"Incorrect data form","Formulario de datos incorrecto"}.
 {"Incorrect password","Contrasinal incorrecta"}.
@@ -156,13 +140,10 @@
 {"Invalid 'from' attribute in forwarded message","Atributo 'from'' non é válido na mensaxe reenviada"}.
 {"Invitations are not allowed in this conference","As invitacións non están permitidas nesta sala"}.
 {"IP addresses","Direccións IP"}.
-{"IP","IP"}.
 {"is now known as","agora coñécese como"}.
 {"It is not allowed to send error messages to the room. The participant (~s) has sent an error message (~s) and got kicked from the room","Non está permitido enviar mensaxes de erro á sala. Este participante (~s) enviou unha mensaxe de erro (~s) e foi expulsado da sala"}.
 {"It is not allowed to send private messages of type \"groupchat\"","Non está permitido enviar mensaxes privadas do tipo \"groupchat\""}.
 {"It is not allowed to send private messages to the conference","Impedir o envio de mensaxes privadas á sala"}.
-{"It is not allowed to send private messages","Non está permitido enviar mensaxes privadas"}.
-{"Jabber Account Registration","Rexistro de conta Jabber"}.
 {"Jabber ID","Jabber ID"}.
 {"January","Xaneiro"}.
 {"joins the room","entra na sala"}.
@@ -173,11 +154,6 @@
 {"Last month","Último mes"}.
 {"Last year","Último ano"}.
 {"leaves the room","sae da sala"}.
-{"List of modules to start","Lista de módulos a iniciar"}.
-{"List of rooms","Lista de salas"}.
-{"Listened Ports at ","Portos de escoita en "}.
-{"Listened Ports","Portos de escoita"}.
-{"Low level update script","Script de actualización a baixo nivel"}.
 {"Make participants list public","A lista de participantes é pública"}.
 {"Make room CAPTCHA protected","Protexer a sala con CAPTCHA"}.
 {"Make room members-only","Sala só para membros"}.
@@ -187,27 +163,21 @@
 {"Make room public searchable","Sala publicamente visible"}.
 {"Malformed username","Nome de usuario mal formado"}.
 {"March","Marzo"}.
+{"Max payload size in bytes","Máximo tamaño do payload en bytes"}.
 {"Maximum Number of Occupants","Número máximo de ocupantes"}.
 {"May","Maio"}.
 {"Membership is required to enter this room","Necesitas ser membro desta sala para poder entrar"}.
-{"Members:","Membros:"}.
-{"Memorize your password, or write it in a paper placed in a safe place. In Jabber there isn't an automated way to recover your password if you forget it.","Memorice o seu contrasinal ou escribilo nun papel colocado nun lugar seguro. En Jabber non hai unha forma automatizada para recuperar o seu contrasinal si a esquece."}.
-{"Memory","Memoria"}.
 {"Message body","Corpo da mensaxe"}.
 {"Message not found in forwarded payload","Mensaxe non atopada no contido reenviado"}.
 {"Middle Name","Segundo nome"}.
+{"Minimum interval between voice requests (in seconds)","Intervalo mínimo entre peticións de voz (en segundos)"}.
 {"Moderator privileges required","Necesítase privilexios de moderador"}.
-{"Modified modules","Módulos Modificados"}.
+{"Moderator","Moderator"}.
 {"Module failed to handle the query","O módulo non puido xestionar a consulta"}.
-{"Module","Módulo"}.
-{"Modules at ~p","Módulos en ~p"}.
-{"Modules","Módulos"}.
 {"Monday","Luns"}.
 {"Multicast","Multicast"}.
-{"Multiple <item/> elements are not allowed by RFC6121","Múltiples elementos <item/> non están permitidos por RFC6121"}.
 {"Multi-User Chat","Salas de Charla"}.
 {"Name","Nome"}.
-{"Name:","Nome:"}.
 {"Neither 'jid' nor 'nick' attribute found","Non se atopou o atributo 'jid' nin 'nick'"}.
 {"Neither 'role' nor 'affiliation' attribute found","Non se atopou o atributo 'role' nin 'affiliation'"}.
 {"Never","Nunca"}.
@@ -215,8 +185,6 @@
 {"Nickname Registration at ","Rexistro do alcume en "}.
 {"Nickname ~s does not exist in the room","O alcume ~s non existe na sala"}.
 {"Nickname","Alcume"}.
-{"No 'access' found in data form","Non se atopou 'access' no formulario de datos"}.
-{"No 'acls' found in data form","Non se atopou 'acls' no formulario de datos"}.
 {"No 'affiliation' attribute found","Non se atopou o atributo de 'affiliation'"}.
 {"No available resource found","Non se atopou ningún recurso"}.
 {"No body provided for announce message","Non se proporcionou corpo de mensaxe para o anuncio"}.
@@ -227,8 +195,8 @@
 {"No info about last activity found","Non se atopou información sobre a última actividade"}.
 {"No 'item' element found","Non se atopou o elemento 'item'"}.
 {"No items found in this query","Non se atoparon elementos nesta consulta"}.
+{"No limit","Sen límite"}.
 {"No module is handling this query","Ningún módulo manexa esta consulta"}.
-{"No 'modules' found in data form","Non se atopan 'modules' no formulario de datos"}.
 {"No node specified","Non se especificou nodo"}.
 {"No 'password' found in data form","Non se atopou 'password' no formulario de datos"}.
 {"No 'password' found in this query","Non se atopou 'password' nesta solicitude"}.
@@ -241,6 +209,7 @@
 {"No statistics found for this item","Non se atopou ningunha estatística para este elemento"}.
 {"No 'to' attribute found in the invitation","O atributo 'to' non se atopou na invitación"}.
 {"Node already exists","O nodo xa existe"}.
+{"Node ID","Nodo ID"}.
 {"Node index not found","Non se atopou índice de nodo"}.
 {"Node not found","Nodo non atopado"}.
 {"Node ~p","Nodo ~p"}.
@@ -249,17 +218,19 @@
 {"None","Ningún"}.
 {"Not Found","Non atopado"}.
 {"Not subscribed","Non subscrito"}.
+{"Notify subscribers when items are removed from the node","Notificar subscriptores cando os elementos bórranse do nodo"}.
+{"Notify subscribers when the node configuration changes","Notificar subscriptores cando cambia a configuración do nodo"}.
+{"Notify subscribers when the node is deleted","Notificar subscriptores cando o nodo bórrase"}.
 {"November","Novembro"}.
+{"Number of occupants","Número de ocupantes"}.
 {"Number of online users","Número de usuarios conectados"}.
 {"Number of registered users","Número de usuarios rexistrados"}.
 {"October","Outubro"}.
-{"Offline Messages","Mensaxes diferidas"}.
-{"Offline Messages:","Mensaxes sen conexión:"}.
 {"OK","Aceptar"}.
 {"Old Password:","Contrasinal anterior:"}.
 {"Online Users","Usuarios conectados"}.
-{"Online Users:","Usuarios conectados:"}.
 {"Online","Conectado"}.
+{"Only deliver notifications to available users","Só enviar notificacións aos usuarios dispoñibles"}.
 {"Only <enable/> or <disable/> tags are allowed","Só se permiten etiquetas <enable/> ou <disable/>"}.
 {"Only <list/> element is allowed in this query","Só se admite o elemento <list/> nesta consulta"}.
 {"Only members may query archives of this room","Só membros poden consultar o arquivo de mensaxes da sala"}.
@@ -269,74 +240,56 @@
 {"Only occupants are allowed to send messages to the conference","Só os ocupantes poden enviar mensaxes á sala"}.
 {"Only occupants are allowed to send queries to the conference","Só os ocupantes poden enviar solicitudes á sala"}.
 {"Only service administrators are allowed to send service messages","Só os administradores do servizo teñen permiso para enviar mensaxes de servizo"}.
-{"Options","Opcións"}.
 {"Organization Name","Nome da organización"}.
 {"Organization Unit","Unidade da organización"}.
 {"Outgoing s2s Connections","Conexións S2S saíntes"}.
-{"Outgoing s2s Connections:","Conexións S2S saíntes:"}.
 {"Owner privileges required","Requírense privilexios de propietario da sala"}.
-{"Packet","Paquete"}.
-{"Parse failed","Fallou o procesamento"}.
+{"Participant","Participante"}.
 {"Password Verification","Verificación da contrasinal"}.
 {"Password Verification:","Verificación da Contrasinal:"}.
 {"Password","Contrasinal"}.
 {"Password:","Contrasinal:"}.
 {"Path to Dir","Ruta ao directorio"}.
 {"Path to File","Ruta ao ficheiro"}.
-{"Pending","Pendente"}.
 {"Period: ","Periodo: "}.
+{"Persist items to storage","Persistir elementos ao almacenar"}.
 {"Ping query is incorrect","A solicitude de Ping é incorrecta"}.
 {"Ping","Ping"}.
 {"Please note that these options will only backup the builtin Mnesia database. If you are using the ODBC module, you also need to backup your SQL database separately.","Ten en conta que estas opcións só farán copia de seguridade da base de datos Mnesia. Se está a utilizar o módulo de ODBC, tamén necesita unha copia de seguridade da súa base de datos SQL por separado."}.
 {"Please, wait for a while before sending new voice request","Por favor, espera un pouco antes de enviar outra petición de voz"}.
 {"Pong","Pong"}.
-{"Port","Porto"}.
-{"Possessing 'ask' attribute is not allowed by RFC6121","Posuír o atributo 'ask' non está permitido por RFC6121"}.
+{"Present real Jabber IDs to","Os Jabber ID reais poden velos"}.
 {"private, ","privado, "}.
-{"Protocol","Protocolo"}.
-{"Publishing items to collection node is not allowed","Non se permite a publicación de elementos no nodo de colección"}.
 {"Publish-Subscribe","Publicar-Subscribir"}.
 {"PubSub subscriber request","Petición de subscriptor de PubSub"}.
+{"Purge all items when the relevant publisher goes offline","Purgar todos os elementos cando o editor correspondente desconéctase"}.
 {"Queries to the conference members are not allowed in this room","Nesta sala non se permiten solicitudes aos membros da sala"}.
 {"Query to another users is forbidden","É prohibido enviar solicitudes a outros usuarios"}.
 {"RAM and disc copy","Copia en RAM e disco"}.
 {"RAM copy","Copia en RAM"}.
-{"Raw","Cru"}.
 {"Really delete message of the day?","¿Está seguro que quere borrar a mensaxe do dia?"}.
 {"Recipient is not in the conference room","O receptor non está na sala de conferencia"}.
-{"Register a Jabber account","Rexistrar unha conta Jabber"}.
-{"Registered Users","Usuarios rexistrados"}.
-{"Registered Users:","Usuarios rexistrados:"}.
 {"Register","Rexistrar"}.
 {"Remote copy","Copia remota"}.
-{"Remove All Offline Messages","Borrar Todas as Mensaxes Sen conexión"}.
 {"Remove User","Eliminar usuario"}.
-{"Remove","Borrar"}.
 {"Replaced by new connection","Substituído por unha nova conexión"}.
 {"Resources","Recursos"}.
 {"Restart Service","Reiniciar o servizo"}.
-{"Restart","Reiniciar"}.
 {"Restore Backup from File at ","Restaura copia de seguridade desde o ficheiro en "}.
 {"Restore binary backup after next ejabberd restart (requires less memory):","Restaurar copia de seguridade binaria no seguinte reinicio de ejabberd (require menos memoria):"}.
 {"Restore binary backup immediately:","Restaurar inmediatamente copia de seguridade binaria:"}.
 {"Restore plain text backup immediately:","Restaurar copias de seguridade de texto plano inmediatamente:"}.
 {"Restore","Restaurar"}.
+{"Roles for which Presence is Broadcasted","Roles para os que si se difunde a súa Presenza"}.
 {"Room Configuration","Configuración da Sala"}.
 {"Room creation is denied by service policy","Denegar crear a sala por política do servizo"}.
 {"Room description","Descrición da sala"}.
 {"Room Occupants","Ocupantes da sala"}.
 {"Room title","Título da sala"}.
-{"Roster module has failed","O módulo de Roster fallou"}.
-{"Roster of ","Lista de contactos de "}.
+{"Roster groups allowed to subscribe","Lista de grupos autorizados a subscribir"}.
 {"Roster size","Tamaño da lista de contactos"}.
-{"Roster","Lista de contactos"}.
-{"RPC Call Error","Erro na chamada RPC"}.
 {"Running Nodes","Nodos funcionando"}.
-{"~s access rule configuration","Configuración das regra de acceso ~s"}.
-{"~s invites you to the room ~s","~s invítache á sala ~s"}.
 {"Saturday","Sábado"}.
-{"Scan failed","O escaneo Fallou"}.
-{"Script check","Comprobación de script"}.
 {"Search Results for ","Buscar resultados por "}.
 {"Search users in ","Buscar usuarios en "}.
 {"Send announcement to all online users on all hosts","Enviar anuncio a todos os usuarios conectados en todos os dominios"}.
@@ -344,7 +297,6 @@
 {"Send announcement to all users on all hosts","Enviar anuncio a todos os usuarios en todos os dominios"}.
 {"Send announcement to all users","Enviar anuncio a todos os usuarios"}.
 {"September","Setembro"}.
-{"Server connections to local subdomains are forbidden","Non se permiten conexións de servidor a subdominios locais"}.
 {"Server:","Servidor:"}.
 {"Set message of the day and send to online users","Pór mensaxe do dia e enviar a todos os usuarios conectados"}.
 {"Set message of the day on all hosts and send to online users","Pór mensaxe do día en todos os dominios e enviar aos usuarios conectados"}.
@@ -352,92 +304,65 @@
 {"Show Integral Table","Mostrar Táboa Integral"}.
 {"Show Ordinary Table","Mostrar Táboa Ordinaria"}.
 {"Shut Down Service","Deter o servizo"}.
-{"Some Jabber clients can store your password in the computer, but you should do this only in your personal computer for safety reasons.","Algúns clientes Jabber pode almacenar o contrasinal no computador, pero debe facer isto só no seu computador persoal por razóns de seguridade."}.
-{"~s's Offline Messages Queue","Cola de mensaxes diferidas de ~s"}.
-{"Start Modules at ","Iniciar módulos en "}.
-{"Start Modules","Iniciar módulos"}.
-{"Start","Iniciar"}.
-{"Statistics of ~p","Estatísticas de ~p"}.
-{"Statistics","Estatísticas"}.
-{"Stop Modules at ","Deter módulos en "}.
-{"Stop Modules","Deter módulos"}.
-{"Stop","Deter"}.
+{"Specify the access model","Especifica o modelo de acceso"}.
+{"Specify the event message type","Especifica o tipo da mensaxe de evento"}.
+{"Specify the publisher model","Especificar o modelo do publicante"}.
 {"Stopped Nodes","Nodos detidos"}.
-{"Storage Type","Tipo de almacenamento"}.
 {"Store binary backup:","Gardar copia de seguridade binaria:"}.
 {"Store plain text backup:","Gardar copia de seguridade en texto plano:"}.
 {"Subject","Asunto"}.
 {"Submit","Enviar"}.
 {"Submitted","Enviado"}.
+{"Subscriber Address","Dirección do subscriptor"}.
 {"Subscriptions are not allowed","Non se permiten subscricións"}.
-{"Subscription","Subscripción"}.
 {"Sunday","Domingo"}.
 {"That nickname is already in use by another occupant","Ese alcume xa está a ser usado por outro ocupante"}.
 {"That nickname is registered by another person","O alcume xa está rexistrado por outra persoa"}.
 {"The CAPTCHA is valid.","O CAPTCHA é válido."}.
 {"The CAPTCHA verification has failed","A verificación de CAPTCHA fallou"}.
+{"The collections with which a node is affiliated","As coleccións coas que un nodo está afiliado"}.
 {"The feature requested is not supported by the conference","A sala de conferencias non admite a función solicitada"}.
 {"The password contains unacceptable characters","O contrasinal contén caracteres inaceptables"}.
 {"The password is too weak","O contrasinal é demasiado débil"}.
 {"the password is","a contrasinal é"}.
-{"The password of your Jabber account was successfully changed.","O contrasinal da súa conta Jabber cambiouse correctamente."}.
 {"The query is only allowed from local users","A solicitude só se permite para usuarios locais"}.
 {"The query must not contain <item/> elements","A solicitude non debe conter elementos <item/>"}.
 {"The stanza MUST contain only one <active/> element, one <default/> element, or one <list/> element","A estroa DEBEN conter un elemento <active/>, un elemento <default/> ou un elemento <list/>"}.
-{"There was an error changing the password: ","Produciuse un erro ao cambiar o contrasinal: "}.
 {"There was an error creating the account: ","Produciuse un erro ao crear a conta: "}.
 {"There was an error deleting the account: ","Produciuse un erro ao eliminar a conta: "}.
-{"This is case insensitive: macbeth is the same that MacBeth and Macbeth.","Esta é insensible: Macbeth é o mesmo que MacBeth e Macbeth."}.
-{"This page allows to create a Jabber account in this Jabber server. Your JID (Jabber IDentifier) will be of the form: username@server. Please read carefully the instructions to fill correctly the fields.","Esta páxina permite crear unha conta Jabber neste servidor Jabber. o seu JID (Jabber IDentificador) será da forma: nomeusuario@servidor. Por favor le coidadosamente as instrucións para encher correctamente os campos."}.
-{"This page allows to unregister a Jabber account in this Jabber server.","Esta páxina permite anular o rexistro dunha conta Jabber neste servidor Jabber."}.
 {"This room is not anonymous","Sala non anónima"}.
 {"Thursday","Xoves"}.
 {"Time delay","Atraso temporal"}.
-{"Time","Data"}.
 {"To register, visit ~s","Para rexistrarse, visita ~s"}.
-{"To ~s","A ~s"}.
 {"Token TTL","Token TTL"}.
 {"Too many active bytestreams","Demasiados bytestreams activos"}.
 {"Too many CAPTCHA requests","Demasiadas solicitudes CAPTCHA"}.
 {"Too many <item/> elements","Demasiados elementos <item/>"}.
 {"Too many <list/> elements","Demasiados elementos <list/>"}.
+{"Too many (~p) failed authentications from this IP address (~s). The address will be unblocked at ~s UTC","Demasiados (~p) fallou autenticaciones desde esta dirección IP (~s). A dirección será desbloqueada as ~s UTC"}.
 {"Too many unacked stanzas","Demasiadas mensaxes sen recoñecer recibilos"}.
 {"Too many users in this conference","Demasiados usuarios nesta sala"}.
-{"To","Para"}.
-{"Total rooms","Salas totais"}.
 {"Traffic rate limit is exceeded","Hase exedido o límite de tráfico"}.
-{"Transactions Aborted:","Transaccións abortadas:"}.
-{"Transactions Committed:","Transaccións finalizadas:"}.
-{"Transactions Logged:","Transaccións rexistradas:"}.
-{"Transactions Restarted:","Transaccións reiniciadas:"}.
 {"Tuesday","Martes"}.
 {"Unable to generate a CAPTCHA","No se pudo generar un CAPTCHA"}.
 {"Unable to register route on existing local domain","Non se pode rexistrar a ruta no dominio local existente"}.
 {"Unauthorized","Non autorizado"}.
 {"Unexpected action","Acción inesperada"}.
-{"Unregister a Jabber account","Eliminar o rexistro dunha conta Jabber"}.
 {"Unregister","Eliminar rexistro"}.
 {"Unsupported <index/> element","Elemento <index/> non soportado"}.
 {"Update message of the day (don't send)","Actualizar mensaxe do dia, pero non envialo"}.
 {"Update message of the day on all hosts (don't send)","Actualizar a mensaxe do día en todos os dominos (pero non envialo)"}.
-{"Update ~p","Actualizar ~p"}.
-{"Update plan","Plan de actualización"}.
-{"Update script","Script de actualización"}.
-{"Update","Actualizar"}.
-{"Uptime:","Tempo desde o inicio:"}.
 {"User already exists","O usuario xa existe"}.
+{"User JID","Jabber ID do usuario"}.
 {"User (jid)","Usuario (jid)"}.
 {"User Management","Administración de usuarios"}.
-{"User part of JID in 'from' is empty","A parte do usuario do JID en 'from' está baleira"}.
 {"User session not found","Sesión de usuario non atopada"}.
 {"User session terminated","Sesión de usuario completada"}.
-{"User ~s","Usuario ~s"}.
 {"Username:","Nome de usuario:"}.
 {"Users are not allowed to register accounts so quickly","Os usuarios non están autorizados a rexistrar contas con tanta rapidez"}.
 {"Users Last Activity","Última actividade dos usuarios"}.
 {"Users","Usuarios"}.
 {"User","Usuario"}.
-{"Validate","Validar"}.
 {"Value 'get' of 'type' attribute is not allowed","O valor \"get\" do atributo 'type' non está permitido"}.
 {"Value of '~s' should be boolean","O valor de '~s' debería ser booleano"}.
 {"Value of '~s' should be datetime string","O valor de '~s' debería ser unha data"}.
@@ -447,10 +372,12 @@
 {"Virtual Hosts","Hosts Virtuais"}.
 {"Visitors are not allowed to change their nicknames in this room","Os visitantes non teñen permitido cambiar os seus alcumes nesta sala"}.
 {"Visitors are not allowed to send messages to all occupants","Os visitantes non poden enviar mensaxes a todos os ocupantes"}.
+{"Visitor","Visitante"}.
 {"Voice request","Petición de voz"}.
 {"Voice requests are disabled in this conference","As peticións de voz están desactivadas nesta sala"}.
 {"Wednesday","Mércores"}.
-{"You can later change your password using a Jabber client.","Máis tarde, pode cambiar o seu contrasinal utilizando un cliente Jabber."}.
+{"When to send the last published item","Cando enviar o último elemento publicado"}.
+{"Whether to allow subscriptions","Permitir subscripciones"}.
 {"You have been banned from this room","Fuches bloqueado nesta sala"}.
 {"You have joined too many conferences","Entrou en demasiadas salas de conferencia"}.
 {"You must fill in field \"Nickname\" in the form","Debes encher o campo \"Alcumo\" no formulario"}.
@@ -459,7 +386,5 @@
 {"You need an x:data capable client to search","Necesitas un cliente con soporte de x:data para poder buscar"}.
 {"Your active privacy list has denied the routing of this stanza.","A súa lista de privacidade activa negou o encaminamiento desta estrofa."}.
 {"Your contact offline message queue is full. The message has been discarded.","A túa cola de mensaxes diferidas de contactos está chea. A mensaxe descartouse."}.
-{"Your Jabber account was successfully created.","A súa conta Jabber creouse correctamente."}.
-{"Your Jabber account was successfully deleted.","A súa conta Jabber eliminouse correctamente."}.
-{"Your messages to ~s are being blocked. To unblock them, visit ~s","As súas mensaxes a ~s encóntranse bloqueadas. Para desbloquear, visite ~s"}.
+{"Your subscription request and/or messages to ~s have been blocked. To unblock your subscription request, visit ~s","As súas mensaxes a ~s encóntranse bloqueadas. Para desbloquear, visite ~s"}.
 {"You're not allowed to create nodes","Non tes permiso para crear nodos"}.

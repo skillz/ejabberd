@@ -2,7 +2,7 @@
 %%% Created :  1 Dec 2018 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2018   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -21,7 +21,6 @@
 %%%----------------------------------------------------------------------
 -module(mod_mix_mnesia).
 -behaviour(mod_mix).
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 %% API
 -export([init/2]).
@@ -87,7 +86,7 @@ set_channel(_LServer, Channel, Service, CreatorJID, Hidden, Key) ->
 		   creator = jid:remove_resource(CreatorJID),
 		   hidden = Hidden,
 		   hmac_key = Key,
-		   created_at = p1_time_compat:timestamp()}).
+		   created_at = erlang:timestamp()}).
 
 get_channels(_LServer, Service) ->
     Ret = mnesia:dirty_index_read(mix_channel, Service, #mix_channel.service),
@@ -127,8 +126,9 @@ set_participant(_LServer, Channel, Service, JID, ID, Nick) ->
 	 jid = jid:remove_resource(JID),
 	 id = ID,
 	 nick = Nick,
-	 created_at = p1_time_compat:timestamp()}).
+	 created_at = erlang:timestamp()}).
 
+-spec get_participant(binary(), binary(), binary(), jid:jid()) -> {ok, {binary(), binary()}} | {error, notfound}.
 get_participant(_LServer, Channel, Service, JID) ->
     {User, Domain, _} = jid:tolower(JID),
     case mnesia:dirty_read(mix_participant, {User, Domain, Channel, Service}) of

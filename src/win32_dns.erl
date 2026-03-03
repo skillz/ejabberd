@@ -5,7 +5,7 @@
 %%% Created : 5 Mar 2009 by Geoff Cant
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -38,10 +38,9 @@ get_nameservers() ->
 
 is_good_ns(Addr) ->
     element(1,
-	    inet_res:nnslookup("a.root-servers.net", in, any, [{Addr,53}],
-			       timer:seconds(5)
-			      )
-	   ) =:= ok.
+	    inet_res:nnslookup("a.root-servers.net", in, a, [{Addr,53}],
+			       timer:seconds(5)))
+	   =:= ok.
 
 reg() ->
     {ok, R} = win32reg:open([read]),

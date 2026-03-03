@@ -5,7 +5,7 @@
 %%% Created : 16 Oct 2014 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -25,11 +25,9 @@
 
 -module(rest).
 
--behaviour(ejabberd_config).
-
 -export([start/1, stop/1, get/2, get/3, post/4, delete/2,
          put/4, patch/4, request/6, with_retry/4,
-         encode_json/1, opt_type/1]).
+         encode_json/1]).
 
 -include("logger.hrl").
 
@@ -39,8 +37,17 @@
 
 start(Host) ->
     application:start(inets),
-    Size = ejabberd_config:get_option({ext_api_http_pool_size, Host}, 100),
-    httpc:set_options([{max_sessions, Size}]).
+    Profile = profile(Host),
+    inets:start(httpc, [{profile, Profile}]),
+    Size = ejabberd_option:ext_api_http_pool_size(Host),
+    Proxy = case {ejabberd_option:rest_proxy(Host),
+                  ejabberd_option:rest_proxy_port(Host)} of
+                {<<>>, _} ->
+                    [];
+                {Host, Port} ->
+                    [{proxy, {{binary_to_list(Host), Port}, []}}]
+            end,
+    httpc:set_options([{max_sessions, Size}] ++ Proxy, Profile).
 
 stop(_Host) ->
     ok.
@@ -79,10 +86,25 @@ patch(Server, Path, Params, Content) ->
     Data = encode_json(Content),
     request(Server, patch, Path, Params, ?CONTENT_TYPE, Data).
 
+request(Server, Method, Path, _Params, _Mime, {error, Error}) ->
+    ejabberd_hooks:run(backend_api_error, Server,
+                       [Server, Method, Path, Error]),
+    {error, Error};
 request(Server, Method, Path, Params, Mime, Data) ->
-    URI = to_list(url(Server, Path, Params)),
-    Opts = [{connect_timeout, ?CONNECT_TIMEOUT},
-            {timeout, ?HTTP_TIMEOUT}],
+    {Query, Opts} = case Params of
+			{_, _} -> Params;
+			_ -> {Params, []}
+		   end,
+    URI = to_list(url(Server, Path, Query)),
+    HttpOpts = case {ejabberd_option:rest_proxy_username(Server),
+                     ejabberd_option:rest_proxy_password(Server)} of
+                   {"", _} -> [{connect_timeout, ?CONNECT_TIMEOUT},
+                               {timeout, ?HTTP_TIMEOUT}];
+                   {User, Pass} ->
+                       [{connect_timeout, ?CONNECT_TIMEOUT},
+                        {timeout, ?HTTP_TIMEOUT},
+                        {proxy_auth, {User, Pass}}]
+               end,
     Hdrs = [{"connection", "keep-alive"},
             {"Accept", "application/json"},
 	    {"User-Agent", "ejabberd"}]
@@ -94,56 +116,40 @@ request(Server, Method, Path, Params, Mime, Data) ->
                   {URI, Hdrs}
           end,
     Begin = os:timestamp(),
-    Result = try httpc:request(Method, Req, Opts, [{body_format, binary}]) of
-        {ok, {{_, Code, _}, _, <<>>}} ->
-            {ok, Code, []};
-        {ok, {{_, Code, _}, _, <<" ">>}} ->
-            {ok, Code, []};
-        {ok, {{_, Code, _}, _, <<"\r\n">>}} ->
-            {ok, Code, []};
-        {ok, {{_, Code, _}, _, Body}} ->
-            try jiffy:decode(Body) of
+    ejabberd_hooks:run(backend_api_call, Server, [Server, Method, Path]),
+    Result = try httpc:request(Method, Req, HttpOpts, [{body_format, binary}], profile(Server)) of
+        {ok, {{_, Code, _}, RetHdrs, Body}} ->
+            try decode_json(Body) of
                 JSon ->
-                    {ok, Code, JSon}
+		    case proplists:get_bool(return_headers, Opts) of
+			true -> {ok, Code, RetHdrs, JSon};
+			false -> {ok, Code, JSon}
+		    end
             catch
-                _:Error ->
-                    ?ERROR_MSG("HTTP response decode failed:~n"
-                               "** URI = ~s~n"
-                               "** Body = ~p~n"
-                               "** Err = ~p",
-                               [URI, Body, Error]),
-                    {error, {invalid_json, Body}}
+                _:Reason ->
+                    {error, {invalid_json, Body, Reason}}
             end;
         {error, Reason} ->
-            ?ERROR_MSG("HTTP request failed:~n"
-                       "** URI = ~s~n"
-                       "** Err = ~p",
-                       [URI, Reason]),
             {error, {http_error, {error, Reason}}}
         catch
         exit:Reason ->
-            ?ERROR_MSG("HTTP request failed:~n"
-                       "** URI = ~s~n"
-                       "** Err = ~p",
-                       [URI, Reason]),
             {error, {http_error, {error, Reason}}}
     end,
-    ejabberd_hooks:run(backend_api_call, Server, [Server, Method, Path]),
     case Result of
-        {ok, _, _} ->
+        {error, {http_error, {error, timeout}}} ->
+            ejabberd_hooks:run(backend_api_timeout, Server,
+                               [Server, Method, Path]);
+        {error, {http_error, {error, connect_timeout}}} ->
+            ejabberd_hooks:run(backend_api_timeout, Server,
+                               [Server, Method, Path]);
+        {error, Error} ->
+            ejabberd_hooks:run(backend_api_error, Server,
+                               [Server, Method, Path, Error]);
+        _ ->
             End = os:timestamp(),
             Elapsed = timer:now_diff(End, Begin) div 1000, %% time in ms
             ejabberd_hooks:run(backend_api_response_time, Server,
-                               [Server, Method, Path, Elapsed]);
-        {error, {http_error,{error,timeout}}} ->
-            ejabberd_hooks:run(backend_api_timeout, Server,
-                               [Server, Method, Path]);
-        {error, {http_error,{error,connect_timeout}}} ->
-            ejabberd_hooks:run(backend_api_timeout, Server,
-                               [Server, Method, Path]);
-        {error, _} ->
-            ejabberd_hooks:run(backend_api_error, Server,
-                               [Server, Method, Path])
+                               [Server, Method, Path, Elapsed])
     end,
     Result.
 
@@ -151,26 +157,29 @@ request(Server, Method, Path, Params, Mime, Data) ->
 %%% HTTP helpers
 %%%----------------------------------------------------------------------
 
+profile(Host) ->
+binary_to_atom(<<"rest_", Host/binary>>, latin1).
+
 to_list(V) when is_binary(V) ->
     binary_to_list(V);
 to_list(V) when is_list(V) ->
     V.
 
 encode_json(Content) ->
-    case catch jiffy:encode(Content) of
+    case catch misc:json_encode(Content) of
         {'EXIT', Reason} ->
-            ?ERROR_MSG("HTTP content encodage failed:~n"
-                       "** Content = ~p~n"
-                       "** Err = ~p",
-                       [Content, Reason]),
-            <<>>;
+            {error, {invalid_payload, Content, Reason}};
         Encoded ->
             Encoded
     end.
 
+decode_json(<<>>) -> [];
+decode_json(<<" ">>) -> [];
+decode_json(<<"\r\n">>) -> [];
+decode_json(Data) -> misc:json_decode(Data).
+
 custom_headers(Server) ->
-  case ejabberd_config:get_option({ext_api_headers, Server},
-                                  <<>>) of
+  case ejabberd_option:ext_api_headers(Server) of
         <<>> ->
             [];
         Hdrs ->
@@ -190,8 +199,7 @@ base_url(Server, Path) ->
     Url = case BPath of
         <<"http", _/binary>> -> BPath;
         _ ->
-            Base = ejabberd_config:get_option({ext_api_url, Server},
-                                              <<"http://localhost/api">>),
+            Base = ejabberd_option:ext_api_url(Server),
             case binary:last(Base) of
                 $/ -> <<Base/binary, BPath/binary>>;
                 _ -> <<Base/binary, "/", BPath/binary>>
@@ -219,12 +227,3 @@ url(Server, Path, Params) ->
                       || P <- binary:split(Extra, <<"&">>, [global])],
             url(Url, Custom++Params)
     end.
-
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
-opt_type(ext_api_http_pool_size) ->
-    fun (X) when is_integer(X), X > 0 -> X end;
-opt_type(ext_api_url) ->
-    fun (X) -> iolist_to_binary(X) end;
-opt_type(ext_api_headers) ->
-    fun (X) -> iolist_to_binary(X) end;
-opt_type(_) -> [ext_api_http_pool_size, ext_api_url, ext_api_headers].

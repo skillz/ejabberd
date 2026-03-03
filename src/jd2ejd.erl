@@ -5,7 +5,7 @@
 %%% Created :  2 Feb 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,7 @@
 -export([import_file/1, import_dir/1]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 %%%----------------------------------------------------------------------
 %%% API
@@ -50,24 +50,24 @@ import_file(File) ->
 		  El when is_record(El, xmlel) ->
 		      case catch process_xdb(User, Server, El) of
 			{'EXIT', Reason} ->
-			    ?ERROR_MSG("Error while processing file \"~s\": "
+			    ?ERROR_MSG("Error while processing file \"~ts\": "
 				       "~p~n",
 				       [File, Reason]),
 			    {error, Reason};
 			_ -> ok
 		      end;
 		  {error, Reason} ->
-		      ?ERROR_MSG("Can't parse file \"~s\": ~p~n",
+		      ?ERROR_MSG("Can't parse file \"~ts\": ~p~n",
 				 [File, Reason]),
 		      {error, Reason}
 		end;
 	    {error, Reason} ->
-		?ERROR_MSG("Can't read file \"~s\": ~p~n",
+		?ERROR_MSG("Can't read file \"~ts\": ~p~n",
 			   [File, Reason]),
 		{error, Reason}
 	  end;
       false ->
-	  ?ERROR_MSG("Illegal user/server name in file \"~s\"~n",
+	  ?ERROR_MSG("Illegal user/server name in file \"~ts\"~n",
 		     [File]),
 	  {error, <<"illegal user/server">>}
     end.
@@ -144,7 +144,7 @@ xdb_data(User, Server, #xmlel{attrs = Attrs} = El) ->
 			From,
 			[{XMLNS, El#xmlel{attrs = NewAttrs}}]);
 	    _ ->
-		?DEBUG("jd2ejd: Unknown namespace \"~s\"~n", [XMLNS])
+		?DEBUG("Unknown namespace \"~ts\"~n", [XMLNS])
 	  end,
 	  ok
     end.
@@ -166,7 +166,7 @@ process_offline(Server, To, #xmlel{children = Els}) ->
 		      ok
 	      catch _:{xmpp_codec, Why} ->
 		      Txt = xmpp:format_error(Why),
-		      ?ERROR_MSG("failed to decode XML '~s': ~s",
+		      ?ERROR_MSG("Failed to decode XML '~ts': ~ts",
 				 [fxml:element_to_binary(El), Txt])
 	      end
       end, Els).

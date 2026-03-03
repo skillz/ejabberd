@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,7 +30,7 @@
 -type info() :: [{conn, atom()} | {ip, ip()} | {node, atom()}
                  | {oor, boolean()} | {auth_module, atom()}
                  | {num_stanzas_in, non_neg_integer()}
-		 | offline].
+		 | {atom(), term()}].
 -type prio() :: undefined | integer().
 
 -endif.

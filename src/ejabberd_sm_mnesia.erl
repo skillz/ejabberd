@@ -4,7 +4,7 @@
 %%% Created :  9 Mar 2015 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -41,6 +41,7 @@
 	 terminate/2, code_change/3, start_link/0]).
 
 -include("ejabberd_sm.hrl").
+-include("logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
 -record(state, {}).
@@ -102,14 +103,16 @@ init([]) ->
     mnesia:subscribe(system),
     {ok, #state{}}.
 
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
+    ?INFO_MSG("Node ~p has left our Mnesia SM tables", [Node]),
     Sessions =
         ets:select(
           session,
@@ -123,7 +126,11 @@ handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
               mnesia:dirty_delete_object(S)
       end, Sessions),
     {noreply, State};
-handle_info(_Info, State) ->
+handle_info({mnesia_system_event, {mnesia_up, Node}}, State) ->
+    ?INFO_MSG("Node ~p joined our Mnesia SM tables", [Node]),
+    {noreply, State};
+handle_info(Info, State) ->
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->

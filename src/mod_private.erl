@@ -5,7 +5,7 @@
 %%% Created : 16 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,22 +27,33 @@
 
 -author('alexey@process-one.net').
 
--protocol({xep, 49, '1.2'}).
--protocol({xep, 411, '0.2.0'}).
+-protocol({xep, 49, '1.2', '0.1.0', "complete", ""}).
+-protocol({xep, 402, '1.2.0', '23.10', "complete", ""}).
+-protocol({xep, 411, '1.1.0', '18.12', "complete", ""}).
 
 -behaviour(gen_mod).
 
 -export([start/2, stop/1, reload/3, process_sm_iq/1, import_info/0,
-	 remove_user/2, get_data/2, get_data/3, export/1,
+	 remove_user/2, get_data/2, get_data/3, export/1, mod_doc/0,
 	 import/5, import_start/2, mod_opt_type/1, set_data/2,
-	 mod_options/1, depends/2, get_sm_features/5, pubsub_publish_item/6]).
+	 mod_options/1, depends/2, get_sm_features/5, pubsub_publish_item/6,
+	 pubsub_delete_item/5, pubsub_tree_call/4,
+	 del_data/3, get_users_with_data/2, count_users_with_data/2]).
 
 -export([get_commands_spec/0, bookmarks_to_pep/2]).
 
+-export([webadmin_menu_hostuser/4, webadmin_page_hostuser/4]).
+
+-import(ejabberd_web_admin, [make_command/4, make_command/2]).
+
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_private.hrl").
 -include("ejabberd_commands.hrl").
+-include("ejabberd_http.hrl").
+-include("ejabberd_web_admin.hrl").
+-include("translate.hrl").
+-include("pubsub.hrl").
 
 -define(PRIVATE_CACHE, private_cache).
 
@@ -54,34 +65,32 @@
 -callback del_data(binary(), binary()) -> ok | {error, any()}.
 -callback use_cache(binary()) -> boolean().
 -callback cache_nodes(binary()) -> [node()].
+-callback del_data(binary(), binary(), binary()) -> ok | {error, any()}.
+-callback get_users_with_data(binary(), binary()) -> {ok, [binary()]} | {error, any()}.
+-callback count_users_with_data(binary(), binary()) -> {ok, integer()} | {error, any()}.
 
 -optional_callbacks([use_cache/1, cache_nodes/1]).
 
 start(Host, Opts) ->
-    Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
+    Mod = gen_mod:db_mod(Opts, ?MODULE),
     Mod:init(Host, Opts),
     init_cache(Mod, Host, Opts),
-    ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
-    ejabberd_hooks:add(disco_sm_features, Host, ?MODULE, get_sm_features, 50),
-    ejabberd_hooks:add(pubsub_publish_item, Host, ?MODULE, pubsub_publish_item, 50),
-    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PRIVATE, ?MODULE, process_sm_iq),
-    ejabberd_commands:register_commands(get_commands_spec()).
+    {ok, [{commands, get_commands_spec()},
+          {hook, remove_user, remove_user, 50},
+          {hook, disco_sm_features, get_sm_features, 50},
+          {hook, pubsub_publish_item, pubsub_publish_item, 50},
+          {hook, pubsub_delete_item, pubsub_delete_item, 50},
+	  {hook, pubsub_tree_call, pubsub_tree_call, 50},
+          {hook, webadmin_menu_hostuser, webadmin_menu_hostuser, 50},
+          {hook, webadmin_page_hostuser, webadmin_page_hostuser, 50},
+          {iq_handler, ejabberd_sm, ?NS_PRIVATE, process_sm_iq}]}.
 
-stop(Host) ->
-    ejabberd_hooks:delete(remove_user, Host, ?MODULE, remove_user, 50),
-    ejabberd_hooks:delete(disco_sm_features, Host, ?MODULE, get_sm_features, 50),
-    ejabberd_hooks:delete(pubsub_publish_item, Host, ?MODULE, pubsub_publish_item, 50),
-    gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_PRIVATE),
-    case gen_mod:is_loaded_elsewhere(Host, ?MODULE) of
-	false ->
-	    ejabberd_commands:unregister_commands(get_commands_spec());
-	true ->
-	    ok
-    end.
+stop(_Host) ->
+    ok.
 
 reload(Host, NewOpts, OldOpts) ->
-    NewMod = gen_mod:db_mod(Host, NewOpts, ?MODULE),
-    OldMod = gen_mod:db_mod(Host, OldOpts, ?MODULE),
+    NewMod = gen_mod:db_mod(NewOpts, ?MODULE),
+    OldMod = gen_mod:db_mod(OldOpts, ?MODULE),
     if NewMod /= OldMod ->
 	    NewMod:init(Host, NewOpts);
        true ->
@@ -92,20 +101,61 @@ reload(Host, NewOpts, OldOpts) ->
 depends(_Host, _Opts) ->
     [{mod_pubsub, soft}].
 
-mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun (I) when is_integer(I), I > 0 -> I;
-        (infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
+mod_opt_type(db_type) ->
+    econf:db_type(?MODULE);
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
 mod_options(Host) ->
     [{db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+     {use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
+
+mod_doc() ->
+    #{desc =>
+          [?T("This module adds support for "
+              "https://xmpp.org/extensions/xep-0049.html"
+              "[XEP-0049: Private XML Storage]."), "",
+           ?T("Using this method, XMPP entities can store "
+              "private data on the server, retrieve it "
+              "whenever necessary and share it between multiple "
+              "connected clients of the same user. The data stored "
+              "might be anything, as long as it is a valid XML. "
+              "One typical usage is storing a bookmark of all user's conferences "
+              "(https://xmpp.org/extensions/xep-0048.html"
+              "[XEP-0048: Bookmarks])."), "",
+           ?T("It also implements the bookmark conversion described in "
+              "https://xmpp.org/extensions/xep-0402.html[XEP-0402: PEP Native Bookmarks]"
+              ", see _`bookmarks_to_pep`_ API.")],
+      opts =>
+          [{db_type,
+            #{value => "mnesia | sql",
+              desc =>
+                  ?T("Same as top-level _`default_db`_ option, but applied to this module only.")}},
+           {use_cache,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`use_cache`_ option, but applied to this module only.")}},
+           {cache_size,
+            #{value => "pos_integer() | infinity",
+              desc =>
+                  ?T("Same as top-level _`cache_size`_ option, but applied to this module only.")}},
+           {cache_missed,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level _`cache_missed`_ option, but applied to this module only.")}},
+           {cache_life_time,
+            #{value => "timeout()",
+              desc =>
+                  ?T("Same as top-level _`cache_life_time`_ option, but applied to this module only.")}}]}.
 
 -spec get_sm_features({error, stanza_error()} | empty | {result, [binary()]},
 		      jid(), jid(), binary(), binary()) ->
@@ -115,7 +165,7 @@ get_sm_features({error, _Error} = Acc, _From, _To, _Node, _Lang) ->
 get_sm_features(Acc, _From, To, <<"">>, _Lang) ->
     case gen_mod:is_loaded(To#jid.lserver, mod_pubsub) of
 	true ->
-	    {result, [?NS_BOOKMARKS_CONVERSION_0 |
+	    {result, [?NS_BOOKMARKS_CONVERSION_0, ?NS_PEP_BOOKMARKS_COMPAT, ?NS_PEP_BOOKMARKS_COMPAT_PEP |
 		      case Acc of
 			  {result, Features} -> Features;
 			  empty -> []
@@ -133,7 +183,7 @@ process_sm_iq(#iq{type = Type, lang = Lang,
 		  sub_els = [#private{sub_els = Els0}]} = IQ) ->
     case filter_xmlels(Els0) of
 	[] ->
-	    Txt = <<"No private data found in this query">>,
+	    Txt = ?T("No private data found in this query"),
 	    xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang));
 	Data when Type == set ->
 	    case set_data(From, Data) of
@@ -142,14 +192,14 @@ process_sm_iq(#iq{type = Type, lang = Lang,
 		{error, #stanza_error{} = Err} ->
 		    xmpp:make_error(IQ, Err);
 		{error, _} ->
-		    Txt = <<"Database failure">>,
+		    Txt = ?T("Database failure"),
 		    Err = xmpp:err_internal_server_error(Txt, Lang),
 		    xmpp:make_error(IQ, Err)
 	    end;
 	Data when Type == get ->
 	    case get_data(LUser, LServer, Data) of
 		{error, _} ->
-		    Txt = <<"Database failure">>,
+		    Txt = ?T("Database failure"),
 		    Err = xmpp:err_internal_server_error(Txt, Lang),
 		    xmpp:make_error(IQ, Err);
 		Els ->
@@ -157,7 +207,7 @@ process_sm_iq(#iq{type = Type, lang = Lang,
 	    end
     end;
 process_sm_iq(#iq{lang = Lang} = IQ) ->
-    Txt = <<"Query to another users is forbidden">>,
+    Txt = ?T("Query to another users is forbidden"),
     xmpp:make_error(IQ, xmpp:err_forbidden(Txt, Lang)).
 
 -spec filter_xmlels([xmlel()]) -> [{binary(), xmlel()}].
@@ -172,17 +222,21 @@ filter_xmlels(Els) ->
 
 -spec set_data(jid(), [{binary(), xmlel()}]) -> ok | {error, _}.
 set_data(JID, Data) ->
-    set_data(JID, Data, true).
+    set_data(JID, Data, true, true).
 
--spec set_data(jid(), [{binary(), xmlel()}], boolean()) -> ok | {error, _}.
-set_data(JID, Data, Publish) ->
+-spec set_data(jid(), [{binary(), xmlel()}], boolean(), boolean()) -> ok | {error, _}.
+set_data(JID, Data, PublishPepStorageBookmarks, PublishPepXmppBookmarks) ->
     {LUser, LServer, _} = jid:tolower(JID),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     case Mod:set_data(LUser, LServer, Data) of
 	ok ->
 	    delete_cache(Mod, LUser, LServer, Data),
-	    case Publish of
-		true -> publish_data(JID, Data);
+	    case PublishPepStorageBookmarks of
+		true -> publish_pep_storage_bookmarks(JID, Data);
+		false -> ok
+	    end,
+	    case PublishPepXmppBookmarks of
+		true -> publish_pep_native_bookmarks(JID, Data);
 		false -> ok
 	    end;
 	{error, _} = Err ->
@@ -223,6 +277,37 @@ get_data(LUser, LServer) ->
 	{error, _} = Err -> Err
     end.
 
+-spec del_data(binary(), binary(), binary()) -> ok | {error, _}.
+del_data(LUser, LServer, NS) ->
+    Mod = gen_mod:db_mod(LServer, ?MODULE),
+	case Mod:del_data(LUser, LServer, NS) of
+		ok ->
+			case use_cache(Mod, LServer) of
+				true ->
+					delete_cache(Mod, LUser, LServer, [{NS, #xmlel{}}]);
+				_ ->
+					ok
+			end;
+		Err -> Err
+	end.
+
+-spec get_users_with_data(binary(), binary()) -> [jid()] | {error, any()}.
+get_users_with_data(LServer, NS) ->
+    Mod = gen_mod:db_mod(LServer, ?MODULE),
+	case Mod:get_users_with_data(LServer, NS) of
+		{ok, Users} ->
+			[jid:make(User, LServer) || User <- Users];
+		Err -> Err
+	end.
+
+-spec count_users_with_data(binary(), binary()) -> integer() | {error, any()}.
+count_users_with_data(LServer, NS) ->
+    Mod = gen_mod:db_mod(LServer, ?MODULE),
+	case Mod:count_users_with_data(LServer, NS) of
+		{ok, Num} -> Num;
+		Err -> Err
+	end.
+
 -spec remove_user(binary(), binary()) -> ok.
 remove_user(User, Server) ->
     LUser = jid:nodeprep(User),
@@ -243,26 +328,112 @@ remove_user(User, Server) ->
 %%%===================================================================
 %%% Pubsub
 %%%===================================================================
--spec publish_data(jid(), [{binary(), xmlel()}]) -> ok | {error, stanza_error()}.
-publish_data(JID, Data) ->
+-spec publish_pep_storage_bookmarks(jid(), [{binary(), xmlel()}]) -> ok | {error, stanza_error()}.
+publish_pep_storage_bookmarks(JID, Data) ->
     {_, LServer, _} = LBJID = jid:remove_resource(jid:tolower(JID)),
     case gen_mod:is_loaded(LServer, mod_pubsub) of
 	true ->
 	    case lists:keyfind(?NS_STORAGE_BOOKMARKS, 1, Data) of
 		false -> ok;
 		{_, El} ->
-		    PubOpts = [{persist_items, true},
-			       {access_model, whitelist}],
-		    case mod_pubsub:publish_item(
-			   LBJID, LServer, ?NS_STORAGE_BOOKMARKS, JID,
-			   <<"current">>, [El], PubOpts, all) of
-			{result, _} -> ok;
-			{error, _} = Err -> Err
+		    case mod_pubsub:get_items(LBJID, ?NS_STORAGE_BOOKMARKS) of
+			{error, #stanza_error{reason = 'item-not-found'}} ->
+			    PubOpts = [{persist_items, true},
+				       {access_model, whitelist}],
+			    case mod_pubsub:publish_item(
+				LBJID, LServer, ?NS_STORAGE_BOOKMARKS, JID,
+				<<"current">>, [El], PubOpts, all) of
+				{result, _} -> ok;
+				{error, _} = Err -> Err
+			    end;
+			_ ->
+			    case mod_pubsub:publish_item(
+				LBJID, LServer, ?NS_STORAGE_BOOKMARKS, JID,
+				<<"current">>, [El], [], all) of
+				{result, _} -> ok;
+				{error, _} = Err -> Err
+			    end
 		    end
 	    end;
 	false ->
 	    ok
     end.
+
+-spec publish_pep_native_bookmarks(jid(), [{binary(), xmlel()}]) -> ok | {error, stanza_error()}.
+publish_pep_native_bookmarks(JID, Data) ->
+    {_, LServer, _} = LBJID = jid:remove_resource(jid:tolower(JID)),
+    case gen_mod:is_loaded(LServer, mod_pubsub) of
+	true ->
+	    case lists:keyfind(?NS_STORAGE_BOOKMARKS, 1, Data) of
+		{_, Bookmarks0} ->
+		    Bookmarks = try xmpp:decode(Bookmarks0) of
+				    #bookmark_storage{conference = C} -> C;
+				    _ -> []
+				catch _:{xmpp_codec, Why} ->
+					  ?DEBUG("Failed to decode bookmarks of ~ts: ~ts",
+						 [jid:encode(JID), xmpp:format_error(Why)]),
+					  []
+				end,
+		    PubOpts = [{persist_items, true}, {access_model, whitelist}, {max_items, max}, {notify_retract,true}, {notify_delete,true}, {send_last_published_item, never}],
+		    case mod_pubsub:get_items(LBJID, ?NS_PEP_BOOKMARKS) of
+			PepBookmarks when is_list(PepBookmarks) ->
+			    put(mod_private_pep_update, true),
+			    PepBookmarksMap = lists:foldl(fun pubsub_item_to_map/2, #{}, PepBookmarks),
+			    {ToDelete, Ret} =
+			    lists:foldl(
+				fun(#bookmark_conference{jid = BookmarkJID} = Bookmark, {Map2, Ret2}) ->
+				    PB = storage_bookmark_to_xmpp_bookmark(Bookmark),
+				    case maps:take(jid:tolower(BookmarkJID), Map2) of
+					{StoredBookmark, Map3} when StoredBookmark == PB ->
+					    {Map3, Ret2};
+					{_, Map4} ->
+					    {Map4,
+					     err_ret(Ret2, mod_pubsub:publish_item(
+						 LBJID, LServer, ?NS_PEP_BOOKMARKS, JID,
+						 jid:encode(BookmarkJID), [xmpp:encode(PB)], [], all))};
+					_ ->
+					    {Map2,
+					     err_ret(Ret2, mod_pubsub:publish_item(
+						 LBJID, LServer, ?NS_PEP_BOOKMARKS, JID,
+						 jid:encode(BookmarkJID), [xmpp:encode(PB)], [], all))}
+				    end
+				end, {PepBookmarksMap, ok}, Bookmarks),
+			    Ret4 =
+			    maps:fold(
+				fun(DeleteJid, _, Ret3) ->
+				    err_ret(Ret3, mod_pubsub:delete_item(LBJID, ?NS_PEP_BOOKMARKS,
+									 JID, jid:encode(DeleteJid)))
+				end, Ret, ToDelete),
+			    erase(mod_private_pep_update),
+			    Ret4;
+			{error, #stanza_error{reason = 'item-not-found'}} ->
+			    put(mod_private_pep_update, true),
+			    Ret7 =
+			    lists:foldl(
+				fun(#bookmark_conference{jid = BookmarkJID} = Bookmark, Ret5) ->
+				    PB = storage_bookmark_to_xmpp_bookmark(Bookmark),
+				    err_ret(Ret5, mod_pubsub:publish_item(
+					LBJID, LServer, ?NS_PEP_BOOKMARKS, JID,
+					jid:encode(BookmarkJID), [xmpp:encode(PB)], PubOpts, all))
+				end, ok, Bookmarks),
+			    erase(mod_private_pep_update),
+			    Ret7;
+			_ ->
+			    ok
+		    end;
+		_ ->
+		    ok
+	    end;
+	false ->
+	    ok
+    end.
+
+err_ret({error, _} = E, _) ->
+    E;
+err_ret(ok, {error, _} = E) ->
+    E;
+err_ret(_, _) ->
+    ok.
 
 -spec pubsub_publish_item(binary(), binary(), jid(), jid(),
 			  binary(), [xmlel()]) -> any().
@@ -270,9 +441,104 @@ pubsub_publish_item(LServer, ?NS_STORAGE_BOOKMARKS,
 		    #jid{luser = LUser, lserver = LServer} = From,
 		    #jid{luser = LUser, lserver = LServer},
 		    _ItemId, [Payload|_]) ->
-    set_data(From, [{?NS_STORAGE_BOOKMARKS, Payload}], false);
+    set_data(From, [{?NS_STORAGE_BOOKMARKS, Payload}], false, true);
+pubsub_publish_item(LServer, ?NS_PEP_BOOKMARKS,
+		    #jid{luser = LUser, lserver = LServer} = From,
+		    #jid{luser = LUser, lserver = LServer},
+		    _ItemId, _Payload) ->
+    NotRecursion = get(mod_private_pep_update) == undefined,
+    case mod_pubsub:get_items({LUser, LServer, <<>>}, ?NS_PEP_BOOKMARKS) of
+	Bookmarks when is_list(Bookmarks), NotRecursion ->
+	    Bookmarks2 = lists:filtermap(fun pubsub_item_to_storage_bookmark/1, Bookmarks),
+	    Payload = xmpp:encode(#bookmark_storage{conference = Bookmarks2}),
+	    set_data(From, [{?NS_STORAGE_BOOKMARKS, Payload}], true, false);
+	_ ->
+	    ok
+    end;
 pubsub_publish_item(_, _, _, _, _, _) ->
     ok.
+
+-spec pubsub_delete_item(binary(), binary(), jid(), jid(), binary()) -> any().
+pubsub_delete_item(LServer, ?NS_PEP_BOOKMARKS,
+		    #jid{luser = LUser, lserver = LServer} = From,
+		    #jid{luser = LUser, lserver = LServer},
+		    _ItemId) ->
+    NotRecursion = get(mod_private_pep_update) == undefined,
+    case mod_pubsub:get_items({LUser, LServer, <<>>}, ?NS_PEP_BOOKMARKS) of
+	Bookmarks when is_list(Bookmarks), NotRecursion ->
+	    Bookmarks2 = lists:filtermap(fun pubsub_item_to_storage_bookmark/1, Bookmarks),
+	    Payload = xmpp:encode(#bookmark_storage{conference = Bookmarks2}),
+	    set_data(From, [{?NS_STORAGE_BOOKMARKS, Payload}], true, false);
+	_ ->
+	    ok
+    end;
+pubsub_delete_item(_, _, _, _, _) ->
+    ok.
+
+-spec pubsub_item_to_storage_bookmark(#pubsub_item{}) -> {true, bookmark_conference()} | false.
+pubsub_item_to_storage_bookmark(#pubsub_item{itemid = {Id, _}, payload = [#xmlel{} = B | _]}) ->
+    try {xmpp:decode(B), jid:decode(Id)} of
+	{#pep_bookmarks_conference{name = Name, autojoin = AutoJoin,
+				   nick = Nick, password = Password},
+	 #jid{} = Jid} ->
+	    {true, #bookmark_conference{jid = Jid, name = Name,
+					autojoin = AutoJoin, nick = Nick,
+					password = Password}};
+	{_, _} ->
+	    false
+    catch
+	_:{xmpp_codec, Why} ->
+	    ?DEBUG("Failed to decode bookmark element (~ts): ~ts",
+		   [Id, xmpp:format_error(Why)]),
+	    false;
+	_:{bad_jid, _} ->
+	    ?DEBUG("Failed to decode bookmark ID (~ts)", [Id]),
+	    false
+    end;
+pubsub_item_to_storage_bookmark(_) ->
+    false.
+
+-spec pubsub_tree_call(Res :: any(), _Tree::any(), atom(), any()) -> any().
+pubsub_tree_call({error, #stanza_error{reason = 'item-not-found'}} = Res, Tree, get_node,
+		 [{User, Server, _}, ?NS_PEP_BOOKMARKS] = Args) ->
+    case get(mod_private_in_pubsub_tree_call) of
+	undefined ->
+	    put(mod_private_in_pubsub_tree_call, true),
+	    bookmarks_to_pep(User, Server),
+	    Res2 = apply(Tree, get_node, Args),
+	    erase(mod_private_in_pubsub_tree_call),
+	    Res2;
+	_ ->
+	    Res
+    end;
+pubsub_tree_call(Res, _Tree, _Function, _Args) ->
+    Res.
+
+-spec storage_bookmark_to_xmpp_bookmark(bookmark_conference()) -> pep_bookmarks_conference().
+storage_bookmark_to_xmpp_bookmark(#bookmark_conference{name = Name, autojoin = AutoJoin, nick = Nick,
+						       password = Password}) ->
+    #pep_bookmarks_conference{name = Name, autojoin = AutoJoin, nick = Nick,
+			      password = Password}.
+
+-spec pubsub_item_to_map(#pubsub_item{}, map()) -> map().
+pubsub_item_to_map(#pubsub_item{itemid = {Id, _}, payload = [#xmlel{} = B | _]}, Map) ->
+    try {xmpp:decode(B), jid:decode(Id)} of
+	{#pep_bookmarks_conference{} = B1, #jid{} = Jid} ->
+	    B2 = B1#pep_bookmarks_conference{extensions = undefined},
+	    maps:put(jid:tolower(Jid), B2, Map);
+	{_, _} ->
+	    Map
+    catch
+	_:{xmpp_codec, Why} ->
+	    ?DEBUG("Failed to decode bookmark element (~ts): ~ts",
+		   [Id, xmpp:format_error(Why)]),
+	    Map;
+	_:{bad_jid, _} ->
+	    ?DEBUG("Failed to decode bookmark ID (~ts)", [Id]),
+	    Map
+    end;
+pubsub_item_to_map(_, Map) ->
+    Map.
 
 %%%===================================================================
 %%% Commands
@@ -282,7 +548,8 @@ get_commands_spec() ->
     [#ejabberd_commands{name = bookmarks_to_pep, tags = [private],
 			desc = "Export private XML storage bookmarks to PEP",
 			module = ?MODULE, function = bookmarks_to_pep,
-			args = [{user, binary}, {server, binary}],
+			args = [{user, binary}, {host, binary}],
+			args_rename = [{server, host}],
 			args_desc = ["Username", "Server"],
 			args_example = [<<"bob">>, <<"example.com">>],
 			result = {res, restuple},
@@ -308,15 +575,36 @@ bookmarks_to_pep(User, Server) ->
     case Res of
 	{ok, El} ->
 	    Data = [{?NS_STORAGE_BOOKMARKS, El}],
-	    case publish_data(jid:make(User, Server), Data) of
+	    case publish_pep_storage_bookmarks(jid:make(User, Server), Data) of
 		ok ->
-		    {ok, <<"Bookmarks exported to PEP node">>};
+		    case publish_pep_native_bookmarks(jid:make(User, Server), Data) of
+			ok ->
+			    {ok, <<"Bookmarks exported to PEP node">>};
+			{error, Err} ->
+			    {error, xmpp:format_stanza_error(Err)}
+		    end;
 		{error, Err} ->
 		    {error, xmpp:format_stanza_error(Err)}
+
 	    end;
 	_ ->
 	    {error, <<"Cannot retrieve bookmarks from private XML storage">>}
     end.
+
+%%%===================================================================
+%%% WebAdmin
+%%%===================================================================
+
+webadmin_menu_hostuser(Acc, _Host, _Username, _Lang) ->
+    Acc ++ [{<<"private">>, <<"Private XML Storage">>}].
+
+webadmin_page_hostuser(_, Host, User,
+	      #request{path = [<<"private">>]} = R) ->
+    Res = ?H1GL(<<"Private XML Storage">>, <<"modules/#mod_private">>, <<"mod_private">>)
+          ++ [make_command(private_set, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+              make_command(private_get, R, [{<<"user">>, User}, {<<"host">>, Host}], [])],
+    {stop, Res};
+webadmin_page_hostuser(Acc, _, _, _) -> Acc.
 
 %%%===================================================================
 %%% Cache
@@ -348,19 +636,16 @@ init_cache(Mod, Host, Opts) ->
 
 -spec cache_opts(gen_mod:opts()) -> [proplists:property()].
 cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_private_opt:cache_size(Opts),
+    CacheMissed = mod_private_opt:cache_missed(Opts),
+    LifeTime = mod_private_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
 -spec use_cache(module(), binary()) -> boolean().
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false -> mod_private_opt:use_cache(Host)
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].

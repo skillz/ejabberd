@@ -5,7 +5,7 @@
 %%% Created : 11 Aug 2007 by Badlop <badlop@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,7 +30,7 @@
 -behaviour(gen_server).
 
 %% API
--export([route_multicast/4,
+-export([route_multicast/5,
 	 register_route/1,
 	 unregister_route/1
 	]).
@@ -39,10 +39,10 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-	 terminate/2, code_change/3]).
+	 terminate/2, code_change/3, update_to_in_wrapped/2]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 -record(route_multicast, {domain = <<"">> :: binary() | '_',
 			  pid = self() :: pid()}).
@@ -58,9 +58,11 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
--spec route_multicast(jid(), binary(), [jid()], stanza()) -> ok.
-route_multicast(From, Domain, Destinations, Packet) ->
-    case catch do_route(Domain, Destinations, xmpp:set_from(Packet, From)) of
+-spec route_multicast(jid(), binary(), [jid()], stanza(), boolean()) -> ok.
+route_multicast(From0, Domain0, Destinations0, Packet0, Wrapped0) ->
+    {From, Domain, Destinations, Packet, Wrapped} =
+    ejabberd_hooks:run_fold(multicast_route, Domain0, {From0, Domain0, Destinations0, Packet0, Wrapped0}, []),
+    case catch do_route(Domain, Destinations, xmpp:set_from(Packet, From), Wrapped) of
 	{'EXIT', Reason} ->
 	    ?ERROR_MSG("~p~nwhen processing: ~p",
 		       [Reason, {From, Domain, Destinations, Packet}]);
@@ -136,9 +138,9 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -146,7 +148,8 @@ handle_call(_Request, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -156,7 +159,7 @@ handle_cast(_Msg, State) ->
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
 handle_info({route_multicast, Domain, Destinations, Packet}, State) ->
-    case catch do_route(Domain, Destinations, Packet) of
+    case catch do_route(Domain, Destinations, Packet, false) of
 	{'EXIT', Reason} ->
 	    ?ERROR_MSG("~p~nwhen processing: ~p",
 		       [Reason, {Domain, Destinations, Packet}]);
@@ -182,7 +185,8 @@ handle_info({'DOWN', _Ref, _Type, Pid, _Info}, State) ->
 	end,
     mnesia:transaction(F),
     {noreply, State};
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -202,14 +206,42 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+-spec update_to_in_wrapped(stanza(), jid()) -> stanza().
+update_to_in_wrapped(Packet, To) ->
+    case Packet of
+	#message{sub_els = [#ps_event{
+	    items = #ps_items{
+		items = [#ps_item{
+		    sub_els = [Internal]
+		} = PSItem]
+	    } = PSItems
+	} = PSEvent]} ->
+	    Internal2 = xmpp:set_to(Internal, To),
+	    PSItem2 = PSItem#ps_item{sub_els = [Internal2]},
+	    PSItems2 = PSItems#ps_items{items = [PSItem2]},
+	    PSEvent2 = PSEvent#ps_event{items = PSItems2},
+	    xmpp:set_to(Packet#message{sub_els = [PSEvent2]}, To);
+	_ ->
+	    xmpp:set_to(Packet, To)
+    end.
+
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
 %% From = #jid
 %% Destinations = [#jid]
--spec do_route(binary(), [jid()], stanza()) -> any().
-do_route(Domain, Destinations, Packet) ->
-    ?DEBUG("route multicast:~n~s~nDomain: ~s~nDestinations: ~s~n",
+-spec do_route(binary(), [jid()], stanza(), boolean()) -> any().
+do_route(Domain, Destinations, Packet, true) ->
+    ?DEBUG("Route multicast:~n~ts~nDomain: ~ts~nDestinations: ~ts~n",
+	   [xmpp:pp(Packet), Domain,
+	    str:join([jid:encode(To) || To <- Destinations], <<", ">>)]),
+    lists:foreach(
+	fun(To) ->
+	    Packet2 = update_to_in_wrapped(Packet, To),
+	    ejabberd_router:route(Packet2)
+	end, Destinations);
+do_route(Domain, Destinations, Packet, false) ->
+    ?DEBUG("Route multicast:~n~ts~nDomain: ~ts~nDestinations: ~ts~n",
 	   [xmpp:pp(Packet), Domain,
 	    str:join([jid:encode(To) || To <- Destinations], <<", ">>)]),
     %% Try to find an appropriate multicast service
@@ -234,4 +266,7 @@ pick_multicast_pid(Rs) ->
 
 -spec do_route_normal([jid()], stanza()) -> any().
 do_route_normal(Destinations, Packet) ->
-    [ejabberd_router:route(xmpp:set_to(Packet, To)) || To <- Destinations].
+    lists:foreach(
+	fun(To) ->
+	    ejabberd_router:route(xmpp:set_to(Packet, To))
+	end, Destinations).
