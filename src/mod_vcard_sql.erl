@@ -142,9 +142,17 @@ get_vcards(LUsers, LServer) ->
 	     UserList,
 	     <<") and server_host='">>, ejabberd_sql:escape(LServer), <<"'">>],
     case ejabberd_sql:sql_query_replica(LServer, Query) of
-	{selected, _Cols, Rows} ->
+	{selected, _Cols, Rows} when is_list(Rows) ->
 	    lists:filtermap(
 	      fun([User, SVCARD]) ->
+		      case fxml_stream:parse_element(SVCARD) of
+			  {error, _} -> false;
+			  VCARD -> {true, {User, VCARD}}
+		      end
+	      end, Rows);
+	{selected, Rows} when is_list(Rows) ->
+	    lists:filtermap(
+	      fun({User, SVCARD}) ->
 		      case fxml_stream:parse_element(SVCARD) of
 			  {error, _} -> false;
 			  VCARD -> {true, {User, VCARD}}
