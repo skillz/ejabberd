@@ -2,7 +2,7 @@ version: '3.7'
 
 services:
   mysql:
-    image: mysql:latest
+    image: mysql:8.0
     container_name: ejabberd-mysql
     volumes:
       - mysqldata:/var/lib/mysql
@@ -15,45 +15,35 @@ services:
       MYSQL_DATABASE: ejabberd_test
       MYSQL_USER: ejabberd_test
       MYSQL_PASSWORD: ejabberd_test
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  mssql:
-    image: mcr.microsoft.com/mssql/server
-    container_name: ejabberd-mssql
+  ejabberd:
+    image: ghcr.io/processone/ejabberd:latest
+    container_name: ejabberd-app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "5222:5222"   # C2S (Client-to-Server)
+      - "5269:5269"   # S2S (Server-to-Server)
+      - "5280:5280"   # HTTP File Upload
+      - "5290:5290"   # WebSocket
+      - "4369:4369"   # Erlang Port Mapper Daemon
+    environment:
+      ERLANG_NODE: ejabberd@localhost
+      ERLANG_COOKIE: ejabberd_secret
+      EJABBERD_HOME: /home/ejabberd
     volumes:
-      - mssqldata:/var/opt/mssql
-      - ./db/mssql/initdb/initdb_mssql.sql:/initdb_mssql.sql:ro
-      - ../../sql/mssql.sql:/mssql.sql:ro
-      - ../../sql/mssql.new.sql:/mssql.new.sql:ro
+      - ejabberd_data:/home/ejabberd
+      - ../../ejabberd.yml:/home/ejabberd/conf/ejabberd.yml:ro
     restart: always
-    ports:
-      - 1433:1433
-    environment:
-      ACCEPT_EULA: Y
-      SA_PASSWORD: ejabberd_Test1
-
-  postgres:
-    image: postgres:latest
-    container_name: ejabberd-postgres
-    volumes:
-      - pgsqldata:/var/lib/postgresql/data
-      - ../../sql/pg.sql:/docker-entrypoint-initdb.d/pg.sql:ro
-    ports:
-      - 5432:5432
-    environment:
-      POSTGRES_PASSWORD: ejabberd_test
-      POSTGRES_USER: ejabberd_test
-      POSTGRES_DB: ejabberd_test
-
-  redis:
-    image: redis:latest
-    container_name: ejabberd-redis
-    ports:
-      - 6379:6379
 
 volumes:
     mysqldata:
       name: ejabberd-mysqldata
-    mssqldata:
-      name: ejabberd-mssqldata
-    pgsqldata:
-      name: ejabberd-pgsqldata
+    ejabberd_data:
+      name: ejabberd-data
