@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '30 9 * * 0'
 
+env:
+  # The ubuntu-24.04-arm runner reports ImageOS=ubuntu24-arm64, which
+  # erlef/setup-beam does not map. Override to the OS it recognizes;
+  # setup-beam detects the arm64 architecture separately.
+  ImageOS: ubuntu24
+
 jobs:
 
   ############################################################### Compile #####

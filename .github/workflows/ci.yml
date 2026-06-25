@@ -18,6 +18,10 @@ on:
 
 env:
   DEV: _build/dev/rel/ejabberd
+  # The ubuntu-24.04-arm runner reports ImageOS=ubuntu24-arm64, which
+  # erlef/setup-beam does not map. Override to the OS it recognizes;
+  # setup-beam detects the arm64 architecture separately.
+  ImageOS: ubuntu24
 
 jobs:
 
