@@ -857,7 +857,7 @@ handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, 
 				Value -> try binary_to_integer(Value) catch _:_ -> 0 end
 			end,
 			AvatarUrl = case skillz_util:get_value_by_tag(SubEls, <<"avatar_url">>, <<"">>) of
-				V when is_binary(V) -> V;
+				Av when is_binary(Av) -> Av;
 				_ -> <<"">>
 			end,
 			Username = case skillz_util:get_value_by_tag(SubEls, <<"username">>) of
@@ -866,7 +866,7 @@ handle_sync_event({get_room_summary, LimitIn, LastMessageId}, _From, StateName, 
 					<<>> -> FromUser;
 					Nickname -> Nickname
 				    end;
-				V when is_binary(V) -> V;
+				Un when is_binary(Un) -> Un;
 				_ -> FromUser
 			end,
 			{Id, Username, Body, UserRole, AvatarUrl}

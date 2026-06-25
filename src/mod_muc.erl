@@ -122,6 +122,7 @@
 -callback get_online_rooms_by_user(binary(), binary(), binary()) -> [{binary(), binary()}].
 -callback get_subscribed_rooms(binary(), binary(), jid()) ->
           {ok, [{jid(), binary(), [binary()]}]} | {error, db_failure}.
+-callback forget_rooms(binary(), binary(), [binary()]) -> any().
 
 -optional_callbacks([get_subscribed_rooms/3,
                      store_changes/4,

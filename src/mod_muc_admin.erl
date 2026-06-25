@@ -1766,10 +1766,6 @@ act_on_rooms(Method, Action, Rooms) ->
 	     end,
     lists:foreach(Delete, Rooms).
 
-act_on_room(Method, destroy, {N, H, SH, Pid}) ->
-    act_on_room(Method, destroy_not_forget, {N, H, SH, Pid}, SH),
-    mod_muc:forget_room(SH, H, N).
-
 act_on_room(Method, destroy_not_forget, {N, H, _SH, Pid}, SH) ->
     Message = iolist_to_binary(io_lib:format(<<"Room destroyed by rooms_~s_destroy.">>, [Method])),
     try
