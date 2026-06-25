@@ -98,9 +98,9 @@
 -include("mod_roster.hrl").
 -include("mod_privacy.hrl").
 -include("ejabberd_sm.hrl").
--include("mod_muc_room.hrl").
 -include_lib("xmpp/include/scram.hrl").
 -include_lib("xmpp/include/xmpp.hrl").
+-include("mod_muc_room.hrl").
 
 %%%
 %%% gen_mod
