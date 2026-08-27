@@ -4,7 +4,7 @@
 %%% Created : 20 Jan 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,8 +27,8 @@
 %% API
 -export([from_dir/1]).
 
--include("scram.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/scram.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("logger.hrl").
 -include("mod_roster.hrl").
 -include("mod_offline.hrl").
@@ -55,7 +55,7 @@ from_dir(ProsodyDir) ->
 				      "privacy", "pep", "pubsub"])
 		      end, HostDirs);
 		{error, Why} = Err ->
-		    ?ERROR_MSG("failed to list ~s: ~s",
+		    ?ERROR_MSG("Failed to list ~ts: ~ts",
 			       [ProsodyDir, file:format_error(Why)]),
 		    Err
 	    end;
@@ -87,8 +87,8 @@ convert_dir(Path, Host, Type) ->
 			      case eval_file(FilePath) of
 				  {ok, Data} ->
 				      Name = iolist_to_binary(filename:rootname(File)),
-				      convert_data(url_decode(Host), Type,
-						   url_decode(Name), Data);
+				      convert_data(uri_string:percent_decode(Host), Type,
+						   uri_string:percent_decode(Name), Data);
 				  Err ->
 				      Err
 			      end
@@ -97,7 +97,7 @@ convert_dir(Path, Host, Type) ->
 	{error, enoent} ->
 	    ok;
 	{error, Why} = Err ->
-	    ?ERROR_MSG("failed to list ~s: ~s",
+	    ?ERROR_MSG("Failed to list ~ts: ~ts",
 		       [Path, file:format_error(Why)]),
 	    Err
     end.
@@ -118,19 +118,19 @@ eval_file(Path) ->
 	    case luerl:eval(NewData, State1) of
 		{ok, _} = Res ->
 		    Res;
-		{error, Why} = Err ->
-		    ?ERROR_MSG("failed to eval ~s: ~p", [Path, Why]),
+		{error, Why, _} = Err ->
+		    ?ERROR_MSG("Failed to eval ~ts: ~p", [Path, Why]),
 		    Err
 	    end;
 	{error, Why} = Err ->
-	    ?ERROR_MSG("failed to read file ~s: ~s",
+	    ?ERROR_MSG("Failed to read file ~ts: ~ts",
 		       [Path, file:format_error(Why)]),
 	    Err
     end.
 
 maybe_get_scram_auth(Data) ->
     case proplists:get_value(<<"iteration_count">>, Data, no_ic) of
-	IC when is_float(IC) -> %% A float like 4096.0 is read
+	IC when is_number(IC) ->
 	    #scram{
 		storedkey = misc:hex_to_base64(proplists:get_value(<<"stored_key">>, Data, <<"">>)),
 		serverkey = misc:hex_to_base64(proplists:get_value(<<"server_key">>, Data, <<"">>)),
@@ -151,7 +151,7 @@ convert_data(Host, "accounts", User, [Data]) ->
 	ok ->
 	    ok;
 	Err ->
-	    ?ERROR_MSG("failed to register user ~s@~s: ~p",
+	    ?ERROR_MSG("Failed to register user ~ts@~ts: ~p",
 		       [User, Host, Err]),
 	    Err
     end;
@@ -198,7 +198,7 @@ convert_data(_Host, "config", _User, [Data]) ->
     RoomCfg = convert_room_config(Data),
     case proplists:get_bool(<<"persistent">>, Config) of
 	true when RoomJID /= error ->
-	    mod_muc:store_room(ejabberd_config:get_myname(), RoomJID#jid.lserver,
+	    mod_muc:store_room(find_serverhost(RoomJID#jid.lserver), RoomJID#jid.lserver,
 			       RoomJID#jid.luser, RoomCfg);
 	_ ->
 	    ok
@@ -272,12 +272,12 @@ convert_data(HostStr, "pubsub", Node, [Data]) ->
 			    Error
 		    end;
 		Error ->
-		    ?ERROR_MSG("failed to import pubsub node ~s on ~p:~n~p",
+		    ?ERROR_MSG("Failed to import pubsub node ~ts on ~p:~n~p",
 			       [Node, Host, NodeData]),
 		    Error
 	    end;
 	Error ->
-	    ?ERROR_MSG("failed to import pubsub node: ~p", [Error]),
+	    ?ERROR_MSG("Failed to import pubsub node: ~p", [Error]),
 	    Error
     end;
 convert_data(_Host, _Type, _User, _Data) ->
@@ -322,8 +322,13 @@ convert_roster_item(LUser, LServer, JIDstring, LuaList) ->
 			  [R#roster{name = Name}];
 		     ({<<"persist">>, false}, _) ->
 			  [];
-		     (_, []) ->
-			  []
+		     ({<<"approved">>, _}, [R]) ->
+			  [R];
+		     (A, [R]) ->
+	                  io:format("Warning: roster of user ~ts@~ts includes unknown "
+                                    "attribute:~n   ~p~nand that one is discarded.~n",
+                                    [LUser, LServer, A]),
+			  [R]
 		  end, [InitR], LuaList)
     catch _:{bad_jid, _} ->
 	    []
@@ -404,16 +409,6 @@ convert_privacy_item({_, Item}) ->
 	      match_message = MatchMsg,
 	      match_presence_in = MatchPresIn,
 	      match_presence_out = MatchPresOut}.
-
-url_decode(Encoded) ->
-    url_decode(Encoded, <<>>).
-url_decode(<<$%, Hi, Lo, Tail/binary>>, Acc) ->
-    Hex = list_to_integer([Hi, Lo], 16),
-    url_decode(Tail, <<Acc/binary, Hex>>);
-url_decode(<<H, Tail/binary>>, Acc) ->
-    url_decode(Tail, <<Acc/binary, H>>);
-url_decode(<<>>, Acc) ->
-    Acc.
 
 decode_pubsub_host(Host) ->
     try jid:decode(Host) of
@@ -521,6 +516,19 @@ el_to_offline_msg(LUser, LServer, #xmlel{attrs = Attrs} = El) ->
 	  _:{xmpp_codec, _} ->
 	    []
     end.
+
+find_serverhost(Host) ->
+    [ServerHost] =
+	lists:filter(
+	  fun(ServerHost) ->
+		  case gen_mod:is_loaded(ServerHost, mod_muc) of
+		      true ->
+			  lists:member(Host, gen_mod:get_module_opt_hosts(ServerHost, mod_muc));
+		      false ->
+			  false
+		  end
+	  end, ejabberd_option:hosts()),
+    ServerHost.
 
 deserialize(L) ->
     deserialize(L, #xmlel{}, []).

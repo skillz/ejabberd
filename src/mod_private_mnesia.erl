@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -28,10 +28,11 @@
 
 %% API
 -export([init/2, set_data/3, get_data/3, get_all_data/2, del_data/2,
-	 use_cache/1, import/3]).
+	del_data/3, get_users_with_data/2, count_users_with_data/2,
+	use_cache/1, import/3]).
 -export([need_transform/1, transform/1]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_private.hrl").
 -include("logger.hrl").
 
@@ -46,7 +47,7 @@ init(_Host, _Opts) ->
 use_cache(Host) ->
     case mnesia:table_info(private_storage, storage_type) of
 	disc_only_copies ->
-	    gen_mod:get_module_opt(Host, mod_private, use_cache);
+	    mod_private_opt:use_cache(Host);
 	_ ->
 	    false
     end.
@@ -101,13 +102,36 @@ del_data(LUser, LServer) ->
 	end,
     transaction(F).
 
+-spec del_data(binary(), binary(), binary()) -> ok | {error, any()}.
+del_data(LUser, LServer, NS) ->
+    F = fun () ->
+		mnesia:delete({private_storage, {LUser, LServer, NS}})
+	end,
+    transaction(F).
+
+-spec get_users_with_data(binary(), binary()) -> {ok, [binary()]} | {error, any()}.
+get_users_with_data(LServer, NS) ->
+	Val = mnesia:dirty_select(private_storage,
+				   [{#private_storage{usns =
+							  {'$1',
+							   LServer,
+							   NS},
+						      _ = '_'},
+				     [], ['$1']}]),
+	{ok, Val}.
+
+-spec count_users_with_data(binary(), binary()) -> {ok, integer()} | {error, any()}.
+count_users_with_data(LServer, NS) ->
+	{ok, Val} = get_users_with_data(LServer, NS),
+	{ok, length(Val)}.
+
 import(LServer, <<"private_storage">>,
        [LUser, XMLNS, XML, _TimeStamp]) ->
     El = #xmlel{} = fxml_stream:parse_element(XML),
     PS = #private_storage{usns = {LUser, LServer, XMLNS}, xml = El},
     mnesia:dirty_write(PS).
 
-need_transform(#private_storage{usns = {U, S, NS}})
+need_transform({private_storage, {U, S, NS}, _})
   when is_list(U) orelse is_list(S) orelse is_list(NS) ->
     ?INFO_MSG("Mnesia table 'private_storage' will be converted to binary", []),
     true;

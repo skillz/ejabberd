@@ -4,7 +4,7 @@
 %%% Created : 15 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,16 +24,16 @@
 
 -module(mod_offline_sql).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -behaviour(mod_offline).
 
 -export([init/2, store_message/1, pop_messages/2, remove_expired_messages/1,
 	 remove_old_messages/2, remove_user/2, read_message_headers/2,
 	 read_message/3, remove_message/3, read_all_messages/2,
-	 remove_all_messages/2, count_messages/2, import/1, export/1]).
+	 remove_all_messages/2, count_messages/2, import/1, export/1, remove_old_messages_batch/3]).
+-export([sql_schemas/0]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_offline.hrl").
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -41,8 +41,27 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"spool">>,
+                columns =
+                    [#sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"xml">>, type = {text, big}},
+                     #sql_column{name = <<"seq">>, type = bigserial},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"server_host">>, <<"username">>]},
+                           #sql_index{
+                              columns = [<<"created_at">>]}]}]}].
 
 store_message(#offline_msg{us = {LUser, LServer}} = M) ->
     From = M#offline_msg.from,
@@ -69,18 +88,24 @@ store_message(#offline_msg{us = {LUser, LServer}} = M) ->
 
 pop_messages(LUser, LServer) ->
     case get_spool_msg(LServer, LUser) of
-	{selected, Rs} ->
-	    {ok, lists:flatmap(
-		   fun({_, XML}) ->
-			   case xml_to_offline_msg(XML) of
-			       {ok, Msg} ->
-				   [Msg];
-			       _Err ->
-				   []
-			   end
-		   end, Rs)};
-	Err ->
-	    {error, Err}
+	{selected, Rs} when is_list(Rs) ->
+	    {ok, lists:flatmap(row_to_offline_msg_fun(), Rs)};
+	{selected, _Cols, Rows} when is_list(Rows) ->
+	    {ok, lists:flatmap(row_to_offline_msg_fun(), Rows)};
+	_ ->
+	    {ok, []}
+    end.
+
+row_to_offline_msg_fun() ->
+    fun(Row) ->
+	    XML = case Row of
+		      {_, X} -> X;
+		      [_, X] -> X
+		  end,
+	    case xml_to_offline_msg(XML) of
+		{ok, Msg} -> [Msg];
+		_ -> []
+	    end
     end.
 
 remove_expired_messages(_LServer) ->
@@ -94,7 +119,12 @@ remove_old_messages(Days, LServer) ->
                    ejabberd_sql:sql_query_t(
                      ?SQL("DELETE FROM spool"
                           " WHERE created_at <"
-                          " NOW() - INTERVAL '%(Days)d DAY'"));
+                          " NOW() - %(Days)d * INTERVAL '1 DAY'"));
+	      (sqlite, _) ->
+		  ejabberd_sql:sql_query_t(
+		      ?SQL("DELETE FROM spool"
+			   " WHERE created_at <"
+			   " DATETIME('now', '-%(Days)d days')"));
               (_, _) ->
                    ejabberd_sql:sql_query_t(
                      ?SQL("DELETE FROM spool"
@@ -103,10 +133,35 @@ remove_old_messages(Days, LServer) ->
         of
 	{updated, N} ->
 	    ?INFO_MSG("~p message(s) deleted from offline spool", [N]);
-	_Error ->
-	    ?ERROR_MSG("Cannot delete message in offline spool: ~p", [_Error])
+	Error ->
+	    ?ERROR_MSG("Cannot delete message in offline spool: ~p", [Error])
     end,
     {atomic, ok}.
+
+remove_old_messages_batch(LServer, Days, Batch) ->
+    case ejabberd_sql:sql_query(
+	LServer,
+	fun(pgsql, _) ->
+	    ejabberd_sql:sql_query_t(
+		?SQL("DELETE FROM spool"
+		     " WHERE created_at <"
+		     " NOW() - %(Days)d * INTERVAL '1 DAY' LIMIT %(Batch)d"));
+	   (sqlite, _) ->
+	       ejabberd_sql:sql_query_t(
+		   ?SQL("DELETE FROM spool"
+			" WHERE created_at <"
+			" DATETIME('now', '-%(Days)d days') LIMIT %(Batch)d"));
+	   (_, _) ->
+	       ejabberd_sql:sql_query_t(
+		   ?SQL("DELETE FROM spool"
+			" WHERE created_at < NOW() - INTERVAL %(Days)d DAY LIMIT %(Batch)d"))
+	end)
+    of
+	{updated, N} ->
+	    {ok, N};
+	Error ->
+	    {error, Error}
+    end.
 
 remove_user(LUser, LServer) ->
     ejabberd_sql:sql_query(
@@ -132,7 +187,7 @@ read_message_headers(LUser, LServer) ->
 		      end
 	      end, Rows);
 	_Err ->
-	    []
+	    error
     end.
 
 read_message(LUser, LServer, Seq) ->
@@ -181,14 +236,22 @@ remove_all_messages(LUser, LServer) ->
     {atomic, ok}.
 
 count_messages(LUser, LServer) ->
-    case catch ejabberd_sql:sql_query(
+    case catch ejabberd_sql:sql_query_replica(
                  LServer,
                  ?SQL("select @(count(*))d from spool "
-                      "where username=%(LUser)s and %(LServer)H"), secondary) of
+                      "where username=%(LUser)s and %(LServer)H")) of
         {selected, [{Res}]} ->
-            Res;
-        _ -> 0
+            {cache, Res};
+	{selected, []} ->
+	    {cache, 0};
+        _ ->
+	    {nocache, 0}
     end.
+
+get_spool_msg(LServer, LUser) ->
+    ejabberd_sql:sql_query_replica(LServer,
+	?SQL("select @(username)s, @(xml)s from spool where "
+	     "username=%(LUser)s and %(LServer)H order by seq")).
 
 export(_Server) ->
     [{offline_msg,
@@ -217,7 +280,7 @@ export(_Server) ->
                            "server_host=%(LServer)s",
                            "xml=%(XML)s"])]
 	      catch _:{xmpp_codec, Why} ->
-		      ?ERROR_MSG("failed to decode packet ~p of user ~s@~s: ~s",
+		      ?ERROR_MSG("Failed to decode packet ~p of user ~ts@~ts: ~ts",
 				 [El, LUser, LServer, xmpp:format_error(Why)]),
 		      []
 	      end;
@@ -236,7 +299,7 @@ xml_to_offline_msg(XML) ->
 	#xmlel{} = El ->
 	    el_to_offline_msg(El);
 	Err ->
-	    ?ERROR_MSG("got ~p when parsing XML packet ~s",
+	    ?ERROR_MSG("Got ~p when parsing XML packet ~ts",
 		       [Err, XML]),
 	    Err
     end.
@@ -252,14 +315,28 @@ el_to_offline_msg(El) ->
 			  to = To,
 			  packet = El}}
     catch _:{bad_jid, To_s} ->
-	    ?ERROR_MSG("failed to get 'to' JID from offline XML ~p", [El]),
+	    ?ERROR_MSG("Failed to get 'to' JID from offline XML ~p", [El]),
 	    {error, bad_jid_to};
 	  _:{bad_jid, From_s} ->
-	    ?ERROR_MSG("failed to get 'from' JID from offline XML ~p", [El]),
+	    ?ERROR_MSG("Failed to get 'from' JID from offline XML ~p", [El]),
 	    {error, bad_jid_from}
     end.
 
-get_spool_msg(LServer, LUser) ->
-	ejabberd_sql:sql_query(LServer,
-		?SQL("select @(username)s, @(xml)s from spool where "
-		"username=%(LUser)s and %(LServer)H order by seq;"), secondary).
+get_and_del_spool_msg_t(LServer, LUser) ->
+    F = fun () ->
+		Result =
+		    ejabberd_sql:sql_query_t(
+                      ?SQL("select @(username)s, @(xml)s from spool where "
+                           "username=%(LUser)s and %(LServer)H order by seq;")),
+		DResult =
+		    ejabberd_sql:sql_query_t(
+                      ?SQL("delete from spool where"
+                           " username=%(LUser)s and %(LServer)H;")),
+		case {Result, DResult} of
+		    {{selected, Rs}, {updated, DC}} when length(Rs) /= DC ->
+			ejabberd_sql:restart(concurent_insert);
+		    _ ->
+			Result
+		end
+	end,
+    ejabberd_sql:sql_transaction(LServer, F).

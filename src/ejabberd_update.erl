@@ -5,7 +5,7 @@
 %%% Created : 27 Jan 2006 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -38,13 +38,17 @@
 %% Update all the modified modules
 update() ->
     case update_info() of
-	{ok, Dir, _UpdatedBeams, _Script, LowLevelScript, _Check} ->
-	    Eval =
-		eval_script(
-		  LowLevelScript, [],
-		  [{ejabberd, "", filename:join(Dir, "..")}]),
-	    ?DEBUG("eval: ~p~n", [Eval]),
-	    Eval;
+	{ok, Dir, UpdatedBeams, _Script, LowLevelScript, _Check} ->
+	    case eval_script(
+		   LowLevelScript, [],
+		   [{ejabberd, "", filename:join(Dir, "..")}]) of
+		{ok, _} ->
+		    ?DEBUG("Updated: ~p~n", [UpdatedBeams]),
+		    {ok, UpdatedBeams};
+		Eval ->
+		    ?DEBUG("Eval: ~p~n", [Eval]),
+		    Eval
+	    end;
 	{error, Reason} ->
 	    {error, Reason}
     end.
@@ -56,12 +60,16 @@ update(ModulesToUpdate) ->
 	    UpdatedBeamsNow =
 		[A || A <- UpdatedBeamsAll, B <- ModulesToUpdate, A == B],
 	    {_, LowLevelScript, _} = build_script(Dir, UpdatedBeamsNow),
-	    Eval =
-		eval_script(
-		  LowLevelScript, [],
-		  [{ejabberd, "", filename:join(Dir, "..")}]),
-	    ?DEBUG("eval: ~p~n", [Eval]),
-	    Eval;
+	    case eval_script(
+		   LowLevelScript, [],
+		   [{ejabberd, "", filename:join(Dir, "..")}]) of
+		{ok, _} ->
+		    ?DEBUG("Updated: ~p~n", [UpdatedBeamsNow]),
+		    {ok, UpdatedBeamsNow};
+		Eval ->
+		    ?DEBUG("Eval: ~p~n", [Eval]),
+		    Eval
+	    end;
 	{error, Reason} ->
 	    {error, Reason}
     end.
@@ -86,7 +94,7 @@ update_info() ->
 update_info(Dir, Files) ->
     Beams = lists:sort(get_beams(Files)),
     UpdatedBeams = get_updated_beams(Beams),
-    ?DEBUG("beam files: ~p~n", [UpdatedBeams]),
+    ?DEBUG("BEAM files: ~p~n", [UpdatedBeams]),
     {Script, LowLevelScript, Check} = build_script(Dir, UpdatedBeams),
     {ok, Dir, UpdatedBeams, Script, LowLevelScript, Check}.
 
@@ -135,46 +143,49 @@ build_script(Dir, UpdatedBeams) ->
 	  [{ejabberd, "", filename:join(Dir, "..")}]),
     Check1 = case Check of
 	{ok, []} ->
-	    ?DEBUG("script: ~p~n", [Script]),
-	    ?DEBUG("low level script: ~p~n", [LowLevelScript]),
-	    ?DEBUG("check: ~p~n", [Check]),
+	    ?DEBUG("Script: ~p~n", [Script]),
+	    ?DEBUG("Low level script: ~p~n", [LowLevelScript]),
+	    ?DEBUG("Check: ~p~n", [Check]),
 	    ok;
 	_ ->
-	    ?ERROR_MSG("script: ~p~n", [Script]),
-	    ?ERROR_MSG("low level script: ~p~n", [LowLevelScript]),
-	    ?ERROR_MSG("check: ~p~n", [Check]),
+	    ?ERROR_MSG("Script: ~p~n", [Script]),
+	    ?ERROR_MSG("Low level script: ~p~n", [LowLevelScript]),
+	    ?ERROR_MSG("Check: ~p~n", [Check]),
 	    error
     end,
     {Script, LowLevelScript, Check1}.
 
 %% Copied from Erlang/OTP file: lib/sasl/src/systools.hrl
--record(application, 
+-record(application,
 	{name,			%% Name of the application, atom().
          type = permanent,	%% Application start type, atom().
 	 vsn = "",         	%% Version of the application, string().
 	 id = "",		%% Id of the application, string().
 	 description = "",	%% Description of application, string().
-	 modules = [],		%% [Module | {Module,Vsn}] of modules 
-				%% incorporated in the application, 
+	 modules = [],		%% [Module | {Module,Vsn}] of modules
+				%% incorporated in the application,
 				%% Module = atom(), Vsn = string().
 	 uses = [],		%% [Application] list of applications required
-	 			%% by the application, Application = atom().
+				%% by the application, Application = atom().
+	 optional = [],		%% [Application] list of applications in uses
+				%% that are optional, Application = atom().
 	 includes = [],		%% [Application] list of applications included
-	 			%% by the application, Application = atom().
-	 regs = [],		%% [RegNames] a list of registered process 
+				%% by the application, Application = atom().
+	 regs = [],		%% [RegNames] a list of registered process
 				%% names used by the application, RegNames =
 				%% atom().
-	 env = [],		%% [{Key,Value}] environment variable of 
-	 			%% application, Key = Value = term().
-	 maxT = infinity,	%% Max time an application may exist, 
+	 env = [],		%% [{Key,Value}] environment variable of
+				%% application, Key = Value = term().
+	 maxT = infinity,	%% Max time an application may exist,
 				%% integer() | infinity.
 	 maxP = infinity,  	%% Max number of processes in an application,
-	 			%% integer() | infinity.
-	 mod = [],		%% [] | {Mod, StartArgs}, Mod= atom(), 
+				%% integer() | infinity.
+	 mod = [],		%% [] | {Mod, StartArgs}, Mod= atom(),
 				%% StartArgs = list().
-	 start_phases = [],	%% [] | {Phase, PhaseArgs}, Phase = atom(),
+	 start_phases,          %% [{Phase, PhaseArgs}] | undefined,
+	                        %% Phase = atom(),
 				%% PhaseArgs = list().
-         dir = ""		%% The directory where the .app file was 
+         dir = ""		%% The directory where the .app file was
 				%% found (internal use).
 	}).
 

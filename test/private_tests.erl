@@ -3,7 +3,7 @@
 %%% Created : 23 Nov 2018 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -95,7 +95,11 @@ test_published(Config) ->
 	    #iq{type = result, sub_els = []} =
 		send_recv(Config,
 			  #iq{type = set,
-			      sub_els = [#pubsub_owner{delete = {Node, <<>>}}]});
+			      sub_els = [#pubsub_owner{delete = {Node, <<>>}}]}),
+	    #iq{type = result, sub_els = []} =
+		send_recv(Config,
+			  #iq{type = set,
+			      sub_els = [#pubsub_owner{delete = {?NS_PEP_BOOKMARKS, <<>>}}]});
 	false ->
 	    ok
     end,

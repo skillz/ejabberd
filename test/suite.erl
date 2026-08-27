@@ -3,7 +3,7 @@
 %%% Created : 27 Jun 2013 by Evgeniy Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -38,7 +38,8 @@ init_config(Config) ->
     PrivDir = proplists:get_value(priv_dir, Config),
     [_, _|Tail] = lists:reverse(filename:split(DataDir)),
     BaseDir = filename:join(lists:reverse(Tail)),
-    ConfigPathTpl = filename:join([DataDir, "ejabberd.yml"]),
+    MacrosPathTpl = filename:join([DataDir, "macros.yml"]),
+    ConfigPath = filename:join([DataDir, "ejabberd.yml"]),
     LogPath = filename:join([PrivDir, "ejabberd.log"]),
     SASLPath = filename:join([PrivDir, "sasl.log"]),
     MnesiaDir = filename:join([PrivDir, "mnesia"]),
@@ -50,48 +51,46 @@ init_config(Config) ->
     {ok, _} = file:copy(SelfSignedCertFile,
 			filename:join([CWD, "self-signed-cert.pem"])),
     {ok, _} = file:copy(CAFile, filename:join([CWD, "ca.pem"])),
-    {ok, CfgContentTpl} = file:read_file(ConfigPathTpl),
+    copy_file(Config, "spam_jids.txt"),
+    copy_file(Config, "spam_urls.txt"),
+    copy_file(Config, "spam_domains.txt"),
+    copy_file(Config, "whitelist_domains.txt"),
+    file:write_file(filename:join([CWD, "spam.log"]), []),
+    {ok, MacrosContentTpl} = file:read_file(MacrosPathTpl),
     Password = <<"password!@#$%^&*()'\"`~<>+-/;:_=[]{}|\\">>,
-    CfgContent = process_config_tpl(CfgContentTpl, [
-                                                    {c2s_port, 5222},
-                                                    {loglevel, 4},
-                                                    {new_schema, false},
-                                                    {s2s_port, 5269},
-						    {component_port, 5270},
-                                                    {web_port, 5280},
-						    {password, Password},
-                                                    {mysql_server, <<"localhost">>},
-                                                    {mysql_port, 3306},
-                                                    {mysql_db, <<"ejabberd">>},
-                                                    {mysql_user, <<"ejabberd">>},
-                                                    {mysql_pass, <<"ejabberd">>},
-                                                    {pgsql_server, <<"localhost">>},
-                                                    {pgsql_port, 5432},
-                                                    {pgsql_db, <<"ejabberd_test">>},
-                                                    {pgsql_user, <<"ejabberd_test">>},
-                                                    {pgsql_pass, <<"ejabberd_test">>},
-                                                    {certfile, CertFile},
-                                                    {cafile, CAFile},
-						    {priv_dir, PrivDir}
-						   ]),
-    HostTypes = re:split(CfgContent, "(\\s*- \"(.*)\\.localhost\")",
-			 [group, {return, binary}]),
-    Types = [binary_to_list(Type) || [_, _, Type] <- HostTypes],
-    Backends = get_config_backends(Types),
-    HostTypes = re:split(CfgContent, "(\\s*- \"(.*)\\.localhost\")",
-			   [group, {return, binary}]),
-    CfgContent2 = lists:foldl(fun([Pre, Frag, Type], Acc) ->
-				      case lists:member(binary_to_list(Type), Backends) of
-					  true ->
-					      <<Acc/binary, Pre/binary, Frag/binary>>;
-					  _ ->
-					      <<Acc/binary, Pre/binary>>
-				      end;
-				 ([Rest], Acc) ->
-				      <<Acc/binary, Rest/binary>>
-			      end, <<>>, HostTypes),
-    ConfigPath = filename:join([CWD, "ejabberd.yml"]),
-    ok = file:write_file(ConfigPath, CfgContent2),
+    Backends = get_config_backends(),
+    MacrosContent = process_config_tpl(
+		      MacrosContentTpl,
+		      [{c2s_port, 5222},
+		       {loglevel, 4},
+		       {multihost_schema, false},
+		       {update_sql_schema, true},
+		       {s2s_port, 5269},
+		       {stun_port, 3478},
+		       {component_port, 5270},
+		       {web_port, 5280},
+		       {proxy_port, 7777},
+		       {password, Password},
+		       {mysql_server, <<"localhost">>},
+		       {mysql_port, 3306},
+		       {mysql_db, <<"ejabberd_test">>},
+		       {mysql_user, <<"ejabberd_test">>},
+		       {mysql_pass, <<"ejabberd_test">>},
+		       {mssql_server, <<"localhost">>},
+		       {mssql_port, 1433},
+		       {mssql_db, <<"ejabberd_test">>},
+		       {mssql_user, <<"ejabberd_test">>},
+		       {mssql_pass, <<"ejabberd_Test1">>},
+		       {pgsql_server, <<"localhost">>},
+		       {pgsql_port, 5432},
+		       {pgsql_db, <<"ejabberd_test">>},
+		       {pgsql_user, <<"ejabberd_test">>},
+		       {pgsql_pass, <<"ejabberd_test">>},
+		       {priv_dir, PrivDir}]),
+    MacrosPath = filename:join([CWD, "macros.yml"]),
+    ok = file:write_file(MacrosPath, MacrosContent),
+    copy_configtest_yml(DataDir, CWD),
+    copy_backend_configs(DataDir, CWD, Backends),
     setup_ejabberd_lib_path(Config),
     case application:load(sasl) of
 	ok -> ok;
@@ -139,9 +138,60 @@ init_config(Config) ->
      {resource, <<"resource!@#$%^&*()'\"`~<>+-/;:_=[]{}|\\">>},
      {master_resource, <<"master_resource!@#$%^&*()'\"`~<>+-/;:_=[]{}|\\">>},
      {slave_resource, <<"slave_resource!@#$%^&*()'\"`~<>+-/;:_=[]{}|\\">>},
+     {update_sql, false},
      {password, Password},
      {backends, Backends}
      |Config].
+
+copy_file(Config, File) ->
+    {ok, CWD} = file:get_cwd(),
+    DataDir = proplists:get_value(data_dir, Config),
+    {ok, _} = file:copy(filename:join([DataDir, File]), filename:join([CWD, File])).
+
+copy_configtest_yml(DataDir, CWD) ->
+    Files = filelib:wildcard(filename:join([DataDir, "configtest.yml"])),
+    lists:foreach(
+	fun(Src) ->
+	    ct:pal("copying ~p", [Src]),
+	    File = filename:basename(Src),
+	    case string:tokens(File, ".") of
+		["configtest", "yml"] ->
+		    Dst = filename:join([CWD, File]),
+		    case true of
+			true ->
+			    {ok, _} = file:copy(Src, Dst);
+			false ->
+			    ok
+		    end;
+		_ ->
+		    ok
+	    end
+	end, Files).
+
+
+copy_backend_configs(DataDir, CWD, Backends) ->
+    Files = filelib:wildcard(filename:join([DataDir, "ejabberd.*.yml"])),
+    lists:foreach(
+	fun(Src) ->
+	    ct:pal("copying ~p", [Src]),
+	    File = filename:basename(Src),
+	    case string:tokens(File, ".") of
+		["ejabberd", SBackend, "yml"] ->
+		    Backend = list_to_atom(SBackend),
+		    Macro = list_to_atom(string:to_upper(SBackend) ++ "_CONFIG"),
+		    Dst = filename:join([CWD, File]),
+		    case lists:member(Backend, Backends) of
+			true ->
+			    {ok, _} = file:copy(Src, Dst);
+			false ->
+			    ok = file:write_file(
+				Dst, fast_yaml:encode(
+				    [{define_macro, [{Macro, []}]}]))
+		    end;
+		_ ->
+		    ok
+	    end
+	end, Files).
 
 find_top_dir(Dir) ->
     case file:read_file_info(filename:join([Dir, ebin])) of
@@ -164,38 +214,22 @@ setup_ejabberd_lib_path(Config) ->
 	    ok
     end.
 
-%% Read environment variable CT_DB=riak,mysql to limit the backends to test.
+%% Read environment variable CT_BACKENDS=mysql to limit the backends to test.
 %% You can thus limit the backend you want to test with:
-%%  CT_BACKENDS=riak,mysql rebar ct suites=ejabberd
-get_config_backends(Types) ->
+%%  CT_BACKENDS=mysql rebar ct suites=ejabberd
+get_config_backends() ->
     EnvBackends = case os:getenv("CT_BACKENDS") of
-		      false  -> Types;
+		      false  -> ?BACKENDS;
 		      String ->
 			  Backends0 = string:tokens(String, ","),
-			  lists:map(fun(Backend) -> string:strip(Backend, both, $ ) end, Backends0)
+			  lists:map(
+			    fun(Backend) ->
+				    list_to_atom(string:strip(Backend, both, $ ))
+			    end, Backends0)
 		  end,
     application:load(ejabberd),
-    EnabledBackends = lists:map(fun(V) when is_atom(V) ->
-					atom_to_list(V);
-				   (V) ->
-					V
-				end,
-			       application:get_env(ejabberd, enabled_backends, Types)),
-    lists:foldl(fun(Backend, Backends) ->
-			case lists:member(Backend, EnabledBackends) of
-			    false ->
-				lists:delete(Backend, Backends);
-			    _ ->
-				Backends
-			end
-		end, EnvBackends, [
-			"odbc",
-			"mysql" %% ,
-%%			"pgsql",
-%%			"sqlite",
-%%			"riak",
-%%			"redis"
-		]).
+    EnabledBackends = application:get_env(ejabberd, enabled_backends, EnvBackends),
+    misc:intersection(EnvBackends, [agnostic, mnesia, ldap, extauth|EnabledBackends]).
 
 process_config_tpl(Content, []) ->
     Content;
@@ -497,6 +531,8 @@ wait_auth_SASL_result(Config, ShouldFail) ->
 			      set_opt(csi, true, ConfigAcc);
 			 (#rosterver_feature{}, ConfigAcc) ->
 			      set_opt(rosterver, true, ConfigAcc);
+			 (#compression{methods = Ms}, ConfigAcc) ->
+			      set_opt(compression, Ms, ConfigAcc);
 			 (_, ConfigAcc) ->
 			      ConfigAcc
 		      end, Config2, Fs)
@@ -544,10 +580,11 @@ decode_stream_element(NS, El) ->
     decode(El, NS, []).
 
 format_element(El) ->
-    case erlang:function_exported(ct, log, 5) of
+    Bin = case erlang:function_exported(ct, log, 5) of
 	true -> ejabberd_web_admin:pretty_print_xml(El);
 	false -> io_lib:format("~p~n", [El])
-    end.
+    end,
+    binary:replace(Bin, <<"<">>, <<"&lt;">>, [global]).
 
 decode(El, NS, Opts) ->
     try
@@ -693,6 +730,10 @@ proxy_jid(Config) ->
     Server = ?config(server, Config),
     jid:make(<<>>, <<"proxy.", Server/binary>>, <<>>).
 
+upload_jid(Config) ->
+    Server = ?config(server, Config),
+    jid:make(<<>>, <<"upload.", Server/binary>>, <<>>).
+
 muc_jid(Config) ->
     Server = ?config(server, Config),
     jid:make(<<>>, <<"conference.", Server/binary>>, <<>>).
@@ -749,6 +790,10 @@ is_feature_advertised(Config, Feature, To) ->
 
 set_opt(Opt, Val, Config) ->
     [{Opt, Val}|lists:keydelete(Opt, 1, Config)].
+
+set_opts([], Config) -> Config;
+set_opts([{Opt, Val} | Opts], Config) ->
+    set_opts(Opts, set_opt(Opt, Val, Config)).
 
 wait_for_master(Config) ->
     put_event(Config, peer_ready),
@@ -873,6 +918,21 @@ receiver(NS, Owner, Socket, MRef) ->
 	{tcp_closed, _} ->
 	    Owner ! closed,
 	    receiver(NS, Owner, Socket, MRef)
+    end.
+
+%% @doc Retry an action until success, at max N times with an interval
+%% `Interval'
+%% Shamlessly stolen (with slight adaptations) from snabbkaffee.
+-spec retry(integer(), non_neg_integer(), fun(() -> Ret)) -> Ret.
+retry(_, 0, Fun) ->
+    Fun();
+retry(Interval, N, Fun) ->
+    try Fun()
+    catch
+        EC:Err  ->
+            timer:sleep(Interval),
+            ct:pal("retrying ~p more times, result was ~p:~p", [N, EC, Err]),
+            retry(Interval, N - 1, Fun)
     end.
 
 %%%===================================================================

@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -21,9 +21,10 @@
 -record(request,
 	{method            :: method(),
 	 path = []         :: [binary()],
+	 raw_path          :: binary(),
 	 q = []            :: [{binary() | nokey, binary()}],
 	 us = {<<>>, <<>>} :: {binary(), binary()},
-	 auth              :: {binary(), binary()} | {oauth, binary(), []} | undefined,
+	 auth              :: {binary(), binary()} | {oauth, binary(), []} | undefined | invalid,
 	 lang = <<"">>     :: binary(),
 	 data = <<"">>     :: binary(),
 	 ip                :: {inet:ip_address(), inet:port_number()},

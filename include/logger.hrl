@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -17,24 +17,50 @@
 %%% 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 %%%
 %%%----------------------------------------------------------------------
-
 -define(PRINT(Format, Args), io:format(Format, Args)).
--compile([{parse_transform, lager_transform}]).
+
+-include_lib("kernel/include/logger.hrl").
+
+-define(CLEAD,    "\e[1").    % bold
+-define(CMID,     "\e[0").    % normal
+-define(CCLEAN,   "\e[0m").   % clean
+
+-define(CDEFAULT, ";49;95m"). % light magenta
+-define(CDEBUG,   ";49;90m"). % dark gray
+-define(CINFO,    ";49;92m"). % green
+-define(CWARNING, ";49;93m"). % light yellow
+-define(CERROR,   ";49;91m"). % light magenta
+-define(CCRITICAL,";49;31m"). % light red
 
 -define(DEBUG(Format, Args),
-	lager:debug(Format, Args)).
+	begin ?LOG_DEBUG(Format, Args,
+                        #{clevel => ?CLEAD ++ ?CDEBUG,
+                          ctext => ?CMID ++ ?CDEBUG}),
+              ok end).
 
 -define(INFO_MSG(Format, Args),
-	lager:info(Format, Args)).
+	begin ?LOG_INFO(Format, Args,
+                        #{clevel => ?CLEAD ++ ?CINFO,
+                          ctext => ?CCLEAN}),
+              ok end).
 
 -define(WARNING_MSG(Format, Args),
-	lager:warning(Format, Args)).
+	begin ?LOG_WARNING(Format, Args,
+                        #{clevel => ?CLEAD ++ ?CWARNING,
+                          ctext => ?CMID ++ ?CWARNING}),
+              ok end).
 
 -define(ERROR_MSG(Format, Args),
-	lager:error(Format, Args)).
+	begin ?LOG_ERROR(Format, Args,
+                        #{clevel => ?CLEAD ++ ?CERROR,
+                          ctext => ?CMID ++ ?CERROR}),
+              ok end).
 
 -define(CRITICAL_MSG(Format, Args),
-	lager:critical(Format, Args)).
+	begin ?LOG_CRITICAL(Format, Args,
+                        #{clevel => ?CLEAD++ ?CCRITICAL,
+                          ctext => ?CMID ++ ?CCRITICAL}),
+              ok end).
 
 %% Use only when trying to troubleshoot test problem with ExUnit
 -define(EXUNIT_LOG(Format, Args),

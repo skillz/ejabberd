@@ -5,7 +5,7 @@
 %%% Created : 5 Jul 2007 by Evgeniy Khramtsov <xram@jabber.ru>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,15 +24,12 @@
 %%%-------------------------------------------------------------------
 -module(ejabberd_auth_pam).
 
--behaviour(ejabberd_config).
-
 -author('xram@jabber.ru').
 
 -behaviour(ejabberd_auth).
 
 -export([start/1, stop/1, check_password/4,
-	 user_exists/2, store_type/1, plain_password_required/1,
-	 opt_type/1]).
+	 user_exists/2, store_type/1, plain_password_required/1]).
 
 start(_Host) ->
     ejabberd:start_app(epam).
@@ -42,19 +39,18 @@ stop(_Host) ->
 
 check_password(User, AuthzId, Host, Password) ->
     if AuthzId /= <<>> andalso AuthzId /= User ->
-        false;
-    true ->
-    Service = get_pam_service(Host),
-    UserInfo = case get_pam_userinfotype(Host) of
-		 username -> User;
-		 jid -> <<User/binary, "@", Host/binary>>
-	       end,
-    case catch epam:authenticate(Service, UserInfo,
-				 Password)
-	of
-      true -> true;
-      _ -> false
-        end
+	    false;
+       true ->
+	    Service = get_pam_service(Host),
+	    UserInfo = case get_pam_userinfotype(Host) of
+			   username -> User;
+			   jid -> <<User/binary, "@", Host/binary>>
+		       end,
+	    case catch epam:authenticate(Service, UserInfo, Password) of
+		true -> {cache, true};
+		false -> {cache, false};
+		_ -> {nocache, false}
+	    end
     end.
 
 user_exists(User, Host) ->
@@ -64,9 +60,9 @@ user_exists(User, Host) ->
 		 jid -> <<User/binary, "@", Host/binary>>
 	       end,
     case catch epam:acct_mgmt(Service, UserInfo) of
-      true -> true;
-      false -> false;
-      _Err -> {error, db_failure}
+	true -> {cache, true};
+	false -> {cache, false};
+	_Err -> {nocache, {error, db_failure}}
     end.
 
 plain_password_required(_) -> true.
@@ -77,15 +73,7 @@ store_type(_) -> external.
 %% Internal functions
 %%====================================================================
 get_pam_service(Host) ->
-    ejabberd_config:get_option({pam_service, Host}, <<"ejabberd">>).
+    ejabberd_option:pam_service(Host).
 
 get_pam_userinfotype(Host) ->
-    ejabberd_config:get_option({pam_userinfotype, Host}, username).
-
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
-opt_type(pam_service) -> fun iolist_to_binary/1;
-opt_type(pam_userinfotype) ->
-    fun (username) -> username;
-	(jid) -> jid
-    end;
-opt_type(_) -> [pam_service, pam_userinfotype].
+    ejabberd_option:pam_userinfotype(Host).

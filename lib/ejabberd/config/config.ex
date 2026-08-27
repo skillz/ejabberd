@@ -36,8 +36,8 @@ defmodule Ejabberd.Config do
 
     case force do
       true ->
-        Ejabberd.Config.Store.stop
-        Ejabberd.Config.Store.start_link
+        Ejabberd.Config.Store.stop()
+        Ejabberd.Config.Store.start_link()
         do_init(file_path)
       false ->
         if not init_already_executed, do: do_init(file_path)
@@ -49,8 +49,8 @@ defmodule Ejabberd.Config do
   """
   def get_ejabberd_opts do
     get_general_opts()
-    |> Dict.put(:modules, get_modules_parsed_in_order())
-    |> Dict.put(:listeners, get_listeners_parsed_in_order())
+    |> Map.put(:modules, get_modules_parsed_in_order())
+    |> Map.put(:listeners, get_listeners_parsed_in_order())
     |> Ejabberd.Config.OptsFormatter.format_opts_for_ejabberd
   end
 
@@ -105,11 +105,8 @@ defmodule Ejabberd.Config do
     Code.eval_file(file_path) |> extract_and_store_module_name()
 
     # Getting start/0 config
-    Ejabberd.Config.Store.get(:module_name)
-    |> case do
-      nil -> IO.puts "[ ERR ] Configuration module not found."
-      [module] -> call_start_func_and_store_data(module)
-    end
+    [module] = Ejabberd.Config.Store.get(:module_name)
+    call_start_func_and_store_data(module)
 
     # Fetching git modules and install them
     get_modules_parsed_in_order()

@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
-%%% @author Evgeny Khramtsov <ekhramtsov@process-one.net>
+%%% Author  : Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%% Created : 31 Mar 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -95,7 +95,7 @@ register_stream(SID, Pid) ->
 			    end),
 		ok;
 	      _:badarg ->
-		?ERROR_MSG("malformed data in redis (key = '~s'): ~p",
+		?ERROR_MSG("Malformed data in redis (key = '~ts'): ~p",
 			   [SIDKey, Val]),
 		{error, db_failure}
 	end
@@ -128,7 +128,7 @@ unregister_stream(SID) ->
 	catch _:badarg when Val == undefined ->
 		ok;
 	      _:badarg ->
-		?ERROR_MSG("malformed data in redis (key = '~s'): ~p",
+		?ERROR_MSG("Malformed data in redis (key = '~ts'): ~p",
 			   [SIDKey, Val]),
 		{error, db_failure}
 	end
@@ -163,7 +163,7 @@ activate_stream(SID, IJID, MaxConnections, _Node) ->
 	catch _:badarg when Val == undefined ->
 		{error, notfound};
 	      _:badarg ->
-		?ERROR_MSG("malformed data in redis (key = '~s'): ~p",
+		?ERROR_MSG("Malformed data in redis (key = '~ts'): ~p",
 			   [SIDKey, Val]),
 		{error, db_failure}
 	end

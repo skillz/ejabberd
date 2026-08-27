@@ -4,7 +4,7 @@
 %%% Created : 29 Jul 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,7 @@
 -export([start_link/2]).
 -export([init/2, stop/1, get_vcard/2, set_vcard/4, search/4,
 	 remove_user/2, import/3, search_fields/1, search_reported/1,
-	 mod_opt_type/1, mod_options/1]).
+	 mod_opt_type/1, mod_options/1, mod_doc/0]).
 -export([is_search_supported/1]).
 
 %% gen_server callbacks
@@ -40,7 +40,7 @@
 
 -include("logger.hrl").
 -include("eldap.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("translate.hrl").
 
 -define(PROCNAME, ejabberd_mod_vcard_ldap).
@@ -57,8 +57,8 @@
          dn = <<"">>                :: binary(),
          base = <<"">>              :: binary(),
          password = <<"">>          :: binary(),
-         uids = []                  :: [{binary()} | {binary(), binary()}],
-         vcard_map = []             :: [{binary(), binary(), [binary()]}],
+         uids = []                  :: [{binary(), binary()}],
+         vcard_map = []             :: [{binary(), [{binary(), [binary()]}]}],
 	 vcard_map_attrs = []       :: [binary()],
          user_filter = <<"">>       :: binary(),
          search_filter              :: eldap:filter(),
@@ -194,14 +194,16 @@ init([Host, Opts]) ->
 
 handle_call(get_state, _From, State) ->
     {reply, {ok, State}, State};
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
-
-handle_cast(_Msg, State) ->
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
     {noreply, State}.
 
-handle_info(_Info, State) ->
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
+    {noreply, State}.
+
+handle_info(Info, State) ->
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -234,12 +236,10 @@ find_ldap_user(User, State) ->
     end.
 
 ldap_attributes_to_vcard(Attributes, VCardMap, UD) ->
-    Attrs = lists:map(fun ({VCardName, _, _}) ->
-			      {stringprep:tolower(VCardName),
-			       map_vcard_attr(VCardName, Attributes, VCardMap,
-					      UD)}
-		      end,
-		      VCardMap),
+    Attrs = lists:map(
+	      fun({VCardName, _}) ->
+		      {VCardName, map_vcard_attr(VCardName, Attributes, VCardMap, UD)}
+	      end, VCardMap),
     lists:foldl(fun ldap_attribute_to_vcard/2, #vcard_temp{}, Attrs).
 
 -spec ldap_attribute_to_vcard({binary(), binary()}, vcard_temp()) -> vcard_temp().
@@ -258,7 +258,7 @@ ldap_attribute_to_vcard({Attr, Value}, V) ->
 	    [] -> #vcard_adr{};
 	    As -> hd(As)
 	end,
-    case Attr of
+    case str:to_lower(Attr) of
 	<<"fn">> -> V#vcard_temp{fn = Value};
 	<<"nickname">> -> V#vcard_temp{nickname = Value};
 	<<"title">> -> V#vcard_temp{title = Value};
@@ -268,7 +268,8 @@ ldap_attribute_to_vcard({Attr, Value}, V) ->
 	<<"role">> -> V#vcard_temp{role = Value};
 	<<"tel">> -> V#vcard_temp{tel = [#vcard_tel{number = Value}|Ts]};
 	<<"email">> -> V#vcard_temp{email = [#vcard_email{userid = Value}|Es]};
-	<<"photo">> -> V#vcard_temp{photo = #vcard_photo{binval = Value}};
+	<<"photo">> -> V#vcard_temp{photo = #vcard_photo{binval = Value,
+                                                         type = photo_type(Value)}};
 	<<"family">> -> V#vcard_temp{n = N#vcard_name{family = Value}};
 	<<"given">> -> V#vcard_temp{n = N#vcard_name{given = Value}};
 	<<"middle">> -> V#vcard_temp{n = N#vcard_name{middle = Value}};
@@ -282,14 +283,18 @@ ldap_attribute_to_vcard({Attr, Value}, V) ->
 	_ -> V
     end.
 
+-spec photo_type(binary()) -> binary().
+photo_type(Value) ->
+    Type = eimp:get_type(Value),
+    <<"image/", (atom_to_binary(Type, latin1))/binary>>.
+
 map_vcard_attr(VCardName, Attributes, Pattern, UD) ->
-    Res = lists:filter(fun ({Name, _, _}) ->
-			       eldap_utils:case_insensitive_match(Name,
-								  VCardName)
-		       end,
-		       Pattern),
+    Res = lists:filter(
+	    fun({Name, _}) ->
+		    eldap_utils:case_insensitive_match(Name, VCardName)
+	    end, Pattern),
     case Res of
-      [{_, Str, Attrs}] ->
+      [{_, [{Str, Attrs}|_]}] ->
 	  process_pattern(Str, UD,
 			  [eldap_utils:get_ldap_attr(X, Attributes)
 			   || X <- Attrs]);
@@ -351,15 +356,15 @@ default_search_reported() ->
      {?T("Organization Unit"), <<"ORGUNIT">>}].
 
 parse_options(Host, Opts) ->
-    MyHosts = gen_mod:get_opt_hosts(Host, Opts),
-    Search = gen_mod:get_opt(search, Opts),
-    Matches = gen_mod:get_opt(matches, Opts),
+    MyHosts = gen_mod:get_opt_hosts(Opts),
+    Search = mod_vcard_opt:search(Opts),
+    Matches = mod_vcard_opt:matches(Opts),
     Eldap_ID = misc:atom_to_binary(gen_mod:get_module_proc(Host, ?PROCNAME)),
-    Cfg = eldap_utils:get_config(Host, Opts),
-    UIDsTemp = gen_mod:get_opt(ldap_uids, Opts),
+    Cfg = ?eldap_config(mod_vcard_ldap_opt, Opts),
+    UIDsTemp = mod_vcard_ldap_opt:ldap_uids(Opts),
     UIDs = eldap_utils:uids_domain_subst(Host, UIDsTemp),
     SubFilter = eldap_utils:generate_subfilter(UIDs),
-    UserFilter = case gen_mod:get_opt(ldap_filter, Opts) of
+    UserFilter = case mod_vcard_ldap_opt:ldap_filter(Opts) of
                      <<"">> ->
 			 SubFilter;
                      F ->
@@ -368,28 +373,27 @@ parse_options(Host, Opts) ->
     {ok, SearchFilter} =
 	eldap_filter:parse(eldap_filter:do_sub(UserFilter,
 					       [{<<"%u">>, <<"*">>}])),
-    VCardMap = gen_mod:get_opt(ldap_vcard_map, Opts),
-    SearchFields = gen_mod:get_opt(ldap_search_fields, Opts),
-    SearchReported = gen_mod:get_opt(ldap_search_reported, Opts),
+    VCardMap = mod_vcard_ldap_opt:ldap_vcard_map(Opts),
+    SearchFields = mod_vcard_ldap_opt:ldap_search_fields(Opts),
+    SearchReported = mod_vcard_ldap_opt:ldap_search_reported(Opts),
     UIDAttrs = [UAttr || {UAttr, _} <- UIDs],
-    VCardMapAttrs = lists:usort(lists:append([A
-					      || {_, _, A} <- VCardMap])
-				  ++ UIDAttrs),
-    SearchReportedAttrs = lists:usort(lists:flatmap(fun ({_,
-							  N}) ->
-							    case
-							      lists:keysearch(N,
-									      1,
-									      VCardMap)
-								of
-							      {value,
-							       {_, _, L}} ->
-								  L;
-							      _ -> []
-							    end
-						    end,
-						    SearchReported)
-					++ UIDAttrs),
+    VCardMapAttrs = lists:usort(
+		      lists:flatten(
+			lists:map(
+			  fun({_, Map}) ->
+				  [Attrs || {_, Attrs} <- Map]
+			  end, VCardMap) ++ UIDAttrs)),
+    SearchReportedAttrs = lists:usort(
+			    lists:flatten(
+			      lists:map(
+				fun ({_, N}) ->
+					case lists:keyfind(N, 1, VCardMap) of
+					    {_, Map} ->
+						[Attrs || {_, Attrs} <- Map];
+					    false ->
+						[]
+					end
+				end, SearchReported) ++ UIDAttrs)),
     #state{serverhost = Host, myhosts = MyHosts,
 	   eldap_id = Eldap_ID, search = Search,
 	   servers = Cfg#eldap_config.servers,
@@ -409,31 +413,168 @@ parse_options(Host, Opts) ->
 	   matches = Matches}.
 
 mod_opt_type(ldap_search_fields) ->
-    fun (Ls) ->
-	    [{iolist_to_binary(S), iolist_to_binary(P)}
-	     || {S, P} <- Ls]
-    end;
+    econf:map(
+      econf:binary(),
+      econf:binary());
 mod_opt_type(ldap_search_reported) ->
-    fun (Ls) ->
-	    [{iolist_to_binary(S), iolist_to_binary(P)}
-	     || {S, P} <- Ls]
-    end;
+    econf:map(
+      econf:binary(),
+      econf:binary());
 mod_opt_type(ldap_vcard_map) ->
-    fun (Ls) ->
-	    lists:map(fun ({S, [{P, L}]}) ->
-			      {iolist_to_binary(S), iolist_to_binary(P),
-			       [iolist_to_binary(E) || E <- L]}
-		      end,
-		      Ls)
-    end;
-mod_opt_type(Opt) ->
-    eldap_utils:opt_type(Opt).
+    econf:map(
+      econf:binary(),
+      econf:map(
+	econf:binary(),
+	econf:list(
+	  econf:binary())));
+mod_opt_type(ldap_backups) ->
+    econf:list(econf:domain(), [unique]);
+mod_opt_type(ldap_base) ->
+    econf:binary();
+mod_opt_type(ldap_deref_aliases) ->
+    econf:enum([never, searching, finding, always]);
+mod_opt_type(ldap_encrypt) ->
+    econf:enum([tls, starttls, none]);
+mod_opt_type(ldap_filter) ->
+    econf:ldap_filter();
+mod_opt_type(ldap_password) ->
+    econf:binary();
+mod_opt_type(ldap_port) ->
+    econf:port();
+mod_opt_type(ldap_rootdn) ->
+    econf:binary();
+mod_opt_type(ldap_servers) ->
+    econf:list(econf:domain(), [unique]);
+mod_opt_type(ldap_tls_cacertfile) ->
+    econf:pem();
+mod_opt_type(ldap_tls_certfile) ->
+    econf:pem();
+mod_opt_type(ldap_tls_depth) ->
+    econf:non_neg_int();
+mod_opt_type(ldap_tls_verify) ->
+    econf:enum([hard, soft, false]);
+mod_opt_type(ldap_uids) ->
+    econf:either(
+      econf:list(
+        econf:and_then(
+          econf:binary(),
+          fun(U) -> {U, <<"%u">>} end)),
+      econf:map(econf:binary(), econf:binary(), [unique])).
 
+-spec mod_options(binary()) -> [{ldap_uids, [{binary(), binary()}]} |
+				{atom(), any()}].
 mod_options(Host) ->
     [{ldap_search_fields, default_search_fields()},
      {ldap_search_reported, default_search_reported()},
-     {ldap_vcard_map, default_vcard_map()}
-     | lists:map(
-	 fun({Opt, Default}) ->
-		 {Opt, ejabberd_config:get_option({Opt, Host}, Default)}
-	 end, eldap_utils:options(Host))].
+     {ldap_vcard_map, default_vcard_map()},
+     {ldap_backups, ejabberd_option:ldap_backups(Host)},
+     {ldap_base, ejabberd_option:ldap_base(Host)},
+     {ldap_uids, ejabberd_option:ldap_uids(Host)},
+     {ldap_deref_aliases, ejabberd_option:ldap_deref_aliases(Host)},
+     {ldap_encrypt, ejabberd_option:ldap_encrypt(Host)},
+     {ldap_password, ejabberd_option:ldap_password(Host)},
+     {ldap_port, ejabberd_option:ldap_port(Host)},
+     {ldap_rootdn, ejabberd_option:ldap_rootdn(Host)},
+     {ldap_servers, ejabberd_option:ldap_servers(Host)},
+     {ldap_filter, ejabberd_option:ldap_filter(Host)},
+     {ldap_tls_certfile, ejabberd_option:ldap_tls_certfile(Host)},
+     {ldap_tls_cacertfile, ejabberd_option:ldap_tls_cacertfile(Host)},
+     {ldap_tls_depth, ejabberd_option:ldap_tls_depth(Host)},
+     {ldap_tls_verify, ejabberd_option:ldap_tls_verify(Host)}].
+
+mod_doc() ->
+    #{opts =>
+          [{ldap_search_fields,
+            #{value => "{Name: Attribute, ...}",
+              desc =>
+                  ?T("This option defines the search form and the LDAP "
+		     "attributes to search within. 'Name' is the name of a "
+		     "search form field which will be automatically "
+		     "translated by using the translation files "
+		     "(see 'msgs/*.msg' for available words). "
+		     "'Attribute' is the LDAP attribute or the pattern '%u'."),
+	      example =>
+		  [{?T("The default is:"),
+		   ["User: \"%u\"",
+		    "\"Full Name\": displayName",
+		    "\"Given Name\": givenName",
+		    "\"Middle Name\": initials",
+		    "\"Family Name\": sn",
+		    "Nickname: \"%u\"",
+		    "Birthday: birthDay",
+		    "Country: c",
+		    "City: l",
+		    "Email: mail",
+		    "\"Organization Name\": o",
+		    "\"Organization Unit\": ou"]
+		   }]}},
+	    {ldap_search_reported,
+	     #{value => "{SearchField: VcardField}, ...}",
+	       desc =>
+		   ?T("This option defines which search fields should be "
+		      "reported. 'SearchField' is the name of a search form "
+		      "field which will be automatically translated by using "
+		      "the translation files (see 'msgs/*.msg' for available "
+		      "words). 'VcardField' is the vCard field name defined "
+		      "in the 'ldap_vcard_map' option."),
+	       example =>
+		   [{?T("The default is:"),
+		     ["\"Full Name\": FN",
+		      "\"Given Name\": FIRST",
+		      "\"Middle Name\": MIDDLE",
+		      "\"Family Name\": LAST",
+		      "\"Nickname\": NICKNAME",
+		      "\"Birthday\": BDAY",
+		      "\"Country\": CTRY",
+		      "\"City\": LOCALITY",
+		      "\"Email\": EMAIL",
+		      "\"Organization Name\": ORGNAME",
+		      "\"Organization Unit\": ORGUNIT"]
+		    }]}},
+	   {ldap_vcard_map,
+	    #{value => "{Name: {Pattern, LDAPattributes}, ...}",
+	      desc =>
+		  ?T("With this option you can set the table that maps LDAP "
+		     "attributes to vCard fields. 'Name' is the type name of "
+		     "the vCard as defined in "
+		     "https://tools.ietf.org/html/rfc2426[RFC 2426]. "
+		     "'Pattern' is a string which contains "
+		     "pattern variables '%u', '%d' or '%s'. "
+		     "'LDAPattributes' is the list containing LDAP attributes. "
+		     "The pattern variables '%s' will be sequentially replaced "
+		     "with the values of LDAP attributes from "
+		     "'List_of_LDAP_attributes', '%u' will be replaced with "
+		     "the user part of a JID, and '%d' will be replaced with "
+		     "the domain part of a JID."),
+	      example =>
+		  [{?T("The default is:"),
+		    ["NICKNAME: {\"%u\": []}",
+		     "FN: {\"%s\": [displayName]}",
+		     "LAST: {\"%s\": [sn]}",
+		     "FIRST: {\"%s\": [givenName]}",
+		     "MIDDLE: {\"%s\": [initials]}",
+		     "ORGNAME: {\"%s\": [o]}",
+		     "ORGUNIT: {\"%s\": [ou]}",
+		     "CTRY: {\"%s\": [c]}",
+		     "LOCALITY: {\"%s\": [l]}",
+		     "STREET: {\"%s\": [street]}",
+		     "REGION: {\"%s\": [st]}",
+		     "PCODE: {\"%s\": [postalCode]}",
+		     "TITLE: {\"%s\": [title]}",
+		     "URL: {\"%s\": [labeleduri]}",
+		     "DESC: {\"%s\": [description]}",
+		     "TEL: {\"%s\": [telephoneNumber]}",
+		     "EMAIL: {\"%s\": [mail]}",
+		     "BDAY: {\"%s\": [birthDay]}",
+		     "ROLE: {\"%s\": [employeeType]}",
+		     "PHOTO: {\"%s\": [jpegPhoto]}"]
+		   }]}}] ++
+          [{Opt,
+            #{desc =>
+                  {?T("Same as top-level _`~s`_ option, but "
+                      "applied to this module only."), [Opt]}}}
+           || Opt <- [ldap_base, ldap_servers, ldap_uids,
+                      ldap_deref_aliases, ldap_encrypt, ldap_password,
+                      ldap_port, ldap_rootdn, ldap_filter,
+                      ldap_tls_certfile, ldap_tls_cacertfile,
+                      ldap_tls_depth, ldap_tls_verify, ldap_backups]]}.

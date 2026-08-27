@@ -5,7 +5,7 @@
 %%% Created : 22 Dec 2004 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -25,259 +25,188 @@
 
 -module(ejabberd_sql_sup).
 
--behaviour(ejabberd_config).
-
 -author('alexey@process-one.net').
 
--export([start_link/1, init/1, add_pid/2, remove_pid/2,
-  get_pids/1, get_random_pid/1, get_pids/2, get_random_pid/2, transform_options/1,
-  reload/1, opt_type/1
-]).
+-export([start/1, stop/1, stop/0]).
+-export([start_link/0, start_link/1]).
+-export([init/1, reload/1, config_reloaded/0, is_started/1]).
+-export([get_secondary_host/1, start_secondary_pools/1]).
 
 -include("logger.hrl").
--include_lib("stdlib/include/ms_transform.hrl").
 
--define(PGSQL_PORT, 5432).
--define(MYSQL_PORT, 3306).
--define(DEFAULT_POOL_SIZE, 10).
--define(DEFAULT_SQL_START_INTERVAL, 30).
--define(CONNECT_TIMEOUT, 500).
+start(Host) ->
+    case is_started(Host) of
+	true -> ok;
+	false ->
+	    case lists:member(Host, ejabberd_option:hosts()) of
+		false ->
+		    ?WARNING_MSG("Rejecting start of sql worker for unknown host: ~ts", [Host]),
+		    {error, invalid_host};
+		true ->
+		    App = case ejabberd_option:sql_type(Host) of
+			      mysql -> p1_mysql;
+			      pgsql -> p1_pgsql;
+			      sqlite -> sqlite3;
+			      _ -> odbc
+			  end,
+		    ejabberd:start_app(App),
+		    Spec = #{id => gen_mod:get_module_proc(Host, ?MODULE),
+			start => {ejabberd_sql_sup, start_link, [Host]},
+			restart => transient,
+			shutdown => infinity,
+			type => supervisor,
+			modules => [?MODULE]},
+		    case supervisor:start_child(ejabberd_db_sup, Spec) of
+			{ok, _} ->
+			    ejabberd_sql_schema:start(Host),
+			    ok;
+			{error, {already_started, Pid}} ->
+			    %% Wait for the supervisor to fully start
+			    _ = supervisor:count_children(Pid),
+			    ok;
+			{error, Why} = Err ->
+			    ?ERROR_MSG("Failed to start ~ts: ~p", [?MODULE, Why]),
+			    Err
+		    end
+	    end
+    end.
 
--record(sql_pool, {host :: binary(),
-       pid  :: pid()}).
+stop(Host) ->
+    Proc = gen_mod:get_module_proc(Host, ?MODULE),
+    case supervisor:terminate_child(ejabberd_db_sup, Proc) of
+	ok -> supervisor:delete_child(ejabberd_db_sup, Proc);
+	Err -> Err
+    end.
+
+
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 start_link(Host) ->
-    ejabberd_mnesia:create(?MODULE, sql_pool,
-      [{ram_copies, [node()]}, {type, bag},
-       {local_content, true},
-       {attributes, record_info(fields, sql_pool)}]),
-    F = fun() -> mnesia:delete({sql_pool, Host}) end,
-    mnesia:ets(F),
-
     supervisor:start_link({local,
-         gen_mod:get_module_proc(Host, ?MODULE)},
-        ?MODULE, [Host]).
+			   gen_mod:get_module_proc(Host, ?MODULE)},
+			  ?MODULE, [Host]).
 
+stop() ->
+    ejabberd_hooks:delete(host_up, ?MODULE, start, 20),
+    ejabberd_hooks:delete(host_down, ?MODULE, stop, 90),
+    ejabberd_hooks:delete(config_reloaded, ?MODULE, config_reloaded, 20).
+
+init([]) ->
+    file:delete(ejabberd_sql:odbcinst_config()),
+    ejabberd_hooks:add(host_up, ?MODULE, start, 20),
+    ejabberd_hooks:add(host_down, ?MODULE, stop, 90),
+    ejabberd_hooks:add(config_reloaded, ?MODULE, config_reloaded, 20),
+    ignore;
 init([Host]) ->
-    Type = ejabberd_config:get_option({sql_type, Host}, odbc),
+    Type = ejabberd_option:sql_type(Host),
     PoolSize = get_pool_size(Type, Host),
     case Type of
         sqlite ->
             check_sqlite_db(Host);
-  mssql ->
-      ejabberd_sql:init_mssql(Host);
+	mssql ->
+	    ejabberd_sql:init_mssql(Host);
         _ ->
             ok
     end,
-    AllHosts = [Host] ++ ejabberd_config:get_option({sql_secondary_servers, Host}, []),
-    {ok,
-      {
-        {one_for_one, PoolSize * 10 * length(AllHosts), 1},
-        %% list of ejabberd_sql specs; the total count would be number of hosts * pool size
-        lists:foldl(
-          fun(H, Acc) ->
-            %% first iter: length(Acc) is 0, so HostIndex bc (0 / PoolSize) + 1 = 1
-            %% next iter : Acc length will be exactly PoolSize, so we have (PoolSize  / PoolSize) + 1 = 2
-            %% next iter : Acc length is now PoolSize * 2,      so we have (2PoolSize / PoolSize) + 1 = 3
-            %% and so on...
-            HostIndex = (length(Acc) div PoolSize) + 1,
+    {ok, {{one_for_one, PoolSize * 10, 1}, child_specs(Host, PoolSize)}}.
 
-            %% if secondary server
-            if HostIndex > 1 ->
-              %% save configs for each secondary using the configs for the primary
-              %% except for of course the sql_server address, which matches the secondary host address provided
-              SqlType = ejabberd_config:get_option({sql_type, Host}, odbc),
-              ejabberd_config:add_option({sql_type, H}, SqlType),
-              ejabberd_config:add_option({sql_server, H}, H),
-              ejabberd_config:add_option({sql_port, H}, ejabberd_config:get_option({sql_port, Host})),
-              ejabberd_config:add_option({sql_database, H}, ejabberd_config:get_option({sql_database, Host}, <<"ejabberd">>)),
-              ejabberd_config:add_option({sql_username, H}, ejabberd_config:get_option({sql_username, Host}, <<"ejabberd">>)),
-              ejabberd_config:add_option({sql_password, H}, ejabberd_config:get_option({sql_password, Host}, <<"">>)),
-              ejabberd_config:add_option({sql_start_interval, H}, ejabberd_config:get_option({sql_start_interval, Host}, ?DEFAULT_SQL_START_INTERVAL)),
-              ejabberd_config:add_option({sql_keepalive_interval, H}, ejabberd_config:get_option({sql_keepalive_interval, Host})),
-              ejabberd_config:add_option({sql_connect_timeout, H}, ejabberd_config:get_option({sql_connect_timeout, Host}, 5)),
-              ejabberd_config:add_option({sql_query_timeout, H}, ejabberd_config:get_option({sql_query_timeout, Host}, 60)),
-              ejabberd_config:add_option({sql_queue_type, H}, ejabberd_config:get_option({sql_queue_type, Host})),
-              ejabberd_config:add_option({sql_pool_size, H}, get_pool_size(SqlType, Host)),
-              ejabberd_config:add_option({sql_ssl, H}, ejabberd_config:get_option({sql_ssl, Host}, false)),
-              ejabberd_config:add_option({sql_ssl_verify, H}, ejabberd_config:get_option({sql_ssl_verify, Host}, false)),
-              ejabberd_config:add_option({sql_ssl_certfile, H}, ejabberd_config:get_option({sql_ssl_certfile, Host})),
-              ejabberd_config:add_option({sql_ssl_cafile, H}, ejabberd_config:get_option({sql_ssl_cafile, Host}));
-            true -> ""
-            end,
+-spec config_reloaded() -> ok.
+config_reloaded() ->
+    lists:foreach(fun reload/1, ejabberd_option:hosts()).
 
-            %% accumulate the ejabberd_sql specs for this host (PoolSize number of specs per host).
-            %% since we saved configs for secondary H above and secondary H points to a secondary server,
-            %% the ejabberd_sql instance will always have the database context of a
-            %% secondary: its DB reference, any queries it runs, etc, will all be against that secondary
-            Acc ++ [
-              child_spec(
-                %% name the child using the host index and the pool index
-                integer_to_list(HostIndex) ++ "-" ++ integer_to_list(I),
-                H
-              ) || I <- lists:seq(1, PoolSize)
-            ]
-          end,
-          [],
-          AllHosts
-        )
-      }
-    }.
-
+-spec reload(binary()) -> ok.
 reload(Host) ->
-    Type = ejabberd_config:get_option({sql_type, Host}, odbc),
-    NewPoolSize = get_pool_size(Type, Host),
-    OldPoolSize = ets:select_count(
-        sql_pool,
-        ets:fun2ms(
-          fun(#sql_pool{host = H}) when H == Host ->
-            true
-          end)),
-    reload(Host, NewPoolSize, OldPoolSize).
-
-reload(Host, NewPoolSize, OldPoolSize) ->
-    Sup = gen_mod:get_module_proc(Host, ?MODULE),
-    AllHosts = [Host] ++ ejabberd_config:get_option({sql_secondary_servers, Host}, []),
-    if NewPoolSize == OldPoolSize ->
-      ok;
-    %% add more sql connections
-    NewPoolSize > OldPoolSize ->
-      %% for each host, get the host and make the extra ejabberd_sql specs needed
-      lists:foreach(
-        fun(HostIndex) ->
-          H = lists:nth(HostIndex, AllHosts),
-          lists:foreach(
-            fun(I) ->
-              supervisor:start_child(Sup, child_spec(integer_to_list(HostIndex) ++ "-" ++ integer_to_list(I), H))
-            end,
-            lists:seq(OldPoolSize + 1, NewPoolSize)
-          )
-        end,
-        lists:seq(1, length(AllHosts))
-      );
-    %% remove sql connections
-    OldPoolSize > NewPoolSize ->
-      %% for each host, get the host and remove the necessary ejabberd_sql specs
-      lists:foreach(
-        fun(HostIndex) ->
-          lists:foreach(
-            fun(I) ->
-              supervisor:terminate_child(Sup, integer_to_list(HostIndex) ++ "-" ++ integer_to_list(I)),
-              supervisor:delete_child(Sup, integer_to_list(HostIndex) ++ "-" ++ integer_to_list(I))
-            end, lists:seq(NewPoolSize + 1, OldPoolSize)
-          )
-        end,
-        lists:seq(1, length(AllHosts))
-      )
+    case is_started(Host) of
+	true ->
+	    Sup = gen_mod:get_module_proc(Host, ?MODULE),
+	    Type = ejabberd_option:sql_type(Host),
+	    PoolSize = get_pool_size(Type, Host),
+	    lists:foreach(
+	      fun(Spec) ->
+		      supervisor:start_child(Sup, Spec)
+	      end, child_specs(Host, PoolSize)),
+	    lists:foreach(
+	      fun({Id, _, _, _}) when Id > PoolSize ->
+		      case supervisor:terminate_child(Sup, Id) of
+			  ok -> supervisor:delete_child(Sup, Id);
+			  _ -> ok
+		      end;
+		 (_) ->
+		      ok
+	      end, supervisor:which_children(Sup));
+	false ->
+	    ok
     end.
 
-%% backwards compatible get_pids
-get_pids(Host) ->
-  get_pids(Host, primary).
-
-%% get_pids that can accept primary or secondary NodeType
-get_pids(Host, NodeType) ->
-  %% if secondary, pick a random secondary host and get its list of pids (ejabberd_sql instances)
-  %% else default to primary
-  SearchHost = if NodeType == secondary orelse NodeType == any ->
-    %% make list of secondary servers and optionally include primary if NodeType is 'any' (meaning primary or secondary)
-    HostList = ejabberd_config:get_option({sql_secondary_servers, Host}, []) ++ (if NodeType == any -> [Host]; true -> [] end),
-    %% only use host list if there actually are some
-    if length(HostList) > 0 ->
-      I = rand:uniform(length(HostList)),
-      lists:nth(I, HostList);
-    true ->
-      Host
-    end;
-  true ->
-    Host
-  end,
-  Rs = mnesia:dirty_read(sql_pool, SearchHost),
-  [R#sql_pool.pid || R <- Rs, is_process_alive(R#sql_pool.pid)].
-
-%% backwards compatible get_random_pid
-get_random_pid(Host) ->
-  get_random_pid(Host, primary).
-
-%% get_random_pid that can accept primary or secondary NodeType
-get_random_pid(Host, NodeType) ->
-    case get_pids(Host, NodeType) of
-      [] -> none;
-      Pids ->
-      I = p1_rand:round_robin(length(Pids)) + 1,
-      lists:nth(I, Pids)
-    end.
-
-add_pid(Host, Pid) ->
-    F = fun () ->
-      mnesia:write(#sql_pool{host = Host, pid = Pid})
-    end,
-    mnesia:ets(F).
-
-remove_pid(Host, Pid) ->
-    F = fun () ->
-    mnesia:delete_object(#sql_pool{host = Host, pid = Pid})
-  end,
-    mnesia:ets(F).
+-spec is_started(binary()) -> boolean().
+is_started(Host) ->
+    whereis(gen_mod:get_module_proc(Host, ?MODULE)) /= undefined.
 
 -spec get_pool_size(atom(), binary()) -> pos_integer().
 get_pool_size(SQLType, Host) ->
-    PoolSize = ejabberd_config:get_option(
-                 {sql_pool_size, Host},
-     case SQLType of
-         sqlite -> 1;
-         _ -> ?DEFAULT_POOL_SIZE
-     end),
+    PoolSize = ejabberd_option:sql_pool_size(Host),
     if PoolSize > 1 andalso SQLType == sqlite ->
-      ?WARNING_MSG("it's not recommended to set sql_pool_size > 1 for "
-       "sqlite, because it may cause race conditions", []);
+	    ?WARNING_MSG("It's not recommended to set sql_pool_size > 1 for "
+			 "sqlite, because it may cause race conditions", []);
        true ->
-      ok
+	    ok
     end,
     PoolSize.
 
-child_spec(I, Host) ->
-    StartInterval = ejabberd_config:get_option(
-                      {sql_start_interval, Host},
-                      ?DEFAULT_SQL_START_INTERVAL),
-    {I, {ejabberd_sql, start_link, [Host, timer:seconds(StartInterval)]},
-     transient, 2000, worker, [?MODULE]}.
+-spec child_spec(binary(), pos_integer()) -> supervisor:child_spec().
+child_spec(Host, I) ->
+    #{id => I,
+      start => {ejabberd_sql, start_link, [Host, I]},
+      restart => transient,
+      shutdown => 2000,
+      type => worker,
+      modules => [?MODULE]}.
 
-transform_options(Opts) ->
-    lists:foldl(fun transform_options/2, [], Opts).
+-spec child_specs(binary(), pos_integer()) -> [supervisor:child_spec()].
+child_specs(Host, PoolSize) ->
+    [child_spec(Host, I) || I <- lists:seq(1, PoolSize)].
 
-transform_options({odbc_server, {Type, Server, Port, DB, User, Pass}}, Opts) ->
-    [{sql_type, Type},
-     {sql_server, Server},
-     {sql_port, Port},
-     {sql_database, DB},
-     {sql_username, User},
-     {sql_password, Pass}|Opts];
-transform_options({odbc_server, {mysql, Server, DB, User, Pass}}, Opts) ->
-    transform_options({odbc_server, {mysql, Server, ?MYSQL_PORT, DB, User, Pass}}, Opts);
-transform_options({odbc_server, {pgsql, Server, DB, User, Pass}}, Opts) ->
-    transform_options({odbc_server, {pgsql, Server, ?PGSQL_PORT, DB, User, Pass}}, Opts);
-transform_options({odbc_server, {sqlite, DB}}, Opts) ->
-    transform_options({odbc_server, {sqlite, DB}}, Opts);
-transform_options(Opt, Opts) ->
-    [Opt|Opts].
+-spec get_secondary_host(binary()) -> {ok, binary()} | error.
+get_secondary_host(Host) ->
+    case ejabberd_option:sql_secondary_servers(Host) of
+	[] -> error;
+	Servers ->
+	    Index = rand:uniform(length(Servers)),
+	    SecondaryHost = lists:nth(Index, Servers),
+	    case is_started(SecondaryHost) of
+		true -> {ok, SecondaryHost};
+		false -> error
+	    end
+    end.
+
+-spec start_secondary_pools(binary()) -> ok.
+start_secondary_pools(Host) ->
+    SecondaryServers = ejabberd_option:sql_secondary_servers(Host),
+    lists:foreach(
+      fun(SecHost) ->
+	      case start(SecHost) of
+		  ok -> ?INFO_MSG("Started secondary SQL pool for ~ts", [SecHost]);
+		  {error, Why} -> ?ERROR_MSG("Failed to start secondary SQL pool for ~ts: ~p", [SecHost, Why])
+	      end
+      end, SecondaryServers).
 
 check_sqlite_db(Host) ->
     DB = ejabberd_sql:sqlite_db(Host),
     File = ejabberd_sql:sqlite_file(Host),
     Ret = case filelib:ensure_dir(File) of
-        ok ->
-      case sqlite3:open(DB, [{file, File}]) of
-          {ok, _Ref} -> ok;
-          {error, {already_started, _Ref}} -> ok;
-          {error, R} -> {error, R}
-      end;
-        Err ->
-      Err
-    end,
+	      ok ->
+		  case sqlite3:open(DB, [{file, File}]) of
+		      {ok, _Ref} -> ok;
+		      {error, {already_started, _Ref}} -> ok;
+		      {error, R} -> {error, R}
+		  end;
+	      Err ->
+		  Err
+	  end,
     case Ret of
         ok ->
-      sqlite3:sql_exec(DB, "pragma foreign_keys = on"),
+	    sqlite3:sql_exec(DB, "pragma foreign_keys = on"),
             case sqlite3:list_tables(DB) of
                 [] ->
                     create_sqlite_tables(DB),
@@ -292,7 +221,11 @@ check_sqlite_db(Host) ->
 
 create_sqlite_tables(DB) ->
     SqlDir = misc:sql_dir(),
-    File = filename:join(SqlDir, "lite.sql"),
+    Filename = case ejabberd_sql:use_multihost_schema() of
+        true -> "lite.new.sql";
+        false -> "lite.sql"
+    end,
+    File = filename:join(SqlDir, Filename),
     case file:open(File, [read, binary]) of
         {ok, Fd} ->
             Qs = read_lines(Fd, File, []),
@@ -300,8 +233,8 @@ create_sqlite_tables(DB) ->
             [ok = sqlite3:sql_exec(DB, Q) || Q <- Qs],
             ok = sqlite3:sql_exec(DB, "commit");
         {error, Reason} ->
-            ?WARNING_MSG("Failed to read SQLite schema file: ~s",
-       [file:format_error(Reason)])
+            ?WARNING_MSG("Failed to read SQLite schema file: ~ts",
+			 [file:format_error(Reason)])
     end.
 
 read_lines(Fd, File, Acc) ->
@@ -331,11 +264,3 @@ read_lines(Fd, File, Acc) ->
             ?ERROR_MSG("Failed read from lite.sql, reason: ~p", [Err]),
             []
     end.
-
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
-opt_type(sql_pool_size) ->
-    fun (I) when is_integer(I), I > 0 -> I end;
-opt_type(sql_start_interval) ->
-    fun (I) when is_integer(I), I > 0 -> I end;
-opt_type(_) ->
-    [sql_pool_size, sql_start_interval].

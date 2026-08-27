@@ -4,7 +4,7 @@
 %%% Created : 15 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -25,18 +25,23 @@
 -module(mod_mam_mnesia).
 
 -behaviour(mod_mam).
+-behaviour(ejabberd_db_serialize).
 
 %% API
 -export([init/2, remove_user/2, remove_room/3, delete_old_messages/3,
-	 extended_fields/0, store/8, write_prefs/4, get_prefs/2, select/6, remove_from_archive/3,
-	 is_empty_for_user/2, is_empty_for_room/3]).
-
--export([get_room_history/4]).
+	 extended_fields/1, store/10, write_prefs/4, get_prefs/2, select/6,
+         remove_from_archive/3,
+	 is_empty_for_user/2, is_empty_for_room/3, get_room_history/4,
+	 delete_old_messages_batch/5,
+         transform/1]).
+-export([serialize/3, deserialize_start/1, deserialize/2]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+
 -include("logger.hrl").
 -include("mod_mam.hrl").
+-include("ejabberd_db_serialize.hrl").
 
 -define(BIN_GREATER_THAN(A, B),
 	((A > B andalso byte_size(A) == byte_size(B))
@@ -77,18 +82,38 @@ remove_user(LUser, LServer) ->
 remove_room(_LServer, LName, LHost) ->
     remove_user(LName, LHost).
 
-remove_from_archive(LUser, LServer, none) ->
-    US = {LUser, LServer},
+remove_from_archive(LUser, LHost, Key) when is_binary(LUser) ->
+    remove_from_archive({LUser, LHost}, LHost, Key);
+remove_from_archive(US, _LServer, none) ->
     case mnesia:transaction(fun () -> mnesia:delete({archive_msg, US}) end) of
 	{atomic, _} -> ok;
 	{aborted, Reason} -> {error, Reason}
     end;
-remove_from_archive(LUser, LServer, WithJid) ->
-    US = {LUser, LServer},
+remove_from_archive(US, _LServer, #jid{} = WithJid) ->
     Peer = jid:remove_resource(jid:split(WithJid)),
     F = fun () ->
-	    Msgs = mnesia:match_object(#archive_msg{us = US, bare_peer = Peer, _ = '_'}),
+	    Msgs = mnesia:select(
+		     archive_msg,
+		     ets:fun2ms(
+		       fun(#archive_msg{us = US1, bare_peer = Peer1} = Msg)
+			  when US1 == US, Peer1 == Peer -> Msg
+		       end)),
 	    lists:foreach(fun mnesia:delete_object/1, Msgs)
+	end,
+    case mnesia:transaction(F) of
+	{atomic, _} -> ok;
+	{aborted, Reason} -> {error, Reason}
+    end;
+remove_from_archive(US, _LServer, StanzaId) ->
+    Timestamp = misc:usec_to_now(StanzaId),
+    F = fun () ->
+	Msgs = mnesia:select(
+	    archive_msg,
+	    ets:fun2ms(
+		fun(#archive_msg{us = US1, timestamp = Timestamp1} = Msg)
+		       when US1 == US, Timestamp1 == Timestamp -> Msg
+		end)),
+	lists:foreach(fun mnesia:delete_object/1, Msgs)
 	end,
     case mnesia:transaction(F) of
 	{atomic, _} -> ok;
@@ -124,18 +149,76 @@ delete_old_user_messages(User, TimeStamp, Type) ->
 	{atomic, ok} ->
 	    delete_old_user_messages(NextRecord, TimeStamp, Type);
 	{aborted, Err} ->
-	    ?ERROR_MSG("Cannot delete old MAM messages: ~s", [Err]),
+	    ?ERROR_MSG("Cannot delete old MAM messages: ~ts", [Err]),
 	    Err
     end.
 
-extended_fields() ->
+delete_batch('$end_of_table', _LServer, _TS, _Type, Num) ->
+    {Num, '$end_of_table'};
+delete_batch(LastUS, _LServer, _TS, _Type, 0) ->
+    {0, LastUS};
+delete_batch(none, LServer, TS, Type, Num) ->
+    delete_batch(mnesia:first(archive_msg), LServer, TS, Type, Num);
+delete_batch({_, LServer2} = LastUS, LServer, TS, Type, Num) when LServer /= LServer2 ->
+    delete_batch(mnesia:next(archive_msg, LastUS), LServer, TS, Type, Num);
+delete_batch(LastUS, LServer, TS, Type, Num) ->
+    Left =
+    lists:foldl(
+	fun(_, 0) ->
+	    0;
+	   (#archive_msg{timestamp = TS2, type = Type2} = O, Num2) when TS2 < TS, (Type == all orelse Type == Type2) ->
+	       mnesia:delete_object(O),
+	       Num2 - 1;
+	   (_, Num2) ->
+	       Num2
+	end, Num, mnesia:wread({archive_msg, LastUS})),
+    case Left of
+	0 -> {0, LastUS};
+	_ -> delete_batch(mnesia:next(archive_msg, LastUS), LServer, TS, Type, Left)
+    end.
+
+delete_old_messages_batch(LServer, TimeStamp, Type, Batch, LastUS) ->
+    R = mnesia:transaction(
+	fun() ->
+	    {Num, NextUS} = delete_batch(LastUS, LServer, TimeStamp, Type, Batch),
+	    {Batch - Num, NextUS}
+	end),
+    case R of
+	{atomic, {Num, State}} ->
+	    {ok, State, Num};
+	{aborted, Err} ->
+	    {error, Err}
+    end.
+
+extended_fields(_) ->
     [].
 
-store(Pkt, _, {LUser, LServer}, Type, Peer, Nick, _Dir, TS) ->
+store(Pkt, _, {LUser, LServer}, Type, Peer, Nick, _Dir, TS,
+      OriginID, Retract) ->
+    case Retract of
+        {true, RID} ->
+            mnesia:transaction(
+              fun () ->
+                      {PUser, PServer, _} = jid:tolower(Peer),
+                      Msgs = mnesia:select(
+                               archive_msg,
+                               ets:fun2ms(
+                                 fun(#archive_msg{
+                                        us = US1,
+                                        bare_peer = Peer1,
+                                        origin_id = OriginID1} = Msg)
+                                       when US1 == {LUser, LServer},
+                                            Peer1 == {PUser, PServer, <<>>},
+                                            OriginID1 == RID -> Msg
+                                 end)),
+                      lists:foreach(fun mnesia:delete_object/1, Msgs)
+              end);
+        false -> ok
+    end,
     case {mnesia:table_info(archive_msg, disc_only_copies),
 	  mnesia:table_info(archive_msg, memory)} of
 	{[_|_], TableSize} when TableSize > ?TABLE_SIZE_LIMIT ->
-	    ?ERROR_MSG("MAM archives too large, won't store message for ~s@~s",
+	    ?ERROR_MSG("MAM archives too large, won't store message for ~ts@~ts",
 		       [LUser, LServer]),
 	    {error, overflow};
 	_ ->
@@ -149,13 +232,14 @@ store(Pkt, _, {LUser, LServer}, Type, Peer, Nick, _Dir, TS) ->
 				       bare_peer = {PUser, PServer, <<>>},
 				       type = Type,
 				       nick = Nick,
-				       packet = Pkt})
+				       packet = Pkt,
+                                       origin_id = OriginID})
 		end,
 	    case mnesia:transaction(F) of
 		{atomic, ok} ->
 		    ok;
 		{aborted, Err} ->
-		    ?ERROR_MSG("Cannot add message to MAM archive of ~s@~s: ~s",
+		    ?ERROR_MSG("Cannot add message to MAM archive of ~ts@~ts: ~ts",
 			       [LUser, LServer, Err]),
 		    Err
 	    end
@@ -275,5 +359,121 @@ filter_by_max(Msgs, Len) when is_integer(Len), Len >= 0 ->
 filter_by_max(_Msgs, _Junk) ->
     {[], true}.
 
-get_room_history(_LServer, _Host, _Room, _HistorySize) ->
-	{error, not_implemented}.
+transform({archive_msg, US, ID, Timestamp, Peer, BarePeer,
+           Packet, Nick, Type}) ->
+    #archive_msg{
+       us = US,
+       id = ID,
+       timestamp = Timestamp,
+       peer = Peer,
+       bare_peer = BarePeer,
+       packet = Packet,
+       nick = Nick,
+       type = Type,
+       origin_id = <<"">>};
+transform(Other) ->
+    Other.
+
+
+serialize(LServer, BatchSize, undefined) ->
+    ArchiveConv =
+        fun([]) -> skip;
+           ([#archive_msg{us = {U, S}, timestamp = TS, peer = Peer, packet = Xml, nick = Nick, type = Type, origin_id = OriginId}])
+              when S == LServer ->
+                {ok, #serialize_mam_v1{
+                       serverhost = LServer,
+                       username = U,
+                       timestamp = misc:now_to_usec(TS),
+                       peer = jid:encode(Peer),
+                       type = Type,
+                       nick = Nick,
+                       origin_id = OriginId,
+                       packet = fxml:element_to_binary(Xml)
+                      }};
+           (_) -> skip
+        end,
+    PrefsConv =
+        fun([]) -> skip;
+           ([#archive_prefs{us = {U, S}, default = Default, always = Always, never = Never}]) when S == LServer ->
+                {ok, #serialize_mam_prefs_v1{
+                       serverhost = LServer,
+                       username = U,
+                       default = Default,
+                       always = Always,
+                       never = Never
+                      }};
+           (_) -> skip
+        end,
+    ejabberd_db_serialize:iter_records([ejabberd_db_serialize:mnesia_iter(archive_msg, ArchiveConv),
+                                        ejabberd_db_serialize:mnesia_iter(archive_prefs, PrefsConv)],
+                                       [],
+                                       BatchSize);
+serialize(_LServer, BatchSize, Key) ->
+    ejabberd_db_serialize:iter_records(Key, [], BatchSize).
+
+
+deserialize_start(LServer) ->
+    mnesia:transaction(
+	fun() ->
+	    ArchiveKeys = mnesia:select(archive_msg,
+					ets:fun2ms(
+					    fun(#archive_msg{us = US}) when element(2, US) == LServer -> US end)),
+	    PrefsKeys = mnesia:select(archive_prefs,
+				      ets:fun2ms(
+					  fun(#archive_prefs{us = US}) when element(2, US) == LServer -> US end)),
+	    lists:foreach(fun(Key) -> mnesia:delete(archive_msg, Key, write) end, ArchiveKeys),
+	    lists:foreach(fun(Key) -> mnesia:delete(archive_prefs, Key, write) end, PrefsKeys)
+	end),
+    ok.
+
+
+deserialize(LServer, Batch) ->
+    F = fun() ->
+	lists:foldl(
+	    fun(_, {error, _} = Err) ->
+		Err;
+	       (#serialize_mam_v1{
+		   username = LUser,
+		   timestamp = TS,
+		   peer = Peer,
+		   type = Type,
+		   nick = Nick,
+		   origin_id = OriginId,
+		   packet = Xml
+	       }, _) ->
+		   {PUser, PServer, _} = PeerJ = jid:tolower(jid:decode(Peer)),
+		   mnesia:write(
+		       #archive_msg{
+			   us = {LUser, LServer},
+			   id = integer_to_binary(
+			       TS),
+			   timestamp = misc:usec_to_now(
+			       TS),
+			   peer = PeerJ,
+			   bare_peer = {PUser, PServer, <<>>},
+			   type = Type,
+			   nick = Nick,
+			   packet = fxml_stream:parse_element(Xml),
+			   origin_id = OriginId
+		       });
+	       (#serialize_mam_prefs_v1{
+		   username = U,
+		   default = Default,
+		   always = Always,
+		   never = Never
+	       },
+		_) ->
+		   mnesia:write(
+		       #archive_prefs{us = {U, LServer}, default = Default, always = Always, never = Never})
+	    end,
+	    ok,
+	    Batch)
+	end,
+    case mnesia:transaction(F) of
+	{atomic, _} -> ok;
+	{aborted, Reason} ->
+	    {error, iolist_to_binary(io_lib:format("Error when writing archive data: ~p", [Reason]))}
+    end.
+
+get_room_history(_LServer, _Room, _Host, _HistorySize) ->
+    [].

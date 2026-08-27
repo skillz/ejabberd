@@ -5,7 +5,7 @@
 %%% Created : 11 Sep 2014 by Holger Weiss <holger@zedat.fu-berlin.de>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2014-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2014-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -25,13 +25,14 @@
 
 -module(mod_client_state).
 -author('holger@zedat.fu-berlin.de').
--protocol({xep, 85, '2.1'}).
--protocol({xep, 352, '0.1'}).
+-protocol({xep, 85, '2.1', '2.1.0', "complete", ""}).
+-protocol({xep, 352, '0.1', '14.12', "complete", ""}).
 
 -behaviour(gen_mod).
 
 %% gen_mod callbacks.
 -export([start/2, stop/1, reload/3, mod_opt_type/1, depends/2, mod_options/1]).
+-export([mod_doc/0]).
 
 %% ejabberd_hooks callbacks.
 -export([filter_presence/1, filter_chat_states/1,
@@ -41,12 +42,13 @@
 	 c2s_copy_session/2, c2s_session_resumed/1]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+-include("translate.hrl").
 
 -define(CSI_QUEUE_MAX, 100).
 
 -type csi_type() :: presence | chatstate | {pep, binary()}.
--type csi_queue() :: {non_neg_integer(), map()}.
+-type csi_queue() :: {non_neg_integer(), #{csi_key() => csi_element()}}.
 -type csi_timestamp() :: {non_neg_integer(), erlang:timestamp()}.
 -type csi_key() :: {ljid(), csi_type()}.
 -type csi_element() :: {csi_timestamp(), stanza()}.
@@ -58,9 +60,9 @@
 %%--------------------------------------------------------------------
 -spec start(binary(), gen_mod:opts()) -> ok.
 start(Host, Opts) ->
-    QueuePresence = gen_mod:get_opt(queue_presence, Opts),
-    QueueChatStates = gen_mod:get_opt(queue_chat_states, Opts),
-    QueuePEP = gen_mod:get_opt(queue_pep, Opts),
+    QueuePresence = mod_client_state_opt:queue_presence(Opts),
+    QueueChatStates = mod_client_state_opt:queue_chat_states(Opts),
+    QueuePEP = mod_client_state_opt:queue_pep(Opts),
     if QueuePresence; QueueChatStates; QueuePEP ->
 	   register_hooks(Host),
 	   if QueuePresence ->
@@ -83,9 +85,9 @@ start(Host, Opts) ->
 
 -spec stop(binary()) -> ok.
 stop(Host) ->
-    QueuePresence = gen_mod:get_module_opt(Host, ?MODULE, queue_presence),
-    QueueChatStates = gen_mod:get_module_opt(Host, ?MODULE, queue_chat_states),
-    QueuePEP = gen_mod:get_module_opt(Host, ?MODULE, queue_pep),
+    QueuePresence = mod_client_state_opt:queue_presence(Host),
+    QueueChatStates = mod_client_state_opt:queue_chat_states(Host),
+    QueuePEP = mod_client_state_opt:queue_pep(Host),
     if QueuePresence; QueueChatStates; QueuePEP ->
 	   unregister_hooks(Host),
 	   if QueuePresence ->
@@ -108,9 +110,9 @@ stop(Host) ->
 
 -spec reload(binary(), gen_mod:opts(), gen_mod:opts()) -> ok.
 reload(Host, NewOpts, _OldOpts) ->
-    QueuePresence = gen_mod:get_opt(queue_presence, NewOpts),
-    QueueChatStates = gen_mod:get_opt(queue_chat_states, NewOpts),
-    QueuePEP = gen_mod:get_opt(queue_pep, NewOpts),
+    QueuePresence = mod_client_state_opt:queue_presence(NewOpts),
+    QueueChatStates = mod_client_state_opt:queue_chat_states(NewOpts),
+    QueuePEP = mod_client_state_opt:queue_pep(NewOpts),
     if QueuePresence; QueueChatStates; QueuePEP ->
 	    register_hooks(Host);
        true ->
@@ -138,18 +140,50 @@ reload(Host, NewOpts, _OldOpts) ->
 				  filter_pep, 50)
     end.
 
--spec mod_opt_type(atom()) -> fun((term()) -> term()) | [atom()].
+-spec mod_opt_type(atom()) -> econf:validator().
 mod_opt_type(queue_presence) ->
-    fun(B) when is_boolean(B) -> B end;
+    econf:bool();
 mod_opt_type(queue_chat_states) ->
-    fun(B) when is_boolean(B) -> B end;
+    econf:bool();
 mod_opt_type(queue_pep) ->
-    fun(B) when is_boolean(B) -> B end.
+    econf:bool().
 
 mod_options(_) ->
     [{queue_presence, true},
      {queue_chat_states, true},
      {queue_pep, true}].
+
+mod_doc() ->
+    #{desc =>
+          [?T("This module allows for queueing certain types of stanzas "
+              "when a client indicates that the user is not actively using "
+              "the client right now (see https://xmpp.org/extensions/xep-0352.html"
+              "[XEP-0352: Client State Indication]). This can save bandwidth and "
+              "resources."), "",
+           ?T("A stanza is dropped from the queue if it's effectively obsoleted "
+              "by a new one (e.g., a new presence stanza would replace an old "
+              "one from the same client). The queue is flushed if a stanza arrives "
+              "that won't be queued, or if the queue size reaches a certain limit "
+              "(currently 100 stanzas), or if the client becomes active again.")],
+      opts =>
+          [{queue_presence,
+            #{value => "true | false",
+              desc =>
+                  ?T("While a client is inactive, queue presence stanzas "
+                     "that indicate (un)availability. The default value is 'true'.")}},
+           {queue_chat_states,
+            #{value => "true | false",
+              desc =>
+                  ?T("Queue \"standalone\" chat state notifications (as defined in "
+                     "https://xmpp.org/extensions/xep-0085.html"
+                     "[XEP-0085: Chat State Notifications]) while a client "
+                     "indicates inactivity. The default value is 'true'.")}},
+           {queue_pep,
+            #{value => "true | false",
+              desc =>
+                  ?T("Queue PEP notifications while a client is inactive. "
+                     "When the queue is flushed, only the most recent notification "
+                     "of a given PEP node is delivered. The default value is 'true'.")}}]}.
 
 -spec depends(binary(), gen_mod:opts()) -> [{module(), hard | soft}].
 depends(_Host, _Opts) ->
@@ -227,7 +261,7 @@ filter_presence({#presence{meta = #{csi_resend := true}}, _} = Acc) ->
 filter_presence({#presence{to = To, type = Type} = Pres,
 		 #{csi_state := inactive} = C2SState})
   when Type == available; Type == unavailable ->
-    ?DEBUG("Got availability presence stanza for ~s", [jid:encode(To)]),
+    ?DEBUG("Got availability presence stanza for ~ts", [jid:encode(To)]),
     enqueue_stanza(presence, Pres, C2SState);
 filter_presence(Acc) ->
     Acc.
@@ -246,7 +280,7 @@ filter_chat_states({#message{from = From, to = To} = Msg,
 		    %% conversations across clients.
 		    Acc;
 		_ ->
-		?DEBUG("Got standalone chat state notification for ~s",
+		?DEBUG("Got standalone chat state notification for ~ts",
 		       [jid:encode(To)]),
 		    enqueue_stanza(chatstate, Msg, C2SState)
 	    end;
@@ -265,7 +299,7 @@ filter_pep({#message{to = To} = Msg,
 	undefined ->
 	    Acc;
 	Node ->
-	    ?DEBUG("Got PEP notification for ~s", [jid:encode(To)]),
+	    ?DEBUG("Got PEP notification for ~ts", [jid:encode(To)]),
 	    enqueue_stanza({pep, Node}, Msg, C2SState)
     end;
 filter_pep(Acc) ->
@@ -277,7 +311,7 @@ filter_other({Stanza, #{jid := JID} = C2SState} = Acc) when ?is_stanza(Stanza) -
 	#{csi_resend := true} ->
 	    Acc;
 	_ ->
-	    ?DEBUG("Won't add stanza for ~s to CSI queue", [jid:encode(JID)]),
+	    ?DEBUG("Won't add stanza for ~ts to CSI queue", [jid:encode(JID)]),
 	    From = case xmpp:get_from(Stanza) of
 		       undefined -> JID;
 		       F -> F
@@ -328,7 +362,7 @@ dequeue_sender(#jid{luser = U, lserver = S} = Sender,
 	    %% This may happen when the module is (re)loaded in runtime
 	    init_csi_state(C2SState);
 	Q ->
-	    ?DEBUG("Flushing packets of ~s@~s from CSI queue of ~s",
+	    ?DEBUG("Flushing packets of ~ts@~ts from CSI queue of ~ts",
 		   [U, S, jid:encode(JID)]),
 	    {Elems, Q1} = queue_take(Sender, Q),
 	    C2SState1 = flush_stanzas(C2SState, Elems),
@@ -337,7 +371,7 @@ dequeue_sender(#jid{luser = U, lserver = S} = Sender,
 
 -spec flush_queue(c2s_state()) -> c2s_state().
 flush_queue(#{csi_queue := Q, jid := JID} = C2SState) ->
-    ?DEBUG("Flushing CSI queue of ~s", [jid:encode(JID)]),
+    ?DEBUG("Flushing CSI queue of ~ts", [jid:encode(JID)]),
     C2SState1 = flush_stanzas(C2SState, queue_to_list(Q)),
     C2SState1#{csi_queue => queue_new()}.
 
@@ -379,7 +413,7 @@ queue_new() ->
 -spec queue_in(csi_key(), stanza(), csi_queue()) -> csi_queue().
 queue_in(Key, Stanza, {Seq, Q}) ->
     Seq1 = Seq + 1,
-    Time = {Seq1, p1_time_compat:timestamp()},
+    Time = {Seq1, erlang:timestamp()},
     Q1 = maps:put(Key, {Time, Stanza}, Q),
     {Seq1, Q1}.
 

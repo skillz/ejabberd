@@ -1,0 +1,278 @@
+name: Runtime
+
+on:
+  push:
+    paths:
+    - '*'
+    - '!*.md'
+    - '.github/workflows/runtime.yml'
+    - 'checkouts/**'
+    - 'config/**'
+    - 'lib/**'
+    - 'm4/**'
+    - 'plugins/**'
+    - 'rel/**'
+  pull_request:
+    paths:
+    - '*'
+    - '!*.md'
+    - '.github/workflows/runtime.yml'
+    - 'checkouts/**'
+    - 'config/**'
+    - 'lib/**'
+    - 'm4/**'
+    - 'plugins/**'
+    - 'rel/**'
+
+jobs:
+
+  ################################################################ Rebars #####
+
+  rebars:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        otp: ['25', '26', '27', '28']
+        rebar: ['rebar', 'rebar3']
+        exclude:
+        - otp: '27'
+          rebar: 'rebar'
+        - otp: '28'
+          rebar: 'rebar'
+    container:
+      image: public.ecr.aws/docker/library/erlang:${{ matrix.otp }}
+
+    steps:
+
+    - uses: actions/checkout@v6
+
+    - name: Get recent compatible Rebar binaries
+      if: matrix.otp < 25
+      run: |
+        rm rebar
+        rm rebar3
+        wget https://github.com/processone/ejabberd/raw/24.12/rebar
+        wget https://github.com/processone/ejabberd/raw/24.12/rebar3
+        chmod +x rebar
+        chmod +x rebar3
+
+    - name: Prepare libraries
+      run: |
+        apt-get -qq update
+        apt-get -q -y install libexpat1-dev libgd-dev libpam0g-dev \
+                              libsqlite3-dev libwebp-dev libyaml-dev
+
+    - name: Cache rebar3
+      if: matrix.rebar == 'rebar3'
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/rebar3/
+          _build/default/lib/
+        key: runtime-${{ matrix.otp }}-${{matrix.rebar}}-${{hashFiles('rebar.config')}}
+
+    - name: Compile
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: prod
+        do: compile
+        tool: ${{ matrix.rebar }}
+        configure: --disable-elixir
+
+    - run: make hooks
+    - run: make options
+    - run: make xref
+    - run: make dialyzer
+    - run: make elvis
+      if: matrix.otp > '25' && matrix.rebar == 'rebar3'
+
+    - name: Production
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: prod
+        do: deploy, start, register, stop, check, logs
+        tool: ${{ matrix.rebar }}
+        username: user1
+
+    - name: Development
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: dev
+        do: deploy, start, register, stop, check, logs
+        tool: ${{ matrix.rebar }}
+        username: user2
+
+    - name: Installed
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: install
+        do: deploy, start, register, stop, check, logs
+        tool: ${{ matrix.rebar }}
+        username: user3
+
+  ####################################################### Rebar3 + Elixir #####
+
+  rebar3-elixir:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        elixir: ['1.14', '1.18', '1.19']
+    container:
+      image: public.ecr.aws/docker/library/elixir:${{ matrix.elixir }}
+
+    steps:
+
+    - uses: actions/checkout@v6
+
+    - name: Prepare libraries
+      run: |
+        apt-get -qq update
+        apt-get -q -y install libexpat1-dev libgd-dev libpam0g-dev \
+                              libsqlite3-dev libwebp-dev libyaml-dev
+
+    - name: Enable Module.Example and an Elixir dependency
+      run: |
+        sed -i "s|^modules:|modules:\n  'Ejabberd.Module.Example': {}|g" \
+                ejabberd.yml.example
+        cat ejabberd.yml.example
+        sed -i 's|^{deps, \[\(.*\)|{deps, [{decimal, ".*", {git, "https://github.com/ericmj/decimal", {branch, "main"}}},\n \1|g' rebar.config
+        cat rebar.config
+
+    - name: Cache hex.pm
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/rebar3/
+        key: runtime-${{matrix.elixir}}-${{hashFiles('rebar.config')}}
+
+    - name: Install Hex and Rebar3 manually on older Elixir
+      if: matrix.elixir < '1.15'
+      run: |
+        mix local.hex --force
+        mix local.rebar --force
+
+    - name: Compile
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: prod
+        do: compile
+        tool: ./rebar3
+
+    - name: Test scripts, deps, eunit
+      run: |
+        make scripts deps
+        ./rebar3 eunit --verbose
+
+    - run: make hooks
+    - run: make options
+    - run: make xref
+    #- run: make dialyzer
+    - run: make elvis
+      if: matrix.otp > '25'
+
+    - name: Production
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: prod
+        do: deploy, start, register, stop, check, logs
+        username: user1
+
+    - name: Release
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: dev
+        do: deploy, start, register, stop, check, logs
+        username: user2
+
+    - name: Installed
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: install
+        do: deploy, start, register, stop, check, logs
+        username: user3
+
+  ################################################################### Mix #####
+
+  mix:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        elixir: ['1.14', '1.18', '1.19']
+    container:
+      image: public.ecr.aws/docker/library/elixir:${{ matrix.elixir }}
+
+    steps:
+
+    - uses: actions/checkout@v6
+
+    - name: Prepare libraries
+      run: |
+        apt-get -qq update
+        apt-get -q -y install libexpat1-dev libgd-dev libpam0g-dev \
+                              libsqlite3-dev libwebp-dev libyaml-dev
+
+    - name: Remove Elixir matchers
+      run: |
+        echo "::remove-matcher owner=elixir-mixCompileWarning::"
+        echo "::remove-matcher owner=elixir-credoOutputDefault::"
+        echo "::remove-matcher owner=elixir-mixCompileError::"
+        echo "::remove-matcher owner=elixir-mixTestFailure::"
+        echo "::remove-matcher owner=elixir-dialyzerOutputDefault::"
+
+    - name: Enable Module.Example and an Elixir dependency
+      run: |
+        sed -i "s|^modules:|modules:\n  'Ejabberd.Module.Example': {}|g" \
+                ejabberd.yml.example
+        cat ejabberd.yml.example
+        sed -i 's|^{deps, \(.*\)|{deps, \1\n  {decimal, ".*", {git, "https://github.com/ericmj/decimal", {branch, "main"}}}, |g' rebar.config
+        cat rebar.config
+
+    - name: Cache hex.pm
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.hex/
+        key: runtime-${{matrix.elixir}}-${{hashFiles('mix.exs')}}
+
+    - name: Install Hex and Rebar3 manually on older Elixir
+      if: matrix.elixir < '1.15'
+      run: |
+        mix local.hex --force
+        mix local.rebar --force
+
+    - name: Compile
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: prod
+        do: compile
+        tool: mix
+
+    - run: make hooks
+    - run: make options
+    - run: make xref
+    - run: make dialyzer
+    - run: make elvis
+      if: matrix.otp > '25'
+
+    - run: make edoc
+
+    - name: Production
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: prod
+        do: deploy, start, register, stop, check, logs
+        username: user1
+
+    - name: Development
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: dev
+        do: deploy, start, register, stop, check, logs
+        username: user2
+
+    - name: Installed
+      uses: ./.github/actions/manage-ejabberd
+      with:
+        for: install
+        do: deploy, start, register, stop, check, logs
+        username: user3

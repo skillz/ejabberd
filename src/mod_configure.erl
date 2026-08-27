@@ -1,11 +1,11 @@
 %%%----------------------------------------------------------------------
 %%% File    : mod_configure.erl
 %%% Author  : Alexey Shchepin <alexey@process-one.net>
-%%% Purpose : Support for online configuration of ejabberd
+%%% Purpose : Support for online configuration of ejabberd using XEP-0050
 %%% Created : 19 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,7 +27,7 @@
 
 -author('alexey@process-one.net').
 
--protocol({xep, 133, '1.1'}).
+-protocol({xep, 133, '1.3.1', '13.10', "partial", ""}).
 
 -behaviour(gen_mod).
 
@@ -36,59 +36,29 @@
 	 adhoc_local_items/4, adhoc_local_commands/4,
 	 get_sm_identity/5, get_sm_features/5, get_sm_items/5,
 	 adhoc_sm_items/4, adhoc_sm_commands/4, mod_options/1,
-	 depends/2]).
+	 mod_opt_type/1,
+	 depends/2, mod_doc/0]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("ejabberd_sm.hrl").
+-include("translate.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
--define(T(Lang, Text), translate:translate(Lang, Text)).
+start(_Host, _Opts) ->
+    {ok, [{hook, disco_local_items, get_local_items, 50},
+          {hook, disco_local_features, get_local_features, 50},
+          {hook, disco_local_identity, get_local_identity, 50},
+          {hook, disco_sm_items, get_sm_items, 50},
+          {hook, disco_sm_features, get_sm_features, 50},
+          {hook, disco_sm_identity, get_sm_identity, 50},
+          {hook, adhoc_local_items, adhoc_local_items, 50},
+          {hook, adhoc_local_commands, adhoc_local_commands, 50},
+          {hook, adhoc_sm_items, adhoc_sm_items, 50},
+          {hook, adhoc_sm_commands, adhoc_sm_commands, 50}]}.
 
-start(Host, _Opts) ->
-    ejabberd_hooks:add(disco_local_items, Host, ?MODULE,
-		       get_local_items, 50),
-    ejabberd_hooks:add(disco_local_features, Host, ?MODULE,
-		       get_local_features, 50),
-    ejabberd_hooks:add(disco_local_identity, Host, ?MODULE,
-		       get_local_identity, 50),
-    ejabberd_hooks:add(disco_sm_items, Host, ?MODULE,
-		       get_sm_items, 50),
-    ejabberd_hooks:add(disco_sm_features, Host, ?MODULE,
-		       get_sm_features, 50),
-    ejabberd_hooks:add(disco_sm_identity, Host, ?MODULE,
-		       get_sm_identity, 50),
-    ejabberd_hooks:add(adhoc_local_items, Host, ?MODULE,
-		       adhoc_local_items, 50),
-    ejabberd_hooks:add(adhoc_local_commands, Host, ?MODULE,
-		       adhoc_local_commands, 50),
-    ejabberd_hooks:add(adhoc_sm_items, Host, ?MODULE,
-		       adhoc_sm_items, 50),
-    ejabberd_hooks:add(adhoc_sm_commands, Host, ?MODULE,
-		       adhoc_sm_commands, 50),
+stop(_Host) ->
     ok.
-
-stop(Host) ->
-    ejabberd_hooks:delete(adhoc_sm_commands, Host, ?MODULE,
-			  adhoc_sm_commands, 50),
-    ejabberd_hooks:delete(adhoc_sm_items, Host, ?MODULE,
-			  adhoc_sm_items, 50),
-    ejabberd_hooks:delete(adhoc_local_commands, Host,
-			  ?MODULE, adhoc_local_commands, 50),
-    ejabberd_hooks:delete(adhoc_local_items, Host, ?MODULE,
-			  adhoc_local_items, 50),
-    ejabberd_hooks:delete(disco_sm_identity, Host, ?MODULE,
-			  get_sm_identity, 50),
-    ejabberd_hooks:delete(disco_sm_features, Host, ?MODULE,
-			  get_sm_features, 50),
-    ejabberd_hooks:delete(disco_sm_items, Host, ?MODULE,
-			  get_sm_items, 50),
-    ejabberd_hooks:delete(disco_local_identity, Host,
-			  ?MODULE, get_local_identity, 50),
-    ejabberd_hooks:delete(disco_local_features, Host,
-			  ?MODULE, get_local_features, 50),
-    ejabberd_hooks:delete(disco_local_items, Host, ?MODULE,
-			  get_local_items, 50).
 
 reload(_Host, _NewOpts, _OldOpts) ->
     ok.
@@ -99,19 +69,19 @@ depends(_Host, _Opts) ->
 %%%-----------------------------------------------------------------------
 
 -define(INFO_IDENTITY(Category, Type, Name, Lang),
-	[#identity{category = Category, type = Type, name = ?T(Lang, Name)}]).
+	[#identity{category = Category, type = Type, name = tr(Lang, Name)}]).
 
 -define(INFO_COMMAND(Name, Lang),
 	?INFO_IDENTITY(<<"automation">>, <<"command-node">>,
 		       Name, Lang)).
 
 -define(NODEJID(To, Name, Node),
-	#disco_item{jid = To, name = ?T(Lang, Name), node = Node}).
+	#disco_item{jid = To, name = tr(Lang, Name), node = Node}).
 
 -define(NODE(Name, Node),
 	#disco_item{jid = jid:make(Server),
 		    node = Node,
-		    name = ?T(Lang, Name)}).
+		    name = tr(Lang, Name)}).
 
 -define(NS_ADMINX(Sub),
 	<<(?NS_ADMIN)/binary, "#", Sub/binary>>).
@@ -120,70 +90,94 @@ depends(_Host, _Opts) ->
 	[<<"http:">>, <<"jabber.org">>, <<"protocol">>,
 	 <<"admin">>, Sub]).
 
+-spec tokenize(binary()) -> [binary()].
 tokenize(Node) -> str:tokens(Node, <<"/#">>).
 
+acl_match_rule(Host, From) ->
+    Access = mod_configure_opt:access(Host),
+    acl:match_rule(Host, Access, From).
+
+-spec get_sm_identity([identity()], jid(), jid(), binary(), binary()) -> [identity()].
 get_sm_identity(Acc, _From, _To, Node, Lang) ->
     case Node of
       <<"config">> ->
-	  ?INFO_COMMAND(<<"Configuration">>, Lang);
+	  ?INFO_COMMAND(?T("Configuration"), Lang);
       _ -> Acc
     end.
 
+-spec get_local_identity([identity()], jid(), jid(), binary(), binary()) -> [identity()].
 get_local_identity(Acc, _From, _To, Node, Lang) ->
     LNode = tokenize(Node),
     case LNode of
       [<<"running nodes">>, ENode] ->
 	  ?INFO_IDENTITY(<<"ejabberd">>, <<"node">>, ENode, Lang);
       [<<"running nodes">>, _ENode, <<"DB">>] ->
-	  ?INFO_COMMAND(<<"Database">>, Lang);
-      [<<"running nodes">>, _ENode, <<"modules">>,
-       <<"start">>] ->
-	  ?INFO_COMMAND(<<"Start Modules">>, Lang);
-      [<<"running nodes">>, _ENode, <<"modules">>,
-       <<"stop">>] ->
-	  ?INFO_COMMAND(<<"Stop Modules">>, Lang);
+	  ?INFO_COMMAND(?T("Database"), Lang);
       [<<"running nodes">>, _ENode, <<"backup">>,
        <<"backup">>] ->
-	  ?INFO_COMMAND(<<"Backup">>, Lang);
+	  ?INFO_COMMAND(?T("Backup"), Lang);
       [<<"running nodes">>, _ENode, <<"backup">>,
        <<"restore">>] ->
-	  ?INFO_COMMAND(<<"Restore">>, Lang);
+	  ?INFO_COMMAND(?T("Restore"), Lang);
       [<<"running nodes">>, _ENode, <<"backup">>,
        <<"textfile">>] ->
-	  ?INFO_COMMAND(<<"Dump to Text File">>, Lang);
+	  ?INFO_COMMAND(?T("Dump to Text File"), Lang);
       [<<"running nodes">>, _ENode, <<"import">>,
        <<"file">>] ->
-	  ?INFO_COMMAND(<<"Import File">>, Lang);
+	  ?INFO_COMMAND(?T("Import File"), Lang);
       [<<"running nodes">>, _ENode, <<"import">>,
        <<"dir">>] ->
-	  ?INFO_COMMAND(<<"Import Directory">>, Lang);
+	  ?INFO_COMMAND(?T("Import Directory"), Lang);
       [<<"running nodes">>, _ENode, <<"restart">>] ->
-	  ?INFO_COMMAND(<<"Restart Service">>, Lang);
+	  ?INFO_COMMAND(?T("Restart Service"), Lang);
       [<<"running nodes">>, _ENode, <<"shutdown">>] ->
-	  ?INFO_COMMAND(<<"Shut Down Service">>, Lang);
+	  ?INFO_COMMAND(?T("Shut Down Service"), Lang);
       ?NS_ADMINL(<<"add-user">>) ->
-	  ?INFO_COMMAND(<<"Add User">>, Lang);
+	  ?INFO_COMMAND(?T("Add User"), Lang);
       ?NS_ADMINL(<<"delete-user">>) ->
-	  ?INFO_COMMAND(<<"Delete User">>, Lang);
+	  ?INFO_COMMAND(?T("Delete User"), Lang);
+      ?NS_ADMINL(<<"disable-user">>) ->
+	  ?INFO_COMMAND(?T("Disable User"), Lang);
+      ?NS_ADMINL(<<"reenable-user">>) ->
+	  ?INFO_COMMAND(?T("Re-Enable User"), Lang);
       ?NS_ADMINL(<<"end-user-session">>) ->
-	  ?INFO_COMMAND(<<"End User Session">>, Lang);
-      ?NS_ADMINL(<<"get-user-password">>) ->
-	  ?INFO_COMMAND(<<"Get User Password">>, Lang);
+	  ?INFO_COMMAND(?T("End User Session"), Lang);
       ?NS_ADMINL(<<"change-user-password">>) ->
-	  ?INFO_COMMAND(<<"Change User Password">>, Lang);
+	  ?INFO_COMMAND(?T("Change User Password"), Lang);
+      ?NS_ADMINL(<<"get-user-roster">>) ->
+	  ?INFO_COMMAND(?T("Get User Roster"), Lang);
       ?NS_ADMINL(<<"get-user-lastlogin">>) ->
-	  ?INFO_COMMAND(<<"Get User Last Login Time">>, Lang);
+	  ?INFO_COMMAND(?T("Get User Last Login Time"), Lang);
       ?NS_ADMINL(<<"user-stats">>) ->
-	  ?INFO_COMMAND(<<"Get User Statistics">>, Lang);
+	  ?INFO_COMMAND(?T("Get User Statistics"), Lang);
       ?NS_ADMINL(<<"get-registered-users-num">>) ->
-	  ?INFO_COMMAND(<<"Get Number of Registered Users">>,
+	  ?INFO_COMMAND(?T("Get Number of Registered Users"),
+			Lang);
+      ?NS_ADMINL(<<"get-disabled-users-num">>) ->
+	  ?INFO_COMMAND(?T("Get Number of Disabled Users"),
 			Lang);
       ?NS_ADMINL(<<"get-online-users-num">>) ->
-	  ?INFO_COMMAND(<<"Get Number of Online Users">>, Lang);
-      [<<"config">>, <<"acls">>] ->
-	  ?INFO_COMMAND(<<"Access Control Lists">>, Lang);
-      [<<"config">>, <<"access">>] ->
-	  ?INFO_COMMAND(<<"Access Rules">>, Lang);
+	  ?INFO_COMMAND(?T("Get Number of Online Users"), Lang);
+      ?NS_ADMINL(<<"get-active-users-num">>) ->
+	  ?INFO_COMMAND(?T("Get Number of Active Users"), Lang);
+      ?NS_ADMINL(<<"get-idle-users-num">>) ->
+	  ?INFO_COMMAND(?T("Get Number of Idle Users"), Lang);
+      ?NS_ADMINL(<<"get-registered-users-list">>) ->
+	  ?INFO_COMMAND(?T("Get List of Registered Users"),
+			Lang);
+      ?NS_ADMINL(<<"get-disabled-users-list">>) ->
+	  ?INFO_COMMAND(?T("Get List of Disabled Users"),
+			Lang);
+      ?NS_ADMINL(<<"get-online-users-list">>) ->
+	  ?INFO_COMMAND(?T("Get List of Online Users"), Lang);
+      ?NS_ADMINL(<<"get-active-users">>) ->
+	  ?INFO_COMMAND(?T("Get List of Active Users"), Lang);
+      ?NS_ADMINL(<<"get-idle-users">>) ->
+	  ?INFO_COMMAND(?T("Get List of Idle Users"), Lang);
+      ?NS_ADMINL(<<"restart">>) ->
+	  ?INFO_COMMAND(?T("Restart Service"), Lang);
+      ?NS_ADMINL(<<"shutdown">>) ->
+	  ?INFO_COMMAND(?T("Shut Down Service"), Lang);
       _ -> Acc
     end.
 
@@ -191,29 +185,33 @@ get_local_identity(Acc, _From, _To, Node, Lang) ->
 
 -define(INFO_RESULT(Allow, Feats, Lang),
 	case Allow of
-	  deny -> {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+	  deny -> {error, xmpp:err_forbidden(?T("Access denied by service policy"), Lang)};
 	  allow -> {result, Feats}
 	end).
 
+-spec get_sm_features(mod_disco:features_acc(), jid(), jid(),
+		      binary(), binary()) -> mod_disco:features_acc().
 get_sm_features(Acc, From,
 		#jid{lserver = LServer} = _To, Node, Lang) ->
     case gen_mod:is_loaded(LServer, mod_adhoc) of
       false -> Acc;
       _ ->
-	  Allow = acl:match_rule(LServer, configure, From),
+	  Allow = acl_match_rule(LServer, From),
 	  case Node of
 	    <<"config">> -> ?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
 	    _ -> Acc
 	  end
     end.
 
+-spec get_local_features(mod_disco:features_acc(), jid(), jid(),
+			 binary(), binary()) -> mod_disco:features_acc().
 get_local_features(Acc, From,
 		   #jid{lserver = LServer} = _To, Node, Lang) ->
     case gen_mod:is_loaded(LServer, mod_adhoc) of
       false -> Acc;
       _ ->
 	  LNode = tokenize(Node),
-	  Allow = acl:match_rule(LServer, configure, From),
+	  Allow = acl_match_rule(LServer, From),
 	  case LNode of
 	    [<<"config">>] -> ?INFO_RESULT(Allow, [], Lang);
 	    [<<"user">>] -> ?INFO_RESULT(Allow, [], Lang);
@@ -227,10 +225,6 @@ get_local_features(Acc, From,
 	    [<<"running nodes">>, _ENode] ->
 		?INFO_RESULT(Allow, [?NS_STATS], Lang);
 	    [<<"running nodes">>, _ENode, <<"DB">>] ->
-		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
-	    [<<"running nodes">>, _ENode, <<"modules">>] ->
-		?INFO_RESULT(Allow, [], Lang);
-	    [<<"running nodes">>, _ENode, <<"modules">>, _] ->
 		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
 	    [<<"running nodes">>, _ENode, <<"backup">>] ->
 		?INFO_RESULT(Allow, [], Lang);
@@ -250,11 +244,15 @@ get_local_features(Acc, From,
 		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
 	    ?NS_ADMINL(<<"delete-user">>) ->
 		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"disable-user">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"reenable-user">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
 	    ?NS_ADMINL(<<"end-user-session">>) ->
 		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
-	    ?NS_ADMINL(<<"get-user-password">>) ->
-		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
 	    ?NS_ADMINL(<<"change-user-password">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"get-user-roster">>) ->
 		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
 	    ?NS_ADMINL(<<"get-user-lastlogin">>) ->
 		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
@@ -262,33 +260,52 @@ get_local_features(Acc, From,
 		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
 	    ?NS_ADMINL(<<"get-registered-users-num">>) ->
 		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"get-disabled-users-num">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
 	    ?NS_ADMINL(<<"get-online-users-num">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"get-active-users-num">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"get-idle-users-num">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"get-registered-users-list">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"get-disabled-users-list">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"get-online-users-list">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"get-active-users">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"get-idle-users">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"restart">>) ->
+		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
+	    ?NS_ADMINL(<<"shutdown">>) ->
 		?INFO_RESULT(Allow, [?NS_COMMANDS], Lang);
 	    _ -> Acc
 	  end
     end.
 
 %%%-----------------------------------------------------------------------
--spec adhoc_sm_items(empty | {error, stanza_error()} | {result, [disco_item()]},
-		     jid(), jid(), binary()) -> {error, stanza_error()} |
-						{result, [disco_item()]} |
-						empty.
+-spec adhoc_sm_items(mod_disco:items_acc(),
+		     jid(), jid(), binary()) -> mod_disco:items_acc().
 adhoc_sm_items(Acc, From, #jid{lserver = LServer} = To,
 	       Lang) ->
-    case acl:match_rule(LServer, configure, From) of
+    case acl_match_rule(LServer, From) of
       allow ->
 	  Items = case Acc of
 		    {result, Its} -> Its;
 		    empty -> []
 		  end,
 	  Nodes = [#disco_item{jid = To, node = <<"config">>,
-			       name = ?T(Lang, <<"Configuration">>)}],
+			       name = tr(Lang, ?T("Configuration"))}],
 	  {result, Items ++ Nodes};
       _ -> Acc
     end.
 
 %%%-----------------------------------------------------------------------
-
+-spec get_sm_items(mod_disco:items_acc(), jid(), jid(),
+		   binary(), binary()) -> mod_disco:items_acc().
 get_sm_items(Acc, From,
 	     #jid{user = User, server = Server, lserver = LServer} =
 		 To,
@@ -300,20 +317,21 @@ get_sm_items(Acc, From,
 		    {result, Its} -> Its;
 		    empty -> []
 		  end,
-	  case {acl:match_rule(LServer, configure, From), Node} of
+	  case {acl_match_rule(LServer, From), Node} of
 	    {allow, <<"">>} ->
-		Nodes = [?NODEJID(To, <<"Configuration">>,
+		Nodes = [?NODEJID(To, ?T("Configuration"),
 				  <<"config">>),
-			 ?NODEJID(To, <<"User Management">>, <<"user">>)],
+			 ?NODEJID(To, ?T("User Management"), <<"user">>)],
 		{result,
 		 Items ++ Nodes ++ get_user_resources(User, Server)};
 	    {allow, <<"config">>} -> {result, []};
 	    {_, <<"config">>} ->
-		  {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+		  {error, xmpp:err_forbidden(?T("Access denied by service policy"), Lang)};
 	    _ -> Acc
 	  end
     end.
 
+-spec get_user_resources(binary(), binary()) -> [disco_item()].
 get_user_resources(User, Server) ->
     Rs = ejabberd_sm:get_user_resources(User, Server),
     lists:map(fun (R) ->
@@ -324,24 +342,22 @@ get_user_resources(User, Server) ->
 
 %%%-----------------------------------------------------------------------
 
--spec adhoc_local_items(empty | {error, stanza_error()} | {result, [disco_item()]},
-			jid(), jid(), binary()) -> {error, stanza_error()} |
-						   {result, [disco_item()]} |
-						   empty.
+-spec adhoc_local_items(mod_disco:items_acc(),
+			jid(), jid(), binary()) -> mod_disco:items_acc().
 adhoc_local_items(Acc, From,
 		  #jid{lserver = LServer, server = Server} = To, Lang) ->
-    case acl:match_rule(LServer, configure, From) of
+    case acl_match_rule(LServer, From) of
       allow ->
 	  Items = case Acc of
 		    {result, Its} -> Its;
 		    empty -> []
 		  end,
-	  PermLev = get_permission_level(From),
+	  PermLev = get_permission_level(From, LServer),
 	  Nodes = recursively_get_local_items(PermLev, LServer,
 					      <<"">>, Server, Lang),
 	  Nodes1 = lists:filter(
 		     fun (#disco_item{node = Nd}) ->
-			     F = get_local_features([], From, To, Nd, Lang),
+			     F = get_local_features(empty, From, To, Nd, Lang),
 			     case F of
 				 {result, [?NS_COMMANDS]} -> true;
 				 _ -> false
@@ -352,6 +368,8 @@ adhoc_local_items(Acc, From,
       _ -> Acc
     end.
 
+-spec recursively_get_local_items(global | vhost, binary(), binary(),
+				  binary(), binary()) -> [disco_item()].
 recursively_get_local_items(_PermLev, _LServer,
 			    <<"online users">>, _Server, _Lang) ->
     [];
@@ -381,8 +399,10 @@ recursively_get_local_items(PermLev, LServer, Node,
 	end,
 	Items)).
 
-get_permission_level(JID) ->
-    case acl:match_rule(global, configure, JID) of
+-spec get_permission_level(jid(), binary()) -> global | vhost.
+get_permission_level(JID, Host) ->
+    Access = mod_configure_opt:access(Host),
+    case acl:match_rule(global, Access, JID) of
       allow -> global;
       deny -> vhost
     end.
@@ -393,7 +413,7 @@ get_permission_level(JID) ->
 	case Allow of
 	  deny -> Fallback;
 	  allow ->
-	      PermLev = get_permission_level(From),
+	      PermLev = get_permission_level(From, LServer),
 	      case get_local_items({PermLev, LServer}, LNode,
 				   jid:encode(To), Lang)
 		  of
@@ -402,6 +422,8 @@ get_permission_level(JID) ->
 	      end
 	end).
 
+-spec get_local_items(mod_disco:items_acc(), jid(), jid(),
+		      binary(), binary()) -> mod_disco:items_acc().
 get_local_items(Acc, From, #jid{lserver = LServer} = To,
 		<<"">>, Lang) ->
     case gen_mod:is_loaded(LServer, mod_adhoc) of
@@ -411,11 +433,11 @@ get_local_items(Acc, From, #jid{lserver = LServer} = To,
 		    {result, Its} -> Its;
 		    empty -> []
 		  end,
-	  Allow = acl:match_rule(LServer, configure, From),
+	  Allow = acl_match_rule(LServer, From),
 	  case Allow of
 	    deny -> {result, Items};
 	    allow ->
-		PermLev = get_permission_level(From),
+		PermLev = get_permission_level(From, LServer),
 		case get_local_items({PermLev, LServer}, [],
 				     jid:encode(To), Lang)
 		    of
@@ -430,8 +452,8 @@ get_local_items(Acc, From, #jid{lserver = LServer} = To,
       false -> Acc;
       _ ->
 	  LNode = tokenize(Node),
-	  Allow = acl:match_rule(LServer, configure, From),
-	  Err = xmpp:err_forbidden(<<"Access denied by service policy">>, Lang),
+	  Allow = acl_match_rule(LServer, From),
+	  Err = xmpp:err_forbidden(?T("Access denied by service policy"), Lang),
 	  case LNode of
 	    [<<"config">>] ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
@@ -453,10 +475,6 @@ get_local_items(Acc, From, #jid{lserver = LServer} = To,
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    [<<"running nodes">>, _ENode, <<"DB">>] ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
-	    [<<"running nodes">>, _ENode, <<"modules">>] ->
-		?ITEMS_RESULT(Allow, LNode, {error, Err});
-	    [<<"running nodes">>, _ENode, <<"modules">>, _] ->
-		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    [<<"running nodes">>, _ENode, <<"backup">>] ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    [<<"running nodes">>, _ENode, <<"backup">>, _] ->
@@ -475,11 +493,15 @@ get_local_items(Acc, From, #jid{lserver = LServer} = To,
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    ?NS_ADMINL(<<"delete-user">>) ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"disable-user">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"reenable-user">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    ?NS_ADMINL(<<"end-user-session">>) ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
-	    ?NS_ADMINL(<<"get-user-password">>) ->
-		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    ?NS_ADMINL(<<"change-user-password">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"get-user-roster">>) ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    ?NS_ADMINL(<<"get-user-lastlogin">>) ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
@@ -487,53 +509,88 @@ get_local_items(Acc, From, #jid{lserver = LServer} = To,
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    ?NS_ADMINL(<<"get-registered-users-num">>) ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"get-disabled-users-num">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    ?NS_ADMINL(<<"get-online-users-num">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"get-active-users-num">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"get-idle-users-num">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"get-registered-users-list">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"get-disabled-users-list">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"get-online-users-list">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"get-active-users">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"get-idle-users">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"restart">>) ->
+		?ITEMS_RESULT(Allow, LNode, {error, Err});
+	    ?NS_ADMINL(<<"shutdown">>) ->
 		?ITEMS_RESULT(Allow, LNode, {error, Err});
 	    _ -> Acc
 	  end
     end.
 
 %%%-----------------------------------------------------------------------
-
-%% @spec ({PermissionLevel, Host}, [string()], Server::string(), Lang)
-%%              -> {result, [xmlelement()]}
-%%       PermissionLevel = global | vhost
+-spec get_local_items({global | vhost, binary()}, [binary()],
+		      binary(), binary()) -> {result, [disco_item()]} | {error, stanza_error()}.
 get_local_items(_Host, [], Server, Lang) ->
     {result,
-     [?NODE(<<"Configuration">>, <<"config">>),
-      ?NODE(<<"User Management">>, <<"user">>),
-      ?NODE(<<"Online Users">>, <<"online users">>),
-      ?NODE(<<"All Users">>, <<"all users">>),
-      ?NODE(<<"Outgoing s2s Connections">>,
+     [?NODE(?T("Configuration"), <<"config">>),
+      ?NODE(?T("User Management"), <<"user">>),
+      ?NODE(?T("Online Users"), <<"online users">>),
+      ?NODE(?T("All Users"), <<"all users">>),
+      ?NODE(?T("Outgoing s2s Connections"),
 	    <<"outgoing s2s">>),
-      ?NODE(<<"Running Nodes">>, <<"running nodes">>),
-      ?NODE(<<"Stopped Nodes">>, <<"stopped nodes">>)]};
-get_local_items(_Host, [<<"config">>], Server, Lang) ->
-    {result,
-     [?NODE(<<"Access Control Lists">>, <<"config/acls">>),
-      ?NODE(<<"Access Rules">>, <<"config/access">>)]};
+      ?NODE(?T("Running Nodes"), <<"running nodes">>),
+      ?NODE(?T("Stopped Nodes"), <<"stopped nodes">>)]};
 get_local_items(_Host, [<<"config">>, _], _Server,
 		_Lang) ->
     {result, []};
 get_local_items(_Host, [<<"user">>], Server, Lang) ->
     {result,
-     [?NODE(<<"Add User">>, (?NS_ADMINX(<<"add-user">>))),
-      ?NODE(<<"Delete User">>,
+     [?NODE(?T("Add User"), (?NS_ADMINX(<<"add-user">>))),
+      ?NODE(?T("Delete User"),
 	    (?NS_ADMINX(<<"delete-user">>))),
-      ?NODE(<<"End User Session">>,
+      ?NODE(?T("Disable User"),
+	    (?NS_ADMINX(<<"disable-user">>))),
+      ?NODE(?T("Re-Enable User"),
+	    (?NS_ADMINX(<<"reenable-user">>))),
+      ?NODE(?T("End User Session"),
 	    (?NS_ADMINX(<<"end-user-session">>))),
-      ?NODE(<<"Get User Password">>,
-	    (?NS_ADMINX(<<"get-user-password">>))),
-      ?NODE(<<"Change User Password">>,
+      ?NODE(?T("Change User Password"),
 	    (?NS_ADMINX(<<"change-user-password">>))),
-      ?NODE(<<"Get User Last Login Time">>,
+      ?NODE(?T("Get User Roster"),
+	    (?NS_ADMINX(<<"get-user-roster">>))),
+      ?NODE(?T("Get User Last Login Time"),
 	    (?NS_ADMINX(<<"get-user-lastlogin">>))),
-      ?NODE(<<"Get User Statistics">>,
+      ?NODE(?T("Get User Statistics"),
 	    (?NS_ADMINX(<<"user-stats">>))),
-      ?NODE(<<"Get Number of Registered Users">>,
+      ?NODE(?T("Get Number of Registered Users"),
 	    (?NS_ADMINX(<<"get-registered-users-num">>))),
-      ?NODE(<<"Get Number of Online Users">>,
-	    (?NS_ADMINX(<<"get-online-users-num">>)))]};
+      ?NODE(?T("Get Number of Disabled Users"),
+	    (?NS_ADMINX(<<"get-disabled-users-num">>))),
+      ?NODE(?T("Get Number of Online Users"),
+	    (?NS_ADMINX(<<"get-online-users-num">>))),
+      ?NODE(?T("Get Number of Active Users"),
+	    (?NS_ADMINX(<<"get-active-users-num">>))),
+      ?NODE(?T("Get Number of Idle Users"),
+	    (?NS_ADMINX(<<"get-idle-users-num">>))),
+      ?NODE(?T("Get List of Registered Users"),
+	    (?NS_ADMINX(<<"get-registered-users-list">>))),
+      ?NODE(?T("Get List of Disabled Users"),
+	    (?NS_ADMINX(<<"get-disabled-users-list">>))),
+      ?NODE(?T("Get List of Online Users"),
+	    (?NS_ADMINX(<<"get-online-users-list">>))),
+      ?NODE(?T("Get List of Active Users"),
+	    (?NS_ADMINX(<<"get-active-users">>))),
+      ?NODE(?T("Get List of Idle Users"),
+	    (?NS_ADMINX(<<"get-idle-users">>)))
+     ]};
 get_local_items(_Host, [<<"http:">> | _], _Server,
 		_Lang) ->
     {result, []};
@@ -559,7 +616,7 @@ get_local_items({_, Host},
 				       name = <<U/binary, $@, S/binary>>}
 		   end, Sub)}
     catch _:_ ->
-	    xmpp:err_not_acceptable()
+	    {error, xmpp:err_not_acceptable()}
     end;
 get_local_items({_, Host}, [<<"outgoing s2s">>],
 		_Server, Lang) ->
@@ -576,48 +633,33 @@ get_local_items(_Host, [<<"stopped nodes">>], _Server,
 get_local_items({global, _Host},
 		[<<"running nodes">>, ENode], Server, Lang) ->
     {result,
-     [?NODE(<<"Database">>,
+     [?NODE(?T("Database"),
 	    <<"running nodes/", ENode/binary, "/DB">>),
-      ?NODE(<<"Modules">>,
-	    <<"running nodes/", ENode/binary, "/modules">>),
-      ?NODE(<<"Backup Management">>,
+      ?NODE(?T("Backup Management"),
 	    <<"running nodes/", ENode/binary, "/backup">>),
-      ?NODE(<<"Import Users From jabberd14 Spool Files">>,
+      ?NODE(?T("Import Users From jabberd14 Spool Files"),
 	    <<"running nodes/", ENode/binary, "/import">>),
-      ?NODE(<<"Restart Service">>,
+      ?NODE(?T("Restart Service"),
+	    (?NS_ADMINX(<<"restart">>))),
+      ?NODE(?T("Shut Down Service"),
+	    (?NS_ADMINX(<<"shutdown">>))),
+      ?NODE(?T("Restart Service"),
 	    <<"running nodes/", ENode/binary, "/restart">>),
-      ?NODE(<<"Shut Down Service">>,
+      ?NODE(?T("Shut Down Service"),
 	    <<"running nodes/", ENode/binary, "/shutdown">>)]};
-get_local_items({vhost, _Host},
-		[<<"running nodes">>, ENode], Server, Lang) ->
-    {result,
-     [?NODE(<<"Modules">>,
-	    <<"running nodes/", ENode/binary, "/modules">>)]};
 get_local_items(_Host,
 		[<<"running nodes">>, _ENode, <<"DB">>], _Server,
 		_Lang) ->
     {result, []};
 get_local_items(_Host,
-		[<<"running nodes">>, ENode, <<"modules">>], Server,
-		Lang) ->
-    {result,
-     [?NODE(<<"Start Modules">>,
-	    <<"running nodes/", ENode/binary, "/modules/start">>),
-      ?NODE(<<"Stop Modules">>,
-	    <<"running nodes/", ENode/binary, "/modules/stop">>)]};
-get_local_items(_Host,
-		[<<"running nodes">>, _ENode, <<"modules">>, _],
-		_Server, _Lang) ->
-    {result, []};
-get_local_items(_Host,
 		[<<"running nodes">>, ENode, <<"backup">>], Server,
 		Lang) ->
     {result,
-     [?NODE(<<"Backup">>,
+     [?NODE(?T("Backup"),
 	    <<"running nodes/", ENode/binary, "/backup/backup">>),
-      ?NODE(<<"Restore">>,
+      ?NODE(?T("Restore"),
 	    <<"running nodes/", ENode/binary, "/backup/restore">>),
-      ?NODE(<<"Dump to Text File">>,
+      ?NODE(?T("Dump to Text File"),
 	    <<"running nodes/", ENode/binary,
 	      "/backup/textfile">>)]};
 get_local_items(_Host,
@@ -628,9 +670,9 @@ get_local_items(_Host,
 		[<<"running nodes">>, ENode, <<"import">>], Server,
 		Lang) ->
     {result,
-     [?NODE(<<"Import File">>,
+     [?NODE(?T("Import File"),
 	    <<"running nodes/", ENode/binary, "/import/file">>),
-      ?NODE(<<"Import Directory">>,
+      ?NODE(?T("Import Directory"),
 	    <<"running nodes/", ENode/binary, "/import/dir">>)]};
 get_local_items(_Host,
 		[<<"running nodes">>, _ENode, <<"import">>, _], _Server,
@@ -647,124 +689,106 @@ get_local_items(_Host,
 get_local_items(_Host, _, _Server, _Lang) ->
     {error, xmpp:err_item_not_found()}.
 
+-spec get_online_vh_users(binary()) -> [disco_item()].
 get_online_vh_users(Host) ->
-    case catch ejabberd_sm:get_vh_session_list(Host) of
-      {'EXIT', _Reason} -> [];
-      USRs ->
-	  SURs = lists:sort([{S, U, R} || {U, S, R} <- USRs]),
-	  lists:map(
-	    fun({S, U, R}) ->
-		    #disco_item{jid = jid:make(U, S, R),
-				name = <<U/binary, "@", S/binary>>}
-		    end, SURs)
-    end.
+    USRs = ejabberd_sm:get_vh_session_list(Host),
+    SURs = lists:sort([{S, U, R} || {U, S, R} <- USRs]),
+    lists:map(
+      fun({S, U, R}) ->
+	      #disco_item{jid = jid:make(U, S, R),
+			  name = <<U/binary, "@", S/binary>>}
+      end, SURs).
 
+-spec get_all_vh_users(binary()) -> [disco_item()].
 get_all_vh_users(Host) ->
-    case catch ejabberd_auth:get_users(Host)
-	of
-      {'EXIT', _Reason} -> [];
-      Users ->
-	  SUsers = lists:sort([{S, U} || {U, S} <- Users]),
-	  case length(SUsers) of
-	    N when N =< 100 ->
-		lists:map(fun({S, U}) ->
-				  #disco_item{jid = jid:make(U, S),
-					      name = <<U/binary, $@, S/binary>>}
-			  end, SUsers);
-	    N ->
-		NParts = trunc(math:sqrt(N * 6.17999999999999993783e-1))
-			   + 1,
-		M = trunc(N / NParts) + 1,
-		lists:map(fun (K) ->
-				  L = K + M - 1,
-				  Node = <<"@",
-					   (integer_to_binary(K))/binary,
-					   "-",
-					   (integer_to_binary(L))/binary>>,
-				  {FS, FU} = lists:nth(K, SUsers),
-				  {LS, LU} = if L < N -> lists:nth(L, SUsers);
-						true -> lists:last(SUsers)
-					     end,
-				  Name = <<FU/binary, "@", FS/binary, " -- ",
-					   LU/binary, "@", LS/binary>>,
-				  #disco_item{jid = jid:make(Host),
-					      node = <<"all users/", Node/binary>>,
-					      name = Name}
-			  end,
-			  lists:seq(1, N, M))
-	  end
+    Users = ejabberd_auth:get_users(Host),
+    SUsers = lists:sort([{S, U} || {U, S} <- Users]),
+    case length(SUsers) of
+	N when N =< 100 ->
+	    lists:map(fun({S, U}) ->
+			      #disco_item{jid = jid:make(U, S),
+					  name = <<U/binary, $@, S/binary>>}
+		      end, SUsers);
+	N ->
+	    NParts = trunc(math:sqrt(N * 6.17999999999999993783e-1)) + 1,
+	    M = trunc(N / NParts) + 1,
+	    lists:map(
+	      fun (K) ->
+		      L = K + M - 1,
+		      Node = <<"@",
+			       (integer_to_binary(K))/binary,
+			       "-",
+			       (integer_to_binary(L))/binary>>,
+		      {FS, FU} = lists:nth(K, SUsers),
+		      {LS, LU} = if L < N -> lists:nth(L, SUsers);
+				    true -> lists:last(SUsers)
+				 end,
+		      Name = <<FU/binary, "@", FS/binary, " -- ",
+			       LU/binary, "@", LS/binary>>,
+		      #disco_item{jid = jid:make(Host),
+				  node = <<"all users/", Node/binary>>,
+				  name = Name}
+	      end, lists:seq(1, N, M))
     end.
 
+-spec get_outgoing_s2s(binary(), binary()) -> [disco_item()].
 get_outgoing_s2s(Host, Lang) ->
-    case catch ejabberd_s2s:dirty_get_connections() of
-      {'EXIT', _Reason} -> [];
-      Connections ->
-	  DotHost = <<".", Host/binary>>,
-	  TConns = [TH
-		    || {FH, TH} <- Connections,
-		       Host == FH orelse str:suffix(DotHost, FH)],
-	  lists:map(
-	    fun (T) ->
-		    Name = str:format(?T(Lang, <<"To ~s">>),[T]),
-		    #disco_item{jid = jid:make(Host),
-				node = <<"outgoing s2s/", T/binary>>,
-				name = Name}
-	    end, lists:usort(TConns))
-    end.
+    Connections = ejabberd_s2s:dirty_get_connections(),
+    DotHost = <<".", Host/binary>>,
+    TConns = [TH || {FH, TH} <- Connections,
+		    Host == FH orelse str:suffix(DotHost, FH)],
+    lists:map(
+      fun (T) ->
+	      Name = str:translate_and_format(Lang, ?T("To ~ts"),[T]),
+	      #disco_item{jid = jid:make(Host),
+			  node = <<"outgoing s2s/", T/binary>>,
+			  name = Name}
+      end, lists:usort(TConns)).
 
+-spec get_outgoing_s2s(binary(), binary(), binary()) -> [disco_item()].
 get_outgoing_s2s(Host, Lang, To) ->
-    case catch ejabberd_s2s:dirty_get_connections() of
-      {'EXIT', _Reason} -> [];
-      Connections ->
-	  lists:map(
-	    fun ({F, _T}) ->
-		    Node = <<"outgoing s2s/", To/binary, "/", F/binary>>,
-		    Name = str:format(?T(Lang, <<"From ~s">>), [F]),
-		    #disco_item{jid = jid:make(Host), node = Node, name = Name}
-	    end,
-	    lists:keysort(1,
-			  lists:filter(fun (E) -> element(2, E) == To
-				       end,
-				       Connections)))
-    end.
+    Connections = ejabberd_s2s:dirty_get_connections(),
+    lists:map(
+      fun ({F, _T}) ->
+	      Node = <<"outgoing s2s/", To/binary, "/", F/binary>>,
+	      Name = str:translate_and_format(Lang, ?T("From ~ts"), [F]),
+	      #disco_item{jid = jid:make(Host), node = Node, name = Name}
+      end,
+      lists:keysort(
+	1,
+	lists:filter(fun (E) -> element(2, E) == To end,
+		     Connections))).
 
+-spec get_running_nodes(binary(), binary()) -> [disco_item()].
 get_running_nodes(Server, _Lang) ->
-    case catch mnesia:system_info(running_db_nodes) of
-      {'EXIT', _Reason} -> [];
-      DBNodes ->
-	  lists:map(
-	    fun (N) ->
-		    S = iolist_to_binary(atom_to_list(N)),
-		    #disco_item{jid = jid:make(Server),
-				node = <<"running nodes/", S/binary>>,
-				name = S}
-	    end,
-	    lists:sort(DBNodes))
-    end.
+    DBNodes = mnesia:system_info(running_db_nodes),
+    lists:map(
+      fun (N) ->
+	      S = iolist_to_binary(atom_to_list(N)),
+	      #disco_item{jid = jid:make(Server),
+			  node = <<"running nodes/", S/binary>>,
+			  name = S}
+      end, lists:sort(DBNodes)).
 
+-spec get_stopped_nodes(binary()) -> [disco_item()].
 get_stopped_nodes(_Lang) ->
-    case catch lists:usort(mnesia:system_info(db_nodes) ++
-			     mnesia:system_info(extra_db_nodes))
-		 -- mnesia:system_info(running_db_nodes)
-	of
-      {'EXIT', _Reason} -> [];
-      DBNodes ->
-	  lists:map(
-	    fun (N) ->
-		    S = iolist_to_binary(atom_to_list(N)),
-		    #disco_item{jid = jid:make(ejabberd_config:get_myname()),
-				node = <<"stopped nodes/", S/binary>>,
-				name = S}
-	    end,
-	    lists:sort(DBNodes))
-    end.
+    DBNodes = lists:usort(mnesia:system_info(db_nodes) ++
+			      mnesia:system_info(extra_db_nodes))
+	-- mnesia:system_info(running_db_nodes),
+    lists:map(
+      fun (N) ->
+	      S = iolist_to_binary(atom_to_list(N)),
+	      #disco_item{jid = jid:make(ejabberd_config:get_myname()),
+			  node = <<"stopped nodes/", S/binary>>,
+			  name = S}
+      end, lists:sort(DBNodes)).
 
 %%-------------------------------------------------------------------------
 
 -define(COMMANDS_RESULT(LServerOrGlobal, From, To,
 			Request, Lang),
-	case acl:match_rule(LServerOrGlobal, configure, From) of
-	  deny -> {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+	case acl_match_rule(LServerOrGlobal, From) of
+	  deny -> {error, xmpp:err_forbidden(?T("Access denied by service policy"), Lang)};
 	  allow -> adhoc_local_commands(From, To, Request)
 	end).
 
@@ -777,8 +801,6 @@ adhoc_local_commands(Acc, From,
     case LNode of
       [<<"running nodes">>, _ENode, <<"DB">>] ->
 	  ?COMMANDS_RESULT(global, From, To, Request, Lang);
-      [<<"running nodes">>, _ENode, <<"modules">>, _] ->
-	  ?COMMANDS_RESULT(LServer, From, To, Request, Lang);
       [<<"running nodes">>, _ENode, <<"backup">>, _] ->
 	  ?COMMANDS_RESULT(global, From, To, Request, Lang);
       [<<"running nodes">>, _ENode, <<"import">>, _] ->
@@ -794,6 +816,7 @@ adhoc_local_commands(Acc, From,
       _ -> Acc
     end.
 
+-spec adhoc_local_commands(jid(), jid(), adhoc_command()) -> adhoc_command() | {error, stanza_error()}.
 adhoc_local_commands(From,
 		     #jid{lserver = LServer} = _To,
 		     #adhoc_command{lang = Lang, node = Node,
@@ -817,16 +840,16 @@ adhoc_local_commands(From,
 	     {error, Error} -> {error, Error}
 	   end;
        XData /= undefined, ActionIsExecute ->
-	    case catch set_form(From, LServer, LNode, Lang, XData) of
+	    case set_form(From, LServer, LNode, Lang, XData) of
 		{result, Res} ->
 		    xmpp_util:make_adhoc_response(
 		      Request,
 		      #adhoc_command{xdata = Res, status = completed});
-		{'EXIT', _} -> {error, xmpp:err_bad_request()};
+		%%{'EXIT', _} -> {error, xmpp:err_bad_request()};
 		{error, Error} -> {error, Error}
 	    end;
        true ->
-	  {error, xmpp:err_bad_request(<<"Unexpected action">>, Lang)}
+	  {error, xmpp:err_bad_request(?T("Unexpected action"), Lang)}
     end.
 
 -define(TVFIELD(Type, Var, Val),
@@ -836,14 +859,14 @@ adhoc_local_commands(From,
 	?TVFIELD(hidden, <<"FORM_TYPE">>, (?NS_ADMIN))).
 
 -define(TLFIELD(Type, Label, Var),
-	#xdata_field{type = Type, label = ?T(Lang, Label), var = Var}).
+	#xdata_field{type = Type, label = tr(Lang, Label), var = Var}).
 
 -define(XFIELD(Type, Label, Var, Val),
-	#xdata_field{type = Type, label = ?T(Lang, Label),
+	#xdata_field{type = Type, label = tr(Lang, Label),
 		     var = Var, values = [Val]}).
 
 -define(XMFIELD(Type, Label, Var, Vals),
-	#xdata_field{type = Type, label = ?T(Lang, Label),
+	#xdata_field{type = Type, label = tr(Lang, Label),
 		     var = Var, values = Vals}).
 
 -define(TABLEFIELD(Table, Val),
@@ -852,32 +875,35 @@ adhoc_local_commands(From,
 	   label = iolist_to_binary(atom_to_list(Table)),
 	   var = iolist_to_binary(atom_to_list(Table)),
 	   values = [iolist_to_binary(atom_to_list(Val))],
-	   options = [#xdata_option{label = ?T(Lang, <<"RAM copy">>),
+	   options = [#xdata_option{label = tr(Lang, ?T("RAM copy")),
 				    value = <<"ram_copies">>},
-		      #xdata_option{label = ?T(Lang, <<"RAM and disc copy">>),
+		      #xdata_option{label = tr(Lang, ?T("RAM and disc copy")),
 				    value = <<"disc_copies">>},
-		      #xdata_option{label = ?T(Lang, <<"Disc only copy">>),
+		      #xdata_option{label = tr(Lang, ?T("Disc only copy")),
 				    value =  <<"disc_only_copies">>},
-		      #xdata_option{label = ?T(Lang, <<"Remote copy">>),
+		      #xdata_option{label = tr(Lang, ?T("Remote copy")),
 				    value = <<"unknown">>}]}).
 
+-spec get_form(binary(), [binary()], binary()) -> {result, xdata()} |
+						  {result, completed, xdata()} |
+						  {error, stanza_error()}.
 get_form(_Host, [<<"running nodes">>, ENode, <<"DB">>],
 	 Lang) ->
     case search_running_node(ENode) of
       false ->
-	  Txt = <<"No running node found">>,
+	  Txt = ?T("No running node found"),
 	  {error, xmpp:err_item_not_found(Txt, Lang)};
       Node ->
 	  case ejabberd_cluster:call(Node, mnesia, system_info, [tables]) of
 	    {badrpc, Reason} ->
 		?ERROR_MSG("RPC call mnesia:system_info(tables) on node "
-			   "~s failed: ~p", [Node, Reason]),
+			   "~ts failed: ~p", [Node, Reason]),
 		{error, xmpp:err_internal_server_error()};
 	    Tables ->
 		STables = lists:sort(Tables),
-		Title = <<(?T(Lang, <<"Database Tables Configuration at ">>))/binary,
+		Title = <<(tr(Lang, ?T("Database Tables Configuration at ")))/binary,
 			  ENode/binary>>,
-		Instr = ?T(Lang, <<"Choose storage type of tables">>),
+		Instr = tr(Lang, ?T("Choose storage type of tables")),
 		try
 		    Fs = lists:map(
 			   fun(Table) ->
@@ -894,123 +920,83 @@ get_form(_Host, [<<"running nodes">>, ENode, <<"DB">>],
 				    fields = [?HFIELD()|Fs]}}
 		catch _:{case_clause, {badrpc, Reason}} ->
 			?ERROR_MSG("RPC call mnesia:table_info/2 "
-				   "on node ~s failed: ~p", [Node, Reason]),
+				   "on node ~ts failed: ~p", [Node, Reason]),
 			{error, xmpp:err_internal_server_error()}
 		end
 	  end
     end;
-get_form(Host,
-	 [<<"running nodes">>, ENode, <<"modules">>, <<"stop">>],
-	 Lang) ->
-    case search_running_node(ENode) of
-      false ->
-	  Txt = <<"No running node found">>,
-	  {error, xmpp:err_item_not_found(Txt, Lang)};
-      Node ->
-	  case ejabberd_cluster:call(Node, gen_mod, loaded_modules, [Host]) of
-	    {badrpc, Reason} ->
-		?ERROR_MSG("RPC call gen_mod:loaded_modules(~s) on node "
-			   "~s failed: ~p", [Host, Node, Reason]),
-		{error, xmpp:err_internal_server_error()};
-	    Modules ->
-		SModules = lists:sort(Modules),
-		Title = <<(?T(Lang, <<"Stop Modules at ">>))/binary,
-			  ENode/binary>>,
-		Instr = ?T(Lang, <<"Choose modules to stop">>),
-		Fs = lists:map(fun(M) ->
-				       S = misc:atom_to_binary(M),
-				       ?XFIELD(boolean, S, S, <<"0">>)
-			       end, SModules),
-		{result, #xdata{title = Title,
-				type = form,
-				instructions = [Instr],
-				fields = [?HFIELD()|Fs]}}
-	  end
-    end;
-get_form(_Host,
-	 [<<"running nodes">>, ENode, <<"modules">>,
-	  <<"start">>],
-	 Lang) ->
-    {result,
-     #xdata{title = <<(?T(Lang, <<"Start Modules at ">>))/binary, ENode/binary>>,
-	    type = form,
-	    instructions = [?T(Lang, <<"Enter list of {Module, [Options]}">>)],
-	    fields = [?HFIELD(),
-		      ?XFIELD('text-multi',
-			      <<"List of modules to start">>, <<"modules">>,
-			      <<"[].">>)]}};
 get_form(_Host,
 	 [<<"running nodes">>, ENode, <<"backup">>,
 	  <<"backup">>],
 	 Lang) ->
     {result,
-     #xdata{title = <<(?T(Lang, <<"Backup to File at ">>))/binary, ENode/binary>>,
+     #xdata{title = <<(tr(Lang, ?T("Backup to File at ")))/binary, ENode/binary>>,
 	    type = form,
-	    instructions = [?T(Lang, <<"Enter path to backup file">>)],
+	    instructions = [tr(Lang, ?T("Enter path to backup file"))],
 	    fields = [?HFIELD(),
-		      ?XFIELD('text-single', <<"Path to File">>,
+		      ?XFIELD('text-single', ?T("Path to File"),
 			      <<"path">>, <<"">>)]}};
 get_form(_Host,
 	 [<<"running nodes">>, ENode, <<"backup">>,
 	  <<"restore">>],
 	 Lang) ->
     {result,
-     #xdata{title = <<(?T(Lang, <<"Restore Backup from File at ">>))/binary,
+     #xdata{title = <<(tr(Lang, ?T("Restore Backup from File at ")))/binary,
 		      ENode/binary>>,
 	    type = form,
-	    instructions = [?T(Lang, <<"Enter path to backup file">>)],
+	    instructions = [tr(Lang, ?T("Enter path to backup file"))],
 	    fields = [?HFIELD(),
-		      ?XFIELD('text-single', <<"Path to File">>,
+		      ?XFIELD('text-single', ?T("Path to File"),
 			      <<"path">>, <<"">>)]}};
 get_form(_Host,
 	 [<<"running nodes">>, ENode, <<"backup">>,
 	  <<"textfile">>],
 	 Lang) ->
     {result,
-     #xdata{title = <<(?T(Lang, <<"Dump Backup to Text File at ">>))/binary,
+     #xdata{title = <<(tr(Lang, ?T("Dump Backup to Text File at ")))/binary,
 		      ENode/binary>>,
 	    type = form,
-	    instructions = [?T(Lang, <<"Enter path to text file">>)],
+	    instructions = [tr(Lang, ?T("Enter path to text file"))],
 	    fields = [?HFIELD(),
-		      ?XFIELD('text-single', <<"Path to File">>,
+		      ?XFIELD('text-single', ?T("Path to File"),
 			      <<"path">>, <<"">>)]}};
 get_form(_Host,
 	 [<<"running nodes">>, ENode, <<"import">>, <<"file">>],
 	 Lang) ->
     {result,
-     #xdata{title = <<(?T(Lang, <<"Import User from File at ">>))/binary,
+     #xdata{title = <<(tr(Lang, ?T("Import User from File at ")))/binary,
 		      ENode/binary>>,
 	    type = form,
-	    instructions = [?T(Lang, <<"Enter path to jabberd14 spool file">>)],
+	    instructions = [tr(Lang, ?T("Enter path to jabberd14 spool file"))],
 	    fields = [?HFIELD(),
-		      ?XFIELD('text-single', <<"Path to File">>,
+		      ?XFIELD('text-single', ?T("Path to File"),
 			      <<"path">>, <<"">>)]}};
 get_form(_Host,
 	 [<<"running nodes">>, ENode, <<"import">>, <<"dir">>],
 	 Lang) ->
     {result,
-     #xdata{title = <<(?T(Lang, <<"Import Users from Dir at ">>))/binary,
+     #xdata{title = <<(tr(Lang, ?T("Import Users from Dir at ")))/binary,
 		      ENode/binary>>,
 	    type = form,
-	    instructions = [?T(Lang, <<"Enter path to jabberd14 spool dir">>)],
+	    instructions = [tr(Lang, ?T("Enter path to jabberd14 spool dir"))],
 	    fields = [?HFIELD(),
-		      ?XFIELD('text-single', <<"Path to Dir">>,
+		      ?XFIELD('text-single', ?T("Path to Dir"),
 			      <<"path">>, <<"">>)]}};
 get_form(_Host,
 	 [<<"running nodes">>, _ENode, <<"restart">>], Lang) ->
     Make_option =
 	fun (LabelNum, LabelUnit, Value) ->
 		#xdata_option{
-		   label = <<LabelNum/binary, (?T(Lang, LabelUnit))/binary>>,
+		   label = <<LabelNum/binary, (tr(Lang, LabelUnit))/binary>>,
 		   value = Value}
 	end,
     {result,
-     #xdata{title = ?T(Lang, <<"Restart Service">>),
+     #xdata{title = tr(Lang, ?T("Restart Service")),
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{
 			 type = 'list-single',
-			 label = ?T(Lang, <<"Time delay">>),
+			 label = tr(Lang, ?T("Time delay")),
 			 var = <<"delay">>,
 			 required = true,
 			 options =
@@ -1027,30 +1013,30 @@ get_form(_Host,
 			      Make_option(<<"15 ">>, <<"minutes">>, <<"900">>),
 			      Make_option(<<"30 ">>, <<"minutes">>, <<"1800">>)]},
 		      #xdata_field{type = fixed,
-				   label = ?T(Lang,
-					      <<"Send announcement to all online users "
-						"on all hosts">>)},
+				   label = tr(Lang,
+					      ?T("Send announcement to all online users "
+						 "on all hosts"))},
 		      #xdata_field{var = <<"subject">>,
 				   type = 'text-single',
-				   label = ?T(Lang, <<"Subject">>)},
+				   label = tr(Lang, ?T("Subject"))},
 		      #xdata_field{var = <<"announcement">>,
 				   type = 'text-multi',
-				   label = ?T(Lang, <<"Message body">>)}]}};
+				   label = tr(Lang, ?T("Message body"))}]}};
 get_form(_Host,
 	 [<<"running nodes">>, _ENode, <<"shutdown">>], Lang) ->
     Make_option =
 	fun (LabelNum, LabelUnit, Value) ->
 		#xdata_option{
-		   label = <<LabelNum/binary, (?T(Lang, LabelUnit))/binary>>,
+		   label = <<LabelNum/binary, (tr(Lang, LabelUnit))/binary>>,
 		   value = Value}
 	end,
     {result,
-     #xdata{title = ?T(Lang, <<"Shut Down Service">>),
+     #xdata{title = tr(Lang, ?T("Shut Down Service")),
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{
 			 type = 'list-single',
-			 label = ?T(Lang, <<"Time delay">>),
+			 label = tr(Lang, ?T("Time delay")),
 			 var = <<"delay">>,
 			 required = true,
 			 options =
@@ -1067,128 +1053,110 @@ get_form(_Host,
 			      Make_option(<<"15 ">>, <<"minutes">>, <<"900">>),
 			      Make_option(<<"30 ">>, <<"minutes">>, <<"1800">>)]},
 		      #xdata_field{type = fixed,
-				   label = ?T(Lang,
-					      <<"Send announcement to all online users "
-						"on all hosts">>)},
+				   label = tr(Lang,
+					      ?T("Send announcement to all online users "
+						 "on all hosts"))},
 		      #xdata_field{var = <<"subject">>,
 				   type = 'text-single',
-				   label = ?T(Lang, <<"Subject">>)},
+				   label = tr(Lang, ?T("Subject"))},
 		      #xdata_field{var = <<"announcement">>,
 				   type = 'text-multi',
-				   label = ?T(Lang, <<"Message body">>)}]}};
-get_form(Host, [<<"config">>, <<"acls">>], Lang) ->
-    ACLs = str:tokens(
-	     str:format("~p.",
-			[mnesia:dirty_select(
-			   acl,
-			   ets:fun2ms(
-			     fun({acl, {Name, H}, Spec}) when H == Host ->
-				     {acl, Name, Spec}
-			     end))]),
-	     <<"\n">>),
-    {result,
-     #xdata{title = ?T(Lang, <<"Access Control List Configuration">>),
-	    type = form,
-	    fields = [?HFIELD(),
-		      #xdata_field{type = 'text-multi',
-				   label = ?T(Lang, <<"Access Control Lists">>),
-				   var = <<"acls">>,
-				   values = ACLs}]}};
-get_form(Host, [<<"config">>, <<"access">>], Lang) ->
-    Accs = str:tokens(
-	     str:format("~p.",
-			[mnesia:dirty_select(
-			   access,
-			   ets:fun2ms(
-			     fun({access, {Name, H}, Acc}) when H == Host ->
-				     {access, Name, Acc}
-			     end))]),
-	     <<"\n">>),
-    {result,
-     #xdata{title = ?T(Lang, <<"Access Configuration">>),
-	    type = form,
-	    fields = [?HFIELD(),
-		      #xdata_field{type = 'text-multi',
-				   label = ?T(Lang, <<"Access Rules">>),
-				   var = <<"access">>,
-				   values = Accs}]}};
+				   label = tr(Lang, ?T("Message body"))}]}};
 get_form(_Host, ?NS_ADMINL(<<"add-user">>), Lang) ->
     {result,
-     #xdata{title = ?T(Lang, <<"Add User">>),
+     #xdata{title = tr(Lang, ?T("Add User")),
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'jid-single',
-				   label = ?T(Lang, <<"Jabber ID">>),
+				   label = tr(Lang, ?T("Jabber ID")),
 				   required = true,
 				   var = <<"accountjid">>},
 		      #xdata_field{type = 'text-private',
-				   label = ?T(Lang, <<"Password">>),
+				   label = tr(Lang, ?T("Password")),
 				   required = true,
 				   var = <<"password">>},
 		      #xdata_field{type = 'text-private',
-				   label = ?T(Lang, <<"Password Verification">>),
+				   label = tr(Lang, ?T("Password Verification")),
 				   required = true,
 				   var = <<"password-verify">>}]}};
 get_form(_Host, ?NS_ADMINL(<<"delete-user">>), Lang) ->
     {result,
-     #xdata{title = ?T(Lang, <<"Delete User">>),
+     #xdata{title = tr(Lang, ?T("Delete User")),
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'jid-multi',
-				   label = ?T(Lang, <<"Jabber ID">>),
+				   label = tr(Lang, ?T("Jabber ID")),
+				   required = true,
+				   var = <<"accountjids">>}]}};
+get_form(_Host, ?NS_ADMINL(<<"disable-user">>), Lang) ->
+    {result,
+     #xdata{title = tr(Lang, ?T("Disable User")),
+	    type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'jid-multi',
+				   label = tr(Lang, ?T("Jabber ID")),
+				   required = true,
+				   var = <<"accountjids">>}]}};
+get_form(_Host, ?NS_ADMINL(<<"reenable-user">>), Lang) ->
+    {result,
+     #xdata{title = tr(Lang, ?T("Re-Enable User")),
+	    type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'jid-multi',
+				   label = tr(Lang, ?T("Jabber ID")),
 				   required = true,
 				   var = <<"accountjids">>}]}};
 get_form(_Host, ?NS_ADMINL(<<"end-user-session">>),
 	 Lang) ->
     {result,
-     #xdata{title = ?T(Lang, <<"End User Session">>),
+     #xdata{title = tr(Lang, ?T("End User Session")),
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'jid-single',
-				   label = ?T(Lang, <<"Jabber ID">>),
+				   label = tr(Lang, ?T("Jabber ID")),
 				   required = true,
 				   var = <<"accountjid">>}]}};
-get_form(_Host, ?NS_ADMINL(<<"get-user-password">>),
-	 Lang) ->
-    {result,
-     #xdata{title = ?T(Lang, <<"Get User Password">>),
-	    type = form,
-	    fields = [?HFIELD(),
-		      #xdata_field{type = 'jid-single',
-				   label = ?T(Lang, <<"Jabber ID">>),
-				   var = <<"accountjid">>,
-				   required = true}]}};
 get_form(_Host, ?NS_ADMINL(<<"change-user-password">>),
 	 Lang) ->
     {result,
-     #xdata{title = ?T(Lang, <<"Get User Password">>),
+     #xdata{title = tr(Lang, ?T("Change User Password")),
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'jid-single',
-				   label = ?T(Lang, <<"Jabber ID">>),
+				   label = tr(Lang, ?T("Jabber ID")),
 				   required = true,
 				   var = <<"accountjid">>},
 		      #xdata_field{type = 'text-private',
-				   label = ?T(Lang, <<"Password">>),
+				   label = tr(Lang, ?T("Password")),
 				   required = true,
 				   var = <<"password">>}]}};
+get_form(_Host, ?NS_ADMINL(<<"get-user-roster">>),
+	 Lang) ->
+    {result,
+     #xdata{title = tr(Lang, ?T("Get User Roster")),
+	    type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'jid-multi',
+				   label = tr(Lang, ?T("Jabber ID")),
+				   required = true,
+				   var = <<"accountjids">>}]}};
 get_form(_Host, ?NS_ADMINL(<<"get-user-lastlogin">>),
 	 Lang) ->
     {result,
-     #xdata{title = ?T(Lang, <<"Get User Last Login Time">>),
+     #xdata{title = tr(Lang, ?T("Get User Last Login Time")),
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'jid-single',
-				   label = ?T(Lang, <<"Jabber ID">>),
+				   label = tr(Lang, ?T("Jabber ID")),
 				   var = <<"accountjid">>,
 				   required = true}]}};
 get_form(_Host, ?NS_ADMINL(<<"user-stats">>), Lang) ->
     {result,
-     #xdata{title = ?T(Lang, <<"Get User Statistics">>),
+     #xdata{title = tr(Lang, ?T("Get User Statistics")),
 	    type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'jid-single',
-				   label = ?T(Lang, <<"Jabber ID">>),
+				   label = tr(Lang, ?T("Jabber ID")),
 				   var = <<"accountjid">>,
 				   required = true}]}};
 get_form(Host,
@@ -1198,8 +1166,18 @@ get_form(Host,
      #xdata{type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'text-single',
-				   label = ?T(Lang, <<"Number of registered users">>),
+				   label = tr(Lang, ?T("Number of registered users")),
 				   var = <<"registeredusersnum">>,
+				   values = [Num]}]}};
+get_form(Host,
+	 ?NS_ADMINL(<<"get-disabled-users-num">>), Lang) ->
+    Num = integer_to_binary(mod_admin_extra:count_banned(Host)),
+    {result, completed,
+     #xdata{type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'text-single',
+				   label = tr(Lang, ?T("Number of disabled users")),
+				   var = <<"disabledusersnum">>,
 				   values = [Num]}]}};
 get_form(Host, ?NS_ADMINL(<<"get-online-users-num">>),
 	 Lang) ->
@@ -1208,17 +1186,102 @@ get_form(Host, ?NS_ADMINL(<<"get-online-users-num">>),
      #xdata{type = form,
 	    fields = [?HFIELD(),
 		      #xdata_field{type = 'text-single',
-				   label = ?T(Lang, <<"Number of online users">>),
+				   label = tr(Lang, ?T("Number of online users")),
 				   var = <<"onlineusersnum">>,
 				   values = [Num]}]}};
+get_form(Host, ?NS_ADMINL(<<"get-active-users-num">>),
+	 Lang) ->
+    Num = integer_to_binary(mod_admin_extra:status_num(Host, [<<"available">>,
+                                                              <<"chat">>,
+                                                              <<"dnd">>])),
+    {result, completed,
+     #xdata{type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'text-single',
+				   label = tr(Lang, ?T("Number of active users")),
+				   var = <<"activeusersnum">>,
+				   values = [Num]}]}};
+get_form(Host, ?NS_ADMINL(<<"get-idle-users-num">>),
+	 Lang) ->
+    Num = integer_to_binary(mod_admin_extra:status_num(Host, [<<"away">>,
+                                                              <<"xa">>])),
+    {result, completed,
+     #xdata{type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'text-single',
+				   label = tr(Lang, ?T("Number of idle users")),
+				   var = <<"idleusersnum">>,
+				   values = [Num]}]}};
+get_form(Host, ?NS_ADMINL(<<"get-registered-users-list">>), Lang) ->
+    Values = [jid:encode(jid:make(U, Host))
+              || {U, _} <- ejabberd_auth:get_users(Host)],
+    {result, completed,
+     #xdata{type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'jid-multi',
+				   label = tr(Lang, ?T("The list of all users")),
+				   var = <<"registereduserjids">>,
+				   values = Values}]}};
+get_form(Host, ?NS_ADMINL(<<"get-disabled-users-list">>), Lang) ->
+    Values = mod_admin_extra:list_banned(Host),
+    {result, completed,
+     #xdata{type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'jid-multi',
+				   label = tr(Lang, ?T("The list of all disabled users")),
+				   var = <<"disableduserjids">>,
+				   values = Values}]}};
+get_form(Host, ?NS_ADMINL(<<"get-online-users-list">>), Lang) ->
+    Accounts = [jid:encode(jid:make(U, Host))
+              || {U, _, _} <- ejabberd_sm:get_vh_session_list(Host)],
+    Values = lists:usort(Accounts),
+    {result, completed,
+     #xdata{type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'jid-multi',
+				   label = tr(Lang, ?T("The list of all online users")),
+				   var = <<"onlineuserjids">>,
+				   values = Values}]}};
+get_form(Host, ?NS_ADMINL(<<"get-active-users">>), Lang) ->
+    RR = mod_admin_extra:status_list(Host, [<<"available">>, <<"chat">>, <<"dnd">>]),
+    Accounts = [jid:encode(jid:make(U, S))
+              || {U, S, _Resource, _Priority, _StatusText} <- RR],
+    Values = lists:usort(Accounts),
+    {result, completed,
+     #xdata{type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'jid-multi',
+				   label = tr(Lang, ?T("The list of all active users")),
+				   var = <<"activeuserjids">>,
+				   values = Values}]}};
+get_form(Host, ?NS_ADMINL(<<"get-idle-users">>), Lang) ->
+    RR = mod_admin_extra:status_list(Host, [<<"away">>, <<"xa">>]),
+    Accounts = [jid:encode(jid:make(U, S))
+              || {U, S, _Resource, _Priority, _StatusText} <- RR],
+    Values = lists:usort(Accounts),
+    {result, completed,
+     #xdata{type = form,
+	    fields = [?HFIELD(),
+		      #xdata_field{type = 'jid-multi',
+				   label = tr(Lang, ?T("The list of all idle users")),
+				   var = <<"idleuserjids">>,
+				   values = Values}]}};
+get_form(Host, ?NS_ADMINL(<<"restart">>), Lang) ->
+    get_form(Host,
+	 [<<"running nodes">>, misc:atom_to_binary(node()), <<"restart">>], Lang);
+get_form(Host, ?NS_ADMINL(<<"shutdown">>), Lang) ->
+    get_form(Host,
+	 [<<"running nodes">>, misc:atom_to_binary(node()), <<"shutdown">>], Lang);
 get_form(_Host, _, _Lang) ->
     {error, xmpp:err_service_unavailable()}.
 
+-spec set_form(jid(), binary(), [binary()], binary(), xdata()) -> {result, xdata() | undefined} |
+								  {error, stanza_error()}.
 set_form(_From, _Host,
 	 [<<"running nodes">>, ENode, <<"DB">>], Lang, XData) ->
     case search_running_node(ENode) of
       false ->
-	  Txt = <<"No running node found">>,
+	  Txt = ?T("No running node found"),
 	  {error, xmpp:err_item_not_found(Txt, Lang)};
       Node ->
 	  lists:foreach(
@@ -1245,93 +1308,36 @@ set_form(_From, _Host,
 	    end, XData#xdata.fields),
 	    {result, undefined}
     end;
-set_form(_From, Host,
-	 [<<"running nodes">>, ENode, <<"modules">>, <<"stop">>],
-	 Lang, XData) ->
-    case search_running_node(ENode) of
-      false ->
-	  Txt = <<"No running node found">>,
-	  {error, xmpp:err_item_not_found(Txt, Lang)};
-      Node ->
-	  lists:foreach(
-	    fun(#xdata_field{var = Var, values = Vals}) ->
-		    case Vals of
-			[<<"1">>] ->
-			    Module = misc:binary_to_atom(Var),
-			    ejabberd_cluster:call(Node, gen_mod, stop_module,
-						  [Host, Module]);
-			_ -> ok
-		    end
-	    end, XData#xdata.fields),
-	  {result, undefined}
-    end;
-set_form(_From, Host,
-	 [<<"running nodes">>, ENode, <<"modules">>,
-	  <<"start">>],
-	 Lang, XData) ->
-    case search_running_node(ENode) of
-	false ->
-	    Txt = <<"No running node found">>,
-	    {error, xmpp:err_item_not_found(Txt, Lang)};
-	Node ->
-	    case xmpp_util:get_xdata_values(<<"modules">>, XData) of
-		[] ->
-		    Txt = <<"No 'modules' found in data form">>,
-		    {error, xmpp:err_bad_request(Txt, Lang)};
-		Strings ->
-		    String = lists:foldl(fun (S, Res) ->
-						 <<Res/binary, S/binary, "\n">>
-					 end, <<"">>, Strings),
-		    case erl_scan:string(binary_to_list(String)) of
-			{ok, Tokens, _} ->
-			    case erl_parse:parse_term(Tokens) of
-				{ok, Modules} ->
-				    lists:foreach(
-				      fun ({Module, Args}) ->
-					      ejabberd_cluster:call(
-						Node, gen_mod, start_module,
-						[Host, Module, Args])
-				      end,
-				      Modules),
-				    {result, undefined};
-				_ ->
-				    Txt = <<"Parse failed">>,
-				    {error, xmpp:err_bad_request(Txt, Lang)}
-			    end;
-			_ ->
-			    Txt = <<"Scan failed">>,
-			    {error, xmpp:err_bad_request(Txt, Lang)}
-		    end
-	    end
-    end;
 set_form(_From, _Host,
 	 [<<"running nodes">>, ENode, <<"backup">>,
 	  <<"backup">>],
 	 Lang, XData) ->
     case search_running_node(ENode) of
 	false ->
-	    Txt = <<"No running node found">>,
+	    Txt = ?T("No running node found"),
 	    {error, xmpp:err_item_not_found(Txt, Lang)};
 	Node ->
 	    case xmpp_util:get_xdata_values(<<"path">>, XData) of
 		[] ->
-		    Txt = <<"No 'path' found in data form">>,
+		    Txt = ?T("No 'path' found in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)};
 		[String] ->
-		    case ejabberd_cluster:call(Node, mnesia, backup, [String]) of
+		    case ejabberd_cluster:call(
+			   Node, mnesia, backup, [binary_to_list(String)],
+			   timer:minutes(10)) of
 			{badrpc, Reason} ->
-			    ?ERROR_MSG("RPC call mnesia:backup(~s) to node ~s "
+			    ?ERROR_MSG("RPC call mnesia:backup(~ts) to node ~ts "
 				       "failed: ~p", [String, Node, Reason]),
 			    {error, xmpp:err_internal_server_error()};
 			{error, Reason} ->
-			    ?ERROR_MSG("RPC call mnesia:backup(~s) to node ~s "
+			    ?ERROR_MSG("RPC call mnesia:backup(~ts) to node ~ts "
 				       "failed: ~p", [String, Node, Reason]),
 			    {error, xmpp:err_internal_server_error()};
 			_ ->
 			    {result, undefined}
 		    end;
 		_ ->
-		    Txt = <<"Incorrect value of 'path' in data form">>,
+		    Txt = ?T("Incorrect value of 'path' in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)}
 	    end
     end;
@@ -1341,29 +1347,30 @@ set_form(_From, _Host,
 	 Lang, XData) ->
     case search_running_node(ENode) of
 	false ->
-	    Txt = <<"No running node found">>,
+	    Txt = ?T("No running node found"),
 	    {error, xmpp:err_item_not_found(Txt, Lang)};
 	Node ->
 	    case xmpp_util:get_xdata_values(<<"path">>, XData) of
 		[] ->
-		    Txt = <<"No 'path' found in data form">>,
+		    Txt = ?T("No 'path' found in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)};
 		[String] ->
-		    case ejabberd_cluster:call(Node, ejabberd_admin,
-					       restore, [String]) of
+		    case ejabberd_cluster:call(
+			   Node, ejabberd_admin, restore,
+			   [String], timer:minutes(10)) of
 			{badrpc, Reason} ->
-			    ?ERROR_MSG("RPC call ejabberd_admin:restore(~s) to node "
-				       "~s failed: ~p", [String, Node, Reason]),
+			    ?ERROR_MSG("RPC call ejabberd_admin:restore(~ts) to node "
+				       "~ts failed: ~p", [String, Node, Reason]),
 			    {error, xmpp:err_internal_server_error()};
 			{error, Reason} ->
-			    ?ERROR_MSG("RPC call ejabberd_admin:restore(~s) to node "
-				       "~s failed: ~p", [String, Node, Reason]),
+			    ?ERROR_MSG("RPC call ejabberd_admin:restore(~ts) to node "
+				       "~ts failed: ~p", [String, Node, Reason]),
 			    {error, xmpp:err_internal_server_error()};
 			_ ->
 			    {result, undefined}
 		    end;
 		_ ->
-		    Txt = <<"Incorrect value of 'path' in data form">>,
+		    Txt = ?T("Incorrect value of 'path' in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)}
 	    end
     end;
@@ -1373,29 +1380,30 @@ set_form(_From, _Host,
 	 Lang, XData) ->
     case search_running_node(ENode) of
 	false ->
-	    Txt = <<"No running node found">>,
+	    Txt = ?T("No running node found"),
 	    {error, xmpp:err_item_not_found(Txt, Lang)};
 	Node ->
 	    case xmpp_util:get_xdata_values(<<"path">>, XData) of
 		[] ->
-		    Txt = <<"No 'path' found in data form">>,
+		    Txt = ?T("No 'path' found in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)};
 		[String] ->
-		    case ejabberd_cluster:call(Node, ejabberd_admin,
-					       dump_to_textfile, [String]) of
+		    case ejabberd_cluster:call(
+			   Node, ejabberd_admin, dump_to_textfile,
+			   [String], timer:minutes(10)) of
 			{badrpc, Reason} ->
-			    ?ERROR_MSG("RPC call ejabberd_admin:dump_to_textfile(~s) "
-				       "to node ~s failed: ~p", [String, Node, Reason]),
+			    ?ERROR_MSG("RPC call ejabberd_admin:dump_to_textfile(~ts) "
+				       "to node ~ts failed: ~p", [String, Node, Reason]),
 			    {error, xmpp:err_internal_server_error()};
 			{error, Reason} ->
-			    ?ERROR_MSG("RPC call ejabberd_admin:dump_to_textfile(~s) "
-				       "to node ~s failed: ~p", [String, Node, Reason]),
+			    ?ERROR_MSG("RPC call ejabberd_admin:dump_to_textfile(~ts) "
+				       "to node ~ts failed: ~p", [String, Node, Reason]),
 			    {error, xmpp:err_internal_server_error()};
 			_ ->
 			    {result, undefined}
 		    end;
 		_ ->
-		    Txt = <<"Incorrect value of 'path' in data form">>,
+		    Txt = ?T("Incorrect value of 'path' in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)}
 	    end
     end;
@@ -1404,18 +1412,18 @@ set_form(_From, _Host,
 	 Lang, XData) ->
     case search_running_node(ENode) of
 	false ->
-	    Txt = <<"No running node found">>,
+	    Txt = ?T("No running node found"),
 	    {error, xmpp:err_item_not_found(Txt, Lang)};
 	Node ->
 	    case xmpp_util:get_xdata_values(<<"path">>, XData) of
 		[] ->
-		    Txt = <<"No 'path' found in data form">>,
+		    Txt = ?T("No 'path' found in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)};
 		[String] ->
 		    ejabberd_cluster:call(Node, jd2ejd, import_file, [String]),
 		    {result, undefined};
 		_ ->
-		    Txt = <<"Incorrect value of 'path' in data form">>,
+		    Txt = ?T("Incorrect value of 'path' in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)}
 	    end
     end;
@@ -1424,18 +1432,18 @@ set_form(_From, _Host,
 	 Lang, XData) ->
     case search_running_node(ENode) of
 	false ->
-	    Txt = <<"No running node found">>,
+	    Txt = ?T("No running node found"),
 	    {error, xmpp:err_item_not_found(Txt, Lang)};
 	Node ->
 	    case xmpp_util:get_xdata_values(<<"path">>, XData) of
 		[] ->
-		    Txt = <<"No 'path' found in data form">>,
+		    Txt = ?T("No 'path' found in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)};
 		[String] ->
 		    ejabberd_cluster:call(Node, jd2ejd, import_dir, [String]),
 		    {result, undefined};
 		_ ->
-		    Txt = <<"Incorrect value of 'path' in data form">>,
+		    Txt = ?T("Incorrect value of 'path' in data form"),
 		    {error, xmpp:err_bad_request(Txt, Lang)}
 	    end
     end;
@@ -1447,75 +1455,6 @@ set_form(From, Host,
 	 [<<"running nodes">>, ENode, <<"shutdown">>], _Lang,
 	 XData) ->
     stop_node(From, Host, ENode, stop, XData);
-set_form(_From, Host, [<<"config">>, <<"acls">>], Lang,
-	 XData) ->
-    case xmpp_util:get_xdata_values(<<"acls">>, XData) of
-	[] ->
-	    Txt = <<"No 'acls' found in data form">>,
-	    {error, xmpp:err_bad_request(Txt, Lang)};
-	Strings ->
-	    String = lists:foldl(fun (S, Res) ->
-					 <<Res/binary, S/binary, "\n">>
-				 end, <<"">>, Strings),
-	    case erl_scan:string(binary_to_list(String)) of
-		{ok, Tokens, _} ->
-		    case erl_parse:parse_term(Tokens) of
-			{ok, ACLs} ->
-			    acl:add_list(Host, ACLs, true),
-			    {result, undefined};
-			_ ->
-			    Txt = <<"Parse failed">>,
-			    {error, xmpp:err_bad_request(Txt, Lang)}
-		    end;
-		_ ->
-		    {error, xmpp:err_bad_request(<<"Scan failed">>, Lang)}
-	    end
-    end;
-set_form(_From, Host, [<<"config">>, <<"access">>],
-	 Lang, XData) ->
-    SetAccess =
-	fun(Rs) ->
-		mnesia:transaction(
-		  fun () ->
-			  Os = mnesia:select(
-				 access,
-				 ets:fun2ms(
-				   fun({access, {_, H}, _} = O) when H == Host ->
-					   O
-				   end)),
-			  lists:foreach(fun mnesia:delete_object/1, Os),
-			  lists:foreach(
-			    fun({access, Name, Rules}) ->
-				    mnesia:write({access, {Name, Host}, Rules})
-			    end, Rs)
-		  end)
-	end,
-    case xmpp_util:get_xdata_values(<<"access">>, XData) of
-	[] ->
-	    Txt = <<"No 'access' found in data form">>,
-	    {error, xmpp:err_bad_request(Txt, Lang)};
-	Strings ->
-	    String = lists:foldl(fun (S, Res) ->
-					 <<Res/binary, S/binary, "\n">>
-				 end, <<"">>, Strings),
-	    case erl_scan:string(binary_to_list(String)) of
-		{ok, Tokens, _} ->
-		    case erl_parse:parse_term(Tokens) of
-			{ok, Rs} ->
-			    case SetAccess(Rs) of
-				{atomic, _} ->
-				    {result, undefined};
-				_ ->
-				    {error, xmpp:err_bad_request()}
-			    end;
-			_ ->
-			    Txt = <<"Parse failed">>,
-			    {error, xmpp:err_bad_request(Txt, Lang)}
-		    end;
-		_ ->
-		    {error, xmpp:err_bad_request(<<"Scan failed">>, Lang)}
-	    end
-    end;
 set_form(From, Host, ?NS_ADMINL(<<"add-user">>), _Lang,
 	 XData) ->
     AccountString = get_value(<<"accountjid">>, XData),
@@ -1524,9 +1463,9 @@ set_form(From, Host, ?NS_ADMINL(<<"add-user">>), _Lang,
     AccountJID = jid:decode(AccountString),
     User = AccountJID#jid.luser,
     Server = AccountJID#jid.lserver,
-    true = lists:member(Server, ejabberd_config:get_myhosts()),
+    true = lists:member(Server, ejabberd_option:hosts()),
     true = Server == Host orelse
-	     get_permission_level(From) == global,
+	     get_permission_level(From, Host) == global,
     case ejabberd_auth:try_register(User, Server, Password) of
 	ok -> {result, undefined};
 	{error, exists} -> {error, xmpp:err_conflict()};
@@ -1542,12 +1481,48 @@ set_form(From, Host, ?NS_ADMINL(<<"delete-user">>),
 			     User = JID#jid.luser,
 			     Server = JID#jid.lserver,
 			     true = Server == Host orelse
-				      get_permission_level(From) == global,
+				      get_permission_level(From, Host) == global,
 			     true = ejabberd_auth:user_exists(User, Server),
 			     {User, Server}
 		     end,
 		     AccountStringList),
     [ejabberd_auth:remove_user(User, Server)
+     || {User, Server} <- ASL2],
+    {result, undefined};
+set_form(From, Host, ?NS_ADMINL(<<"disable-user">>),
+	 _Lang, XData) ->
+    AccountStringList = get_values(<<"accountjids">>,
+				   XData),
+    [_ | _] = AccountStringList,
+    ASL2 = lists:map(fun (AccountString) ->
+			     JID = jid:decode(AccountString),
+			     User = JID#jid.luser,
+			     Server = JID#jid.lserver,
+			     true = Server == Host orelse
+				      get_permission_level(From, Host) == global,
+			     true = ejabberd_auth:user_exists(User, Server),
+			     {User, Server}
+		     end,
+		     AccountStringList),
+    [mod_admin_extra:ban_account_v2(User, Server, <<"">>)
+     || {User, Server} <- ASL2],
+    {result, undefined};
+set_form(From, Host, ?NS_ADMINL(<<"reenable-user">>),
+	 _Lang, XData) ->
+    AccountStringList = get_values(<<"accountjids">>,
+				   XData),
+    [_ | _] = AccountStringList,
+    ASL2 = lists:map(fun (AccountString) ->
+			     JID = jid:decode(AccountString),
+			     User = JID#jid.luser,
+			     Server = JID#jid.lserver,
+			     true = Server == Host orelse
+				      get_permission_level(From, Host) == global,
+			     true = ejabberd_auth:user_exists(User, Server),
+			     {User, Server}
+		     end,
+		     AccountStringList),
+    [mod_admin_extra:unban_account(User, Server)
      || {User, Server} <- ASL2],
     {result, undefined};
 set_form(From, Host, ?NS_ADMINL(<<"end-user-session">>),
@@ -1556,7 +1531,7 @@ set_form(From, Host, ?NS_ADMINL(<<"end-user-session">>),
     JID = jid:decode(AccountString),
     LServer = JID#jid.lserver,
     true = LServer == Host orelse
-	     get_permission_level(From) == global,
+	     get_permission_level(From, Host) == global,
     case JID#jid.lresource of
 	<<>> ->
 	    ejabberd_sm:kick_user(JID#jid.luser, JID#jid.lserver);
@@ -1565,23 +1540,6 @@ set_form(From, Host, ?NS_ADMINL(<<"end-user-session">>),
     end,
     {result, undefined};
 set_form(From, Host,
-	 ?NS_ADMINL(<<"get-user-password">>), Lang, XData) ->
-    AccountString = get_value(<<"accountjid">>, XData),
-    JID = jid:decode(AccountString),
-    User = JID#jid.luser,
-    Server = JID#jid.lserver,
-    true = Server == Host orelse
-	     get_permission_level(From) == global,
-    Password = ejabberd_auth:get_password(User, Server),
-    true = is_binary(Password),
-    {result,
-     #xdata{type = form,
-	    fields = [?HFIELD(),
-		      ?XFIELD('jid-single', <<"Jabber ID">>,
-			      <<"accountjid">>, AccountString),
-		      ?XFIELD('text-single', <<"Password">>,
-			      <<"password">>, Password)]}};
-set_form(From, Host,
 	 ?NS_ADMINL(<<"change-user-password">>), _Lang, XData) ->
     AccountString = get_value(<<"accountjid">>, XData),
     Password = get_value(<<"password">>, XData),
@@ -1589,10 +1547,35 @@ set_form(From, Host,
     User = JID#jid.luser,
     Server = JID#jid.lserver,
     true = Server == Host orelse
-	     get_permission_level(From) == global,
+	     get_permission_level(From, Host) == global,
     true = ejabberd_auth:user_exists(User, Server),
     ejabberd_auth:set_password(User, Server, Password),
     {result, undefined};
+set_form(From, Host,
+	 ?NS_ADMINL(<<"get-user-roster">>), Lang, XData) ->
+    AccountStringList = get_values(<<"accountjids">>,
+				   XData),
+    [_ | _] = AccountStringList,
+    ASL2 = lists:map(fun (AccountString) ->
+			     JID = jid:decode(AccountString),
+			     User = JID#jid.luser,
+			     Server = JID#jid.lserver,
+			     true = Server == Host orelse
+				      get_permission_level(From, Host) == global,
+			     true = ejabberd_auth:user_exists(User, Server),
+			     {User, Server}
+		     end,
+		     AccountStringList),
+    Contacts = [mod_admin_extra:get_roster(User, Server) || {User, Server} <- ASL2],
+    Jids = [lists:join(<<"; ">>, [Jid, Name, Subscription, lists:join(<<", ">>, Groups)])
+            || {Jid, Name, Subscription, _, Groups} <- lists:flatten(Contacts)],
+    {result,
+     #xdata{type = result,
+	    fields = [?HFIELD(),
+		      ?XMFIELD('jid-multi', ?T("Jabber ID"),
+			      <<"accountjids">>, AccountStringList),
+		      ?XMFIELD('text-multi', ?T("Contacts"),
+			       <<"contacts">>, Jids)]}};
 set_form(From, Host,
 	 ?NS_ADMINL(<<"get-user-lastlogin">>), Lang, XData) ->
     AccountString = get_value(<<"accountjid">>, XData),
@@ -1600,13 +1583,13 @@ set_form(From, Host,
     User = JID#jid.luser,
     Server = JID#jid.lserver,
     true = Server == Host orelse
-	     get_permission_level(From) == global,
+	     get_permission_level(From, Host) == global,
     FLast = case ejabberd_sm:get_user_resources(User,
 						Server)
 		of
 	      [] ->
 		  case get_last_info(User, Server) of
-		    not_found -> ?T(Lang, <<"Never">>);
+		    not_found -> tr(Lang, ?T("Never"));
 		    {ok, Timestamp, _Status} ->
 			Shift = Timestamp,
 			TimeStamp = {Shift div 1000000, Shift rem 1000000, 0},
@@ -1616,14 +1599,14 @@ set_form(From, Host,
 						       [Year, Month, Day, Hour,
 							Minute, Second]))
 		  end;
-	      _ -> ?T(Lang, <<"Online">>)
+	      _ -> tr(Lang, ?T("Online"))
 	    end,
     {result,
-     #xdata{type = form,
+     #xdata{type = result,
 	    fields = [?HFIELD(),
-		      ?XFIELD('jid-single', <<"Jabber ID">>,
+		      ?XFIELD('jid-single', ?T("Jabber ID"),
 			      <<"accountjid">>, AccountString),
-		      ?XFIELD('text-single', <<"Last login">>,
+		      ?XFIELD('text-single', ?T("Last login"),
 			      <<"lastlogin">>, FLast)]}};
 set_form(From, Host, ?NS_ADMINL(<<"user-stats">>), Lang,
 	 XData) ->
@@ -1632,7 +1615,7 @@ set_form(From, Host, ?NS_ADMINL(<<"user-stats">>), Lang,
     User = JID#jid.luser,
     Server = JID#jid.lserver,
     true = Server == Host orelse
-	     get_permission_level(From) == global,
+	     get_permission_level(From, Host) == global,
     Resources = ejabberd_sm:get_user_resources(User,
 					       Server),
     IPs1 = [ejabberd_sm:get_user_ip(User, Server, Resource)
@@ -1644,41 +1627,55 @@ set_form(From, Host, ?NS_ADMINL(<<"user-stats">>), Lang,
 				    [{User, Server}]),
     Rostersize = integer_to_binary(erlang:length(Items)),
     {result,
-     #xdata{type = form,
+     #xdata{type = result,
 	    fields = [?HFIELD(),
-		      ?XFIELD('jid-single', <<"Jabber ID">>,
+		      ?XFIELD('jid-single', ?T("Jabber ID"),
 			      <<"accountjid">>, AccountString),
-		      ?XFIELD('text-single', <<"Roster size">>,
+		      ?XFIELD('text-single', ?T("Roster size"),
 			      <<"rostersize">>, Rostersize),
-		      ?XMFIELD('text-multi', <<"IP addresses">>,
+		      ?XMFIELD('text-multi', ?T("IP addresses"),
 			       <<"ipaddresses">>, IPs),
-		      ?XMFIELD('text-multi', <<"Resources">>,
+		      ?XMFIELD('text-multi', ?T("Resources"),
 			       <<"onlineresources">>, Resources)]}};
+set_form(From, Host, ?NS_ADMINL(<<"restart">>), Lang,
+	 XData) ->
+    set_form(From, Host,
+	 [<<"running nodes">>, misc:atom_to_binary(node()), <<"restart">>], Lang, XData);
+set_form(From, Host, ?NS_ADMINL(<<"shutdown">>), Lang,
+	 XData) ->
+    set_form(From, Host,
+	 [<<"running nodes">>, misc:atom_to_binary(node()), <<"shutdown">>], Lang, XData);
 set_form(_From, _Host, _, _Lang, _XData) ->
     {error, xmpp:err_service_unavailable()}.
 
-get_value(Field, XData) -> hd(get_values(Field, XData)).
+-spec get_value(binary(), xdata()) -> binary().
+get_value(Field, XData) ->
+    hd(get_values(Field, XData)).
 
+-spec get_values(binary(), xdata()) -> [binary()].
 get_values(Field, XData) ->
     xmpp_util:get_xdata_values(Field, XData).
 
+-spec search_running_node(binary()) -> false | node().
 search_running_node(SNode) ->
     search_running_node(SNode,
 			mnesia:system_info(running_db_nodes)).
 
+-spec search_running_node(binary(), [node()]) -> false | node().
 search_running_node(_, []) -> false;
 search_running_node(SNode, [Node | Nodes]) ->
-    case iolist_to_binary(atom_to_list(Node)) of
-      SNode -> Node;
-      _ -> search_running_node(SNode, Nodes)
+    case atom_to_binary(Node, utf8) of
+	SNode -> Node;
+	_ -> search_running_node(SNode, Nodes)
     end.
 
+-spec stop_node(jid(), binary(), binary(), restart | stop, xdata()) -> {result, undefined}.
 stop_node(From, Host, ENode, Action, XData) ->
     Delay = binary_to_integer(get_value(<<"delay">>, XData)),
-    Subject = case get_value(<<"subject">>, XData) of
-		  <<"">> ->
+    Subject = case get_values(<<"subject">>, XData) of
+		  [] ->
 		      [];
-		  S ->
+		  [S|_] ->
 		      [#xdata_field{var = <<"subject">>, values = [S]}]
 	      end,
     Announcement = case get_values(<<"announcement">>, XData) of
@@ -1700,9 +1697,10 @@ stop_node(From, Host, ENode, Action, XData) ->
     end,
     Time = timer:seconds(Delay),
     Node = misc:binary_to_atom(ENode),
-    {ok, _} = timer:apply_after(Time, rpc, call, [Node, init, Action, []]),
+    {ok, _} = timer:apply_after(Time, ejabberd_cluster, call, [Node, init, Action, []]),
     {result, undefined}.
 
+-spec get_last_info(binary(), binary()) -> {ok, non_neg_integer(), binary()} | not_found.
 get_last_info(User, Server) ->
     case gen_mod:is_loaded(Server, mod_last) of
       true -> mod_last:get_last_info(User, Server);
@@ -1710,14 +1708,15 @@ get_last_info(User, Server) ->
     end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
--spec adhoc_sm_commands(adhoc_command(), jid(), jid(), adhoc_command()) -> adhoc_command().
+-spec adhoc_sm_commands(adhoc_command(), jid(), jid(), adhoc_command()) -> adhoc_command() |
+									   {error, stanza_error()}.
 adhoc_sm_commands(_Acc, From,
 		  #jid{user = User, server = Server, lserver = LServer},
 		  #adhoc_command{lang = Lang, node = <<"config">>,
 				 action = Action, xdata = XData} = Request) ->
-    case acl:match_rule(LServer, configure, From) of
+    case acl_match_rule(LServer, From) of
 	deny ->
-	    {error, xmpp:err_forbidden(<<"Access denied by service policy">>, Lang)};
+	    {error, xmpp:err_forbidden(?T("Access denied by service policy"), Lang)};
 	allow ->
 	    ActionIsExecute = Action == execute orelse Action == complete,
 	    if Action == cancel ->
@@ -1735,35 +1734,39 @@ adhoc_sm_commands(_Acc, From,
 	       XData /= undefined, ActionIsExecute ->
 		    set_sm_form(User, Server, <<"config">>, Request);
 	       true ->
-		    Txt = <<"Unexpected action">>,
+		    Txt = ?T("Unexpected action"),
 		    {error, xmpp:err_bad_request(Txt, Lang)}
 	    end
     end;
 adhoc_sm_commands(Acc, _From, _To, _Request) -> Acc.
 
+-spec get_sm_form(binary(), binary(), binary(), binary()) -> {result, xdata()} |
+							     {error, stanza_error()}.
 get_sm_form(User, Server, <<"config">>, Lang) ->
     {result,
      #xdata{type = form,
-	    title = <<(?T(Lang, <<"Administration of ">>))/binary, User/binary>>,
+	    title = <<(tr(Lang, ?T("Administration of ")))/binary, User/binary>>,
 	    fields =
 		[?HFIELD(),
 		 #xdata_field{
 		    type = 'list-single',
-		    label = ?T(Lang, <<"Action on user">>),
+		    label = tr(Lang, ?T("Action on user")),
 		    var = <<"action">>,
 		    values = [<<"edit">>],
 		    options = [#xdata_option{
-				  label = ?T(Lang, <<"Edit Properties">>),
+				  label = tr(Lang, ?T("Edit Properties")),
 				  value = <<"edit">>},
 			       #xdata_option{
-				  label = ?T(Lang, <<"Remove User">>),
+				  label = tr(Lang, ?T("Remove User")),
 				  value = <<"remove">>}]},
-		 ?XFIELD('text-private', <<"Password">>,
+		 ?XFIELD('text-private', ?T("Password"),
 			 <<"password">>,
 			 ejabberd_auth:get_password_s(User, Server))]}};
 get_sm_form(_User, _Server, _Node, _Lang) ->
     {error, xmpp:err_service_unavailable()}.
 
+-spec set_sm_form(binary(), binary(), binary(), adhoc_command()) -> adhoc_command() |
+								    {error, stanza_error()}.
 set_sm_form(User, Server, <<"config">>,
 	    #adhoc_command{lang = Lang, node = Node,
 			   sid = SessionID, xdata = XData}) ->
@@ -1776,17 +1779,125 @@ set_sm_form(User, Server, <<"config">>,
 		    ejabberd_auth:set_password(User, Server, Password),
 		    xmpp_util:make_adhoc_response(Response);
 		_ ->
-		    Txt = <<"No 'password' found in data form">>,
+		    Txt = ?T("No 'password' found in data form"),
 		    {error, xmpp:err_not_acceptable(Txt, Lang)}
 	    end;
 	[<<"remove">>] ->
-	    catch ejabberd_auth:remove_user(User, Server),
+	    ejabberd_auth:remove_user(User, Server),
 	    xmpp_util:make_adhoc_response(Response);
 	_ ->
-	    Txt = <<"Incorrect value of 'action' in data form">>,
+	    Txt = ?T("Incorrect value of 'action' in data form"),
 	    {error, xmpp:err_not_acceptable(Txt, Lang)}
     end;
 set_sm_form(_User, _Server, _Node, _Request) ->
     {error, xmpp:err_service_unavailable()}.
 
-mod_options(_) -> [].
+-spec tr(binary(), binary()) -> binary().
+tr(Lang, Text) ->
+    translate:translate(Lang, Text).
+
+-spec mod_opt_type(atom()) -> econf:validator().
+mod_opt_type(access) ->
+    econf:acl().
+
+-spec mod_options(binary()) -> [{services, [tuple()]} | {atom(), any()}].
+mod_options(_Host) ->
+    [{access, configure}].
+
+%% All ad-hoc commands implemented by mod_configure are available as API Commands:
+%% - add-user                  -> register
+%% - delete-user               -> unregister
+%% - disable-user              -> ban_account
+%% - reenable-user             -> unban_account
+%% - end-user-session          -> kick_session / kick_user
+%% - change-user-password      -> change_password
+%% - get-user-lastlogin        -> get_last
+%% - get-user-roster           -> get_roster
+%% - get-user-lastlogin        -> get_last
+%% - user-stats                -> user_sessions_info
+%% - edit-blacklist            -> not ad-hoc or API command available !!!
+%% - edit-whitelist            -> not ad-hoc or API command available !!!
+%% - get-registered-users-num  -> stats
+%% - get-disabled-users-num    -> count_banned
+%% - get-online-users-num      -> stats
+%% - get-active-users-num      -> status_num
+%% - get-idle-users-num        -> status_num
+%% - get-registered-users-list -> registered_users
+%% - get-disabled-users-list   -> list_banned
+%% - get-online-users-list     -> connected_users
+%% - get-active-users          -> status_list
+%% - get-idle-users            -> status_list
+%% - stopped nodes             -> list_cluster_detailed
+%% - DB                        -> mnesia_list_tables and mnesia_table_change_storage
+%% - edit-admin                -> not ad-hoc or API command available !!!
+%% - restart                   -> restart_kindly
+%% - shutdown                  -> stop_kindly
+%% - backup                    -> backup
+%% - restore                   -> restore
+%% - textfile                  -> dump
+%% - import/file               -> import_file
+%% - import/dir                -> import_dir
+
+%%
+%% An exclusive feature available only in this module is to list items and discover them:
+%% - outgoing s2s
+%% - online users
+%% - all users
+
+mod_doc() ->
+    #{desc =>
+          [?T("The module provides server configuration functionalities using "
+              "https://xmpp.org/extensions/xep-0030.html[XEP-0030: Service Discovery] and "
+              "https://xmpp.org/extensions/xep-0050.html[XEP-0050: Ad-Hoc Commands]:"),
+           "",
+           "- List and discover outgoing s2s, online client sessions and all registered accounts",
+           "- Most of the ad-hoc commands defined in "
+           "  https://xmpp.org/extensions/xep-0133.html[XEP-0133: Service Administration]",
+           "- Additional custom ad-hoc commands specific to ejabberd",
+           "",
+           ?T("Ad-hoc commands from XEP-0133 that behave differently to the XEP:"),
+           "",
+           " - `get-user-roster`: returns standard fields instead of roster items that client cannot display",
+           "",
+           ?T("Those ad-hoc commands from XEP-0133 do not include in the response "
+              "the client that executed the command:"),
+           "",
+           " - `get-active-users-num`",
+           " - `get-idle-users-num`",
+           " - `get-active-users`",
+           " - `get-idle-users`",
+           "",
+           ?T("Those ad-hoc commands from XEP-0133 are not implemented:"),
+           "",
+           " - `edit-blacklist`",
+           " - `edit-whitelist`",
+           " - `edit-admin`",
+           "",
+           ?T("This module requires _`mod_adhoc`_ (to execute the commands), "
+              "and recommends _`mod_disco`_ (to discover the commands). "),
+           "",
+           ?T("Please notice that all the ad-hoc commands implemented by this module "
+              "have an equivalent "
+              "https://docs.ejabberd.im/developer/ejabberd-api/[API Command] "
+              "that you can execute using _`mod_adhoc_api`_ or any other API frontend.")],
+      note => "improved in 25.10",
+      opts =>
+          [{access,
+            #{value => ?T("AccessName"),
+              note => "added in 25.03",
+              desc =>
+                  ?T("This option defines which access rule will be used to "
+                     "control who is allowed to access the features provided by this module. "
+                     "The default value is 'configure'.")}}],
+      example =>
+          ["acl:",
+           "  admin:",
+           "    user: sun@localhost",
+           "",
+           "access_rules:",
+           "  configure:",
+           "    allow: admin",
+           "",
+           "modules:",
+           "  mod_configure:",
+           "    access: configure"]}.

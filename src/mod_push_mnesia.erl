@@ -5,7 +5,7 @@
 %%% Created : 15 Jul 2017 by Holger Weiss <holger@zedat.fu-berlin.de>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2017-2019 ProcessOne
+%%% ejabberd, Copyright (C) 2017-2026 ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -35,7 +35,7 @@
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_push.hrl").
 
 %%%-------------------------------------------------------------------
@@ -63,7 +63,7 @@ store_session(LUser, LServer, TS, PushJID, Node, XData) ->
 	{atomic, ok} ->
 	    {ok, {TS, PushLJID, Node, XData}};
 	{aborted, E} ->
-	    ?ERROR_MSG("Cannot store push session for ~s@~s: ~p",
+	    ?ERROR_MSG("Cannot store push session for ~ts@~ts: ~p",
 		       [LUser, LServer, E]),
 	    {error, db_failure}
     end.
@@ -82,7 +82,7 @@ lookup_session(LUser, LServer, PushJID, Node) ->
 	[#push_session{timestamp = TS, xml = El}] ->
 	    {ok, {TS, PushLJID, Node, decode_xdata(El)}};
 	[] ->
-	    ?DEBUG("No push session found for ~s@~s (~p, ~s)",
+	    ?DEBUG("No push session found for ~ts@~ts (~p, ~ts)",
 		   [LUser, LServer, PushJID, Node]),
 	    {error, notfound}
     end.
@@ -99,7 +99,7 @@ lookup_session(LUser, LServer, TS) ->
 	[#push_session{service = PushLJID, node = Node, xml = El}] ->
 	    {ok, {TS, PushLJID, Node, decode_xdata(El)}};
 	[] ->
-	    ?DEBUG("No push session found for ~s@~s (~p)",
+	    ?DEBUG("No push session found for ~ts@~ts (~p)",
 		   [LUser, LServer, TS]),
 	    {error, notfound}
     end.
@@ -145,7 +145,7 @@ delete_session(LUser, LServer, TS) ->
 	{atomic, ok} ->
 	    ok;
 	{aborted, E} ->
-	    ?ERROR_MSG("Cannot delete push session of ~s@~s: ~p",
+	    ?ERROR_MSG("Cannot delete push session of ~ts@~ts: ~p",
 		       [LUser, LServer, E]),
 	    {error, db_failure}
     end.
@@ -187,7 +187,7 @@ enforce_max_sessions({U, S} = US, MaxSessions) ->
 				       TS1 >= TS2
 			       end, Recs),
 	    OldRecs = lists:nthtail(MaxSessions - 1, Recs1),
-	    ?INFO_MSG("Disabling old push session(s) of ~s@~s", [U, S]),
+	    ?INFO_MSG("Disabling old push session(s) of ~ts@~ts", [U, S]),
 	    lists:foreach(fun(Rec) -> mnesia:delete_object(Rec) end, OldRecs);
 	_ ->
 	    ok

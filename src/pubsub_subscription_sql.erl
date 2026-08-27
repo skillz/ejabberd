@@ -6,7 +6,7 @@
 %%% Created :  7 Aug 2009 by Pablo Polvorin <pablo.polvorin@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -34,8 +34,8 @@
     get_options_xform/2, parse_options_xform/1]).
 
 -include("pubsub.hrl").
-
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+-include("translate.hrl").
 
 -define(PUBSUB_DELIVER, <<"pubsub#deliver">>).
 -define(PUBSUB_DIGEST, <<"pubsub#digest">>).
@@ -134,7 +134,7 @@ create_table() -> ok.
 
 -spec make_subid() -> mod_pubsub:subId().
 make_subid() ->
-    {T1, T2, T3} = p1_time_compat:timestamp(),
+    {T1, T2, T3} = erlang:timestamp(),
     (str:format("~.16B~.16B~.16B", [T1, T2, T3])).
 
 %%
@@ -171,14 +171,14 @@ val_xfield(digest_frequency = Opt, [Val]) ->
     case catch binary_to_integer(Val) of
 	N when is_integer(N) -> N;
 	_ ->
-	    Txt = {<<"Value of '~s' should be integer">>, [Opt]},
-	    {error, xmpp:err_not_acceptable(Txt, ejabberd_config:get_mylang())}
+	    Txt = {?T("Value of '~s' should be integer"), [Opt]},
+	    {error, xmpp:err_not_acceptable(Txt, ejabberd_option:language())}
     end;
 val_xfield(expire = Opt, [Val]) ->
     try xmpp_util:decode_timestamp(Val)
     catch _:{bad_timestamp, _} ->
-	    Txt = {<<"Value of '~s' should be datetime string">>, [Opt]},
-	    {error, xmpp:err_not_acceptable(Txt, ejabberd_config:get_mylang())}
+	    Txt = {?T("Value of '~s' should be datetime string"), [Opt]},
+	    {error, xmpp:err_not_acceptable(Txt, ejabberd_option:language())}
     end;
 val_xfield(include_body = Opt, [Val]) -> xopt_to_bool(Opt, Val);
 val_xfield(show_values, Vals) -> Vals;
@@ -189,8 +189,8 @@ val_xfield(subscription_depth = Opt, [Depth]) ->
     case catch binary_to_integer(Depth) of
 	N when is_integer(N) -> N;
 	_ ->
-	    Txt = {<<"Value of '~s' should be integer">>, [Opt]},
-	    {error, xmpp:err_not_acceptable(Txt, ejabberd_config:get_mylang())}
+	    Txt = {?T("Value of '~s' should be integer"), [Opt]},
+	    {error, xmpp:err_not_acceptable(Txt, ejabberd_option:language())}
     end.
 
 %% Convert XForm booleans to Erlang booleans.
@@ -199,8 +199,8 @@ xopt_to_bool(_, <<"1">>) -> true;
 xopt_to_bool(_, <<"false">>) -> false;
 xopt_to_bool(_, <<"true">>) -> true;
 xopt_to_bool(Option, _) ->
-    Txt = {<<"Value of '~s' should be boolean">>, [Option]},
-    {error, xmpp:err_not_acceptable(Txt, ejabberd_config:get_mylang())}.
+    Txt = {?T("Value of '~s' should be boolean"), [Option]},
+    {error, xmpp:err_not_acceptable(Txt, ejabberd_option:language())}.
 
 %% Return a field for an XForm for Key, with data filled in, if
 %% applicable, from Options.

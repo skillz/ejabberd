@@ -1,0 +1,56 @@
+{Vars, ElixirApps} = case file:consult(filename:join([filename:dirname(SCRIPT), "..", "vars.config"])) of
+    {ok, Terms} ->
+        Backends = [mssql, mysql, odbc, pgsql, redis, sqlite],
+        EBs = lists:filter(fun(Backend) -> lists:member({Backend, true}, Terms) end, Backends),
+        Elixirs = case proplists:get_bool(elixir, Terms) of
+            true -> [elixir, logger, mix];
+            false -> []
+        end,
+
+        ProfileEnvironmentVariable = os:getenv("REBAR_PROFILE"),
+        AsProfiles = case lists:dropwhile(fun("as") -> false; (_) -> true end,
+                                               init:get_plain_arguments()) of
+                              ["as", Profiles | _] -> string:split(Profiles, ",");
+                              _ -> []
+                          end,
+        Terms2 = case lists:member("dev", [ProfileEnvironmentVariable | AsProfiles]) of
+            true -> lists:keystore(tools, 1, Terms, {tools, true});
+            false -> Terms
+        end,
+        Tools = case lists:keyfind(tools, 1, Terms2) of
+            {tools, true} -> [observer];
+            _ -> []
+        end,
+
+        {[lists:keyfind(description, 1, Terms),
+         lists:keyfind(vsn, 1, Terms),
+         {env, [{enabled_backends, EBs}]}
+        ], Elixirs ++ Tools};
+    _Err ->
+        {[], []}
+    end,
+
+{application, ejabberd,
+ Vars ++
+ [{modules, []},
+  {registered, []},
+  {applications, [kernel, sasl, ssl, stdlib, syntax_tools]},
+  {included_applications,
+    [compiler, inets, mnesia, os_mon,
+     cache_tab,
+     eimp,
+     fast_tls,
+     fast_xml,
+     fast_yaml,
+     p1_acme,
+     p1_utils,
+     pkix,
+     stringprep,
+     yconf,
+     xmpp | ElixirApps]},
+  {mod, {ejabberd_app, []}}]}.
+
+%% Local Variables:
+%% mode: erlang
+%% End:
+%% vim: set filetype=erlang tabstop=8:

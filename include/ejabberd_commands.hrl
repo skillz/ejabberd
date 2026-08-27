@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -19,12 +19,33 @@
 %%%----------------------------------------------------------------------
 
 -type aterm() :: {atom(), atype()}.
--type atype() :: integer | string | binary |
+-type atype() :: integer | string | binary | any | atom |
                  {tuple, [aterm()]} | {list, aterm()}.
 -type rterm() :: {atom(), rtype()}.
--type rtype() :: integer | string | atom |
+-type rtype() :: integer | string | atom | any |
                  {tuple, [rterm()]} | {list, rterm()} |
                  rescode | restuple.
+
+%% The 'any' and 'atom' argument types and 'any' result type
+%% should only be used by commands with tag 'internal',
+%% which are meant to be used only internally in ejabberd,
+%% and not called using external frontends.
+
+%% When a command with tag 'async' is called by mod_adhoc_api,
+%% it is spawned in a new process for the command execution,
+%% and the command immediately returns success.
+
+%% The purpose of a command can either be:
+%% - informative: its purpose is to obtain information
+%% - modifier: its purpose is to produce some change in the server
+%%
+%% A modifier command should be designed just to produce its desired side-effect,
+%% and its result term should just be success or failure: rescode or restuple.
+%%
+%% ejabberd_web_admin:make_command/2 considers that commands
+%% with result type different than rescode or restuple
+%% are commands that can be safely executed automatically
+%% to get information and build the web page.
 
 -type oauth_scope() :: atom().
 
@@ -51,6 +72,7 @@
          desc = ""               :: string() | '_' | '$3',
          longdesc = ""           :: string() | '_',
          version = 0             :: integer(),
+         note = ""               :: string(),
          weight = 1              :: integer(),
          module                  :: atom() | '_',
          function                :: atom() | '_',
@@ -58,48 +80,32 @@
          policy = restricted     :: open | restricted | admin | user,
         %% access is: [accessRuleName] or [{Module, AccessOption, DefaultAccessRuleName}]
          access = []             :: [{atom(),atom(),atom()}|atom()],
+         definer = unknown       :: atom(),
          result = {res, rescode} :: rterm() | '_' | '$2',
+         args_rename = []        :: [{atom(),atom()}],
          args_desc = none        :: none | [string()] | '_',
          result_desc = none      :: none | string() | '_',
          args_example = none     :: none | [any()] | '_',
          result_example = none   :: any()}).
 
-%% TODO Fix me: Type is not up to date
--type ejabberd_commands() :: #ejabberd_commands{name :: atom(),
-                                                tags :: [atom()],
-                                                desc :: string(),
-                                                longdesc :: string(),
-                                                version :: integer(),
-                                                module :: atom(),
-                                                function :: atom(),
-                                                args :: [aterm()],
-                                                policy :: open | restricted | admin | user,
-                                                access :: [{atom(),atom(),atom()}|atom()],
-                                                result :: rterm()}.
+-type ejabberd_commands() :: #ejabberd_commands{name                    :: atom(),
+                                                tags                    :: [atom()],
+                                                desc                    :: string(),
+                                                longdesc                :: string(),
+                                                version                 :: integer(),
+                                                note                    :: string(),
+                                                weight                  :: integer(),
+                                                module                  :: atom(),
+                                                function                :: atom(),
+                                                args                    :: [aterm()],
+                                                policy                  :: open | restricted | admin | user,
+                                                access                  :: [{atom(),atom(),atom()}|atom()],
+                                                definer                 :: atom(),
+                                                result                  :: rterm(),
+                                                args_rename             :: [{atom(),atom()}],
+                                                args_desc               :: none | [string()] | '_',
+                                                result_desc             :: none | string() | '_',
+                                                args_example            :: none | [any()] | '_',
+                                                result_example          :: any()
+                                               }.
 
-%% @type ejabberd_commands() = #ejabberd_commands{
-%%    name = atom(),
-%%    tags = [atom()],
-%%    desc = string(),
-%%    longdesc = string(),
-%%    module = atom(),
-%%    function = atom(),
-%%    args = [aterm()],
-%%    result = rterm()
-%%    }.
-%% desc: Description of the command
-%% args: Describe the accepted arguments.
-%% This way the function that calls the command can format the
-%% arguments before calling.
-
-%% @type atype() = integer | string | {tuple, [aterm()]} | {list, aterm()}.
-%% Allowed types for arguments are integer, string, tuple and list.
-
-%% @type rtype() = integer | string | atom | {tuple, [rterm()]} | {list, rterm()} | rescode | restuple.
-%% A rtype is either an atom or a tuple with two elements.
-
-%% @type aterm() = {Name::atom(), Type::atype()}.
-%% An argument term is a tuple with the term name and the term type.
-
-%% @type rterm() = {Name::atom(), Type::rtype()}.
-%% A result term is a tuple with the term name and the term type.

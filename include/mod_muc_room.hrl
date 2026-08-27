@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,11 +24,13 @@
 
 -record(lqueue,
 {
-    queue   :: p1_queue:queue(),
-    max = 0 :: integer()
+    queue = p1_queue:new()  :: p1_queue:queue(lqueue_elem()),
+    max   = 0               :: integer()
 }).
 
 -type lqueue() :: #lqueue{}.
+-type lqueue_elem() :: {binary(), message(), boolean(),
+			erlang:timestamp(), non_neg_integer()}.
 
 -record(config,
 {
@@ -36,13 +38,13 @@
     description                          = <<"">> :: binary(),
     allow_change_subj                    = true :: boolean(),
     allow_query_users                    = true :: boolean(),
-    allow_private_messages               = true :: boolean(),
+    allowpm                              = anyone :: anyone | participants | moderators | none,
     allow_private_messages_from_visitors = anyone :: anyone | moderators | nobody ,
     allow_visitor_status                 = true :: boolean(),
     allow_visitor_nickchange             = true :: boolean(),
     public                               = true :: boolean(),
     public_list                          = true :: boolean(),
-    persistent                           = false :: boolean(),
+    persistent                           = false :: boolean() | {destroying, boolean()},
     moderated                            = true :: boolean(),
     captcha_protected                    = false :: boolean(),
     members_by_default                   = true :: boolean(),
@@ -63,13 +65,14 @@
     captcha_whitelist                    = (?SETS):empty() :: gb_sets:set(),
     mam                                  = false :: boolean(),
     pubsub                               = <<"">> :: binary(),
-    lang                                 = ejabberd_config:get_mylang() :: binary()
+    enable_hats                          = true :: boolean(),
+    lang                                 = ejabberd_option:language() :: binary()
 }).
 
 -type config() :: #config{}.
 
 -type role() :: moderator | participant | visitor | none.
--type affiliation() :: admin | member | outcast | muted | owner | none.
+-type affiliation() :: admin | member | outcast | owner | none | muted.
 
 -record(user,
 {
@@ -78,19 +81,30 @@
     role :: role(),
     %%is_subscriber = false :: boolean(),
     %%subscriptions = [] :: [binary()],
-    last_presence :: presence() | undefined
+    last_presence :: presence() | undefined,
+    occupant_id :: binary()
 }).
 
 -record(subscriber, {jid :: jid(),
 		     nick = <<>> :: binary(),
 		     nodes = [] :: [binary()]}).
 
+-record(muc_subscribers,
+        {subscribers             = #{} :: subscribers(),
+         subscriber_nicks        = #{} :: subscriber_nicks(),
+         subscriber_nodes        = #{} :: subscriber_nodes()
+        }).
+
+-type subscribers() :: #{ljid() => #subscriber{}}.
+-type subscriber_nicks() :: #{binary() => [ljid()]}.
+-type subscriber_nodes() :: #{binary() => subscribers()}.
+
 -record(activity,
 {
     message_time    = 0 :: integer(),
     presence_time   = 0 :: integer(),
-    message_shaper  = none :: shaper:shaper(),
-    presence_shaper = none :: shaper:shaper(),
+    message_shaper  = none :: ejabberd_shaper:shaper(),
+    presence_shaper = none :: ejabberd_shaper:shaper(),
     message :: message() | undefined,
     presence :: {binary(), presence()} | undefined
 }).
@@ -103,37 +117,28 @@
     access                  = {none,none,none,none,none} :: {atom(), atom(), atom(), atom(), atom()},
     jid                     = #jid{} :: jid(),
     config                  = #config{} :: config(),
-    users                   = #{} :: map(),
-    subscribers             = #{} :: map(),
-    subscriber_nicks        = #{} :: map(),
+    users                   = #{} :: users(),
+    muc_subscribers         = #muc_subscribers{} :: #muc_subscribers{},
     last_voice_request_time = treap:empty() :: treap:treap(),
-    robots                  = #{} :: map(),
-    nicks                   = #{} :: map(),
-    affiliations            = #{} :: map(),
-    history                 :: lqueue(),
+    robots                  = #{} :: robots(),
+    nicks                   = #{} :: nicks(),
+    affiliations            = #{} :: affiliations(),
+    roles                   = #{} :: roles(),
+    history                 = #lqueue{} :: lqueue(),
     subject                 = [] :: [text()],
-    subject_author          = <<"">> :: binary(),
-    just_created            = misc:now_to_usec(now()) :: true | integer(),
+    subject_author          = {<<"">>, #jid{}} :: {binary(), jid()},
+    hats_defs               = #{} :: #{binary() => {binary(), binary()}},
+    hats_users              = #{} :: #{ljid() => [binary()]},
+    just_created            = erlang:system_time(microsecond) :: true | integer(),
     activity                = treap:empty() :: treap:treap(),
-    room_shaper             = none :: shaper:shaper(),
-    room_queue              :: p1_queue:queue() | undefined
+    room_shaper             = none :: ejabberd_shaper:shaper(),
+    room_queue              :: p1_queue:queue({message | presence, jid()}) | undefined,
+    hibernate_timer         = none :: reference() | none | hibernating,
+    salt                    = <<>> :: binary()
 }).
 
-%%------------------------------------------------------------------------
-%%
-%% Skills patch:
-%% Define message types that we shouldn't include in the offline message flow.
-%% Also contains various constant values that are the locations of stanza data.
-%%
-%%------------------------------------------------------------------------
-
--define(VsFriendsMessageType, 1).
--define(NudgeMessageType, 3).
-
--define(NoOfflineToSenderTypes, 
-        [
-         ?VsFriendsMessageType, 
-         ?NudgeMessageType
-        ]).
-
--define(SdkElementsPosition, 3).
+-type users() :: #{ljid() => #user{}}.
+-type robots() :: #{jid() => {binary(), stanza()}}.
+-type nicks() :: #{binary() => [ljid()]}.
+-type affiliations() :: #{ljid() => affiliation() | {affiliation(), binary()}}.
+-type roles() :: #{ljid() => role() | {role(), binary()}}.

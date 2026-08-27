@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,16 +24,16 @@
 
 -module(mod_vcard_sql).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -behaviour(mod_vcard).
 
 %% API
--export([init/2, stop/1, get_vcard/2, get_vcards/2, set_vcard/4, search/4, remove_user/2,
+-export([init/2, stop/1, get_vcard/2, set_vcard/4, search/4, remove_user/2,
 	 search_fields/1, search_reported/1, import/3, export/1]).
 -export([is_search_supported/1]).
+-export([sql_schemas/0]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_vcard.hrl").
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -42,8 +42,78 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"vcard">>,
+                columns =
+                    [#sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"vcard">>, type = {text, big}},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"server_host">>, <<"username">>],
+                              unique = true}]},
+             #sql_table{
+                name = <<"vcard_search">>,
+                columns =
+                    [#sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"lusername">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"fn">>, type = text},
+                     #sql_column{name = <<"lfn">>, type = text},
+                     #sql_column{name = <<"family">>, type = text},
+                     #sql_column{name = <<"lfamily">>, type = text},
+                     #sql_column{name = <<"given">>, type = text},
+                     #sql_column{name = <<"lgiven">>, type = text},
+                     #sql_column{name = <<"middle">>, type = text},
+                     #sql_column{name = <<"lmiddle">>, type = text},
+                     #sql_column{name = <<"nickname">>, type = text},
+                     #sql_column{name = <<"lnickname">>, type = text},
+                     #sql_column{name = <<"bday">>, type = text},
+                     #sql_column{name = <<"lbday">>, type = text},
+                     #sql_column{name = <<"ctry">>, type = text},
+                     #sql_column{name = <<"lctry">>, type = text},
+                     #sql_column{name = <<"locality">>, type = text},
+                     #sql_column{name = <<"llocality">>, type = text},
+                     #sql_column{name = <<"email">>, type = text},
+                     #sql_column{name = <<"lemail">>, type = text},
+                     #sql_column{name = <<"orgname">>, type = text},
+                     #sql_column{name = <<"lorgname">>, type = text},
+                     #sql_column{name = <<"orgunit">>, type = text},
+                     #sql_column{name = <<"lorgunit">>, type = text}],
+                indices = [#sql_index{
+                              columns = [<<"server_host">>, <<"lusername">>],
+                              unique = true},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lfn">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lfamily">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lgiven">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lmiddle">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lnickname">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lbday">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lctry">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"llocality">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lemail">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lorgname">>]},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"lorgunit">>]}]}]}].
 
 stop(_Host) ->
     ok.
@@ -52,10 +122,10 @@ is_search_supported(_LServer) ->
     true.
 
 get_vcard(LUser, LServer) ->
-    case ejabberd_sql:sql_query(
+    case ejabberd_sql:sql_query_replica(
 	   LServer,
 	   ?SQL("select @(vcard)s from vcard"
-                " where username=%(LUser)s and %(LServer)H"), secondary) of
+                " where username=%(LUser)s and %(LServer)H")) of
 	{selected, [{SVCARD}]} ->
 	    case fxml_stream:parse_element(SVCARD) of
 		{error, _Reason} -> error;
@@ -66,29 +136,30 @@ get_vcard(LUser, LServer) ->
     end.
 
 get_vcards(LUsers, LServer) ->
-  UserInStr = str:join([[<<"'">>, ejabberd_sql:escape(User), <<"'">>] || User <- LUsers], <<",">>),
-  Query = <<(<<"select username, vcard from vcard where username in (">>)/binary, UserInStr/binary, (<<")">>)/binary>>,
-  ?DEBUG("get_vcards: [~p]", [Query]),
-  case ejabberd_sql:sql_query(LServer, Query, secondary) of
-    {selected, _, []} -> [];
-    {selected, _, Results} -> [
-      %% note: every elem needs an xmlns (jabber:client is default)
-      #xmlel{name = <<"vCards">>, attrs = [{<<"xmlns">>, <<"jabber:client">>}], children = [
-        case fxml_stream:parse_element(SVCARD) of
-          {error, _Reason} -> #xmlel{
-            name = <<"vCard">>,
-            attrs = [{<<"xmlns">>, <<"jabber:client">>}, {<<"username">>, Username}],
-            children = [ {xmlcdata, <<"error">>} ]
-          };
-          VCARD -> VCARD#xmlel{attrs = VCARD#xmlel.attrs ++ [{<<"username">>, Username}]}
-        end || [Username, SVCARD] <- Results
-      ]}
-    ];
-    Error ->
-      ?ERROR_MSG("get_vcards database error: [~p]", [Error]),
-      error
-  end
-.
+    UserList = str:join(
+      [<<"'", (ejabberd_sql:escape(U))/binary, "'">> || U <- LUsers], <<",">>),
+    Query = [<<"select username, vcard from vcard where username IN (">>,
+	     UserList,
+	     <<") and server_host='">>, ejabberd_sql:escape(LServer), <<"'">>],
+    case ejabberd_sql:sql_query_replica(LServer, Query) of
+	{selected, _Cols, Rows} when is_list(Rows) ->
+	    lists:filtermap(
+	      fun([User, SVCARD]) ->
+		      case fxml_stream:parse_element(SVCARD) of
+			  {error, _} -> false;
+			  VCARD -> {true, {User, VCARD}}
+		      end
+	      end, Rows);
+	{selected, Rows} when is_list(Rows) ->
+	    lists:filtermap(
+	      fun({User, SVCARD}) ->
+		      case fxml_stream:parse_element(SVCARD) of
+			  {error, _} -> false;
+			  VCARD -> {true, {User, VCARD}}
+		      end
+	      end, Rows);
+	_ -> []
+    end.
 
 set_vcard(LUser, LServer, VCARD,
 	  #vcard_search{user = {User, _},
@@ -218,7 +289,7 @@ remove_user(LUser, LServer) ->
                      " where lusername=%(LUser)s and %(LServer)H"))
       end).
 
-export(_Server) ->   
+export(_Server) ->
     [{vcard,
       fun(Host, #vcard{us = {LUser, LServer}, vcard = VCARD})
             when LServer == Host ->
@@ -287,12 +358,13 @@ make_matchspec(LServer, Data) ->
     filter_fields(Data, <<"">>, LServer).
 
 filter_fields([], Match, LServer) ->
-    case ejabberd_sql:use_new_schema() of
+    case ejabberd_sql:use_multihost_schema() of
         true ->
-            SServer = ejabberd_sql:escape(LServer),
+            SQLType = ejabberd_option:sql_type(LServer),
+            SServer = ejabberd_sql:to_string_literal(SQLType, LServer),
             case Match of
-                <<"">> -> [<<"where server_host='">>, SServer, <<"'">>];
-                _ -> [<<" where server_host='">>, SServer, <<"' and ">>, Match]
+                <<"">> -> [<<"where server_host=">>, SServer];
+                _ -> [<<" where server_host=">>, SServer, <<" and ">>, Match]
             end;
         false ->
             case Match of
@@ -304,26 +376,26 @@ filter_fields([{SVar, [Val]} | Ds], Match, LServer)
   when is_binary(Val) and (Val /= <<"">>) ->
     LVal = mod_vcard:string2lower(Val),
     NewMatch = case SVar of
-		   <<"user">> -> make_val(Match, <<"lusername">>, LVal);
-		   <<"fn">> -> make_val(Match, <<"lfn">>, LVal);
-		   <<"last">> -> make_val(Match, <<"lfamily">>, LVal);
-		   <<"first">> -> make_val(Match, <<"lgiven">>, LVal);
-		   <<"middle">> -> make_val(Match, <<"lmiddle">>, LVal);
-		   <<"nick">> -> make_val(Match, <<"lnickname">>, LVal);
-		   <<"bday">> -> make_val(Match, <<"lbday">>, LVal);
-		   <<"ctry">> -> make_val(Match, <<"lctry">>, LVal);
+		   <<"user">> -> make_val(LServer, Match, <<"lusername">>, LVal);
+		   <<"fn">> -> make_val(LServer, Match, <<"lfn">>, LVal);
+		   <<"last">> -> make_val(LServer, Match, <<"lfamily">>, LVal);
+		   <<"first">> -> make_val(LServer, Match, <<"lgiven">>, LVal);
+		   <<"middle">> -> make_val(LServer, Match, <<"lmiddle">>, LVal);
+		   <<"nick">> -> make_val(LServer, Match, <<"lnickname">>, LVal);
+		   <<"bday">> -> make_val(LServer, Match, <<"lbday">>, LVal);
+		   <<"ctry">> -> make_val(LServer, Match, <<"lctry">>, LVal);
 		   <<"locality">> ->
-		       make_val(Match, <<"llocality">>, LVal);
-		   <<"email">> -> make_val(Match, <<"lemail">>, LVal);
-		   <<"orgname">> -> make_val(Match, <<"lorgname">>, LVal);
-		   <<"orgunit">> -> make_val(Match, <<"lorgunit">>, LVal);
+		       make_val(LServer, Match, <<"llocality">>, LVal);
+		   <<"email">> -> make_val(LServer, Match, <<"lemail">>, LVal);
+		   <<"orgname">> -> make_val(LServer, Match, <<"lorgname">>, LVal);
+		   <<"orgunit">> -> make_val(LServer, Match, <<"lorgunit">>, LVal);
 		   _ -> Match
 	       end,
     filter_fields(Ds, NewMatch, LServer);
 filter_fields([_ | Ds], Match, LServer) ->
     filter_fields(Ds, Match, LServer).
 
-make_val(Match, Field, Val) ->
+make_val(LServer, Match, Field, Val) ->
     Condition = case str:suffix(<<"*">>, Val) of
 		  true ->
 		      Val1 = str:substr(Val, 1, byte_size(Val) - 1),
@@ -333,8 +405,9 @@ make_val(Match, Field, Val) ->
 			       "%">>,
 		      [Field, <<" LIKE '">>, SVal, <<"' ESCAPE '^'">>];
 		  _ ->
-		      SVal = ejabberd_sql:escape(Val),
-		      [Field, <<" = '">>, SVal, <<"'">>]
+                      SQLType = ejabberd_option:sql_type(LServer),
+		      SVal = ejabberd_sql:to_string_literal(SQLType, Val),
+		      [Field, <<" = ">>, SVal]
 		end,
     case Match of
       <<"">> -> Condition;
