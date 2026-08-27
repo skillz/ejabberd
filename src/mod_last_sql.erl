@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,11 +26,11 @@
 
 -behaviour(mod_last).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 %% API
 -export([init/2, get_last/2, store_last_info/4, remove_user/2,
 	 import/2, export/1]).
+-export([sql_schemas/0]).
 
 -include("mod_last.hrl").
 -include("logger.hrl").
@@ -39,8 +39,24 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"last">>,
+                columns =
+                    [#sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"seconds">>, type = text},
+                     #sql_column{name = <<"state">>, type = text}],
+                indices = [#sql_index{
+                              columns = [<<"server_host">>, <<"username">>],
+                              unique = true}]}]}].
 
 get_last(LUser, LServer) ->
     case ejabberd_sql:sql_query(
@@ -56,10 +72,11 @@ get_last(LUser, LServer) ->
     end.
 
 store_last_info(LUser, LServer, TimeStamp, Status) ->
+    TS = integer_to_binary(TimeStamp),
     case ?SQL_UPSERT(LServer, "last",
 		     ["!username=%(LUser)s",
                       "!server_host=%(LServer)s",
-		      "seconds=%(TimeStamp)d",
+		      "seconds=%(TS)s",
 		      "state=%(Status)s"]) of
 	ok ->
 	    ok;
@@ -77,11 +94,12 @@ export(_Server) ->
       fun(Host, #last_activity{us = {LUser, LServer},
                                timestamp = TimeStamp, status = Status})
             when LServer == Host ->
+              TS = integer_to_binary(TimeStamp),
               [?SQL("delete from last where username=%(LUser)s and %(LServer)H;"),
                ?SQL_INSERT("last",
                            ["username=%(LUser)s",
                             "server_host=%(LServer)s",
-                            "seconds=%(TimeStamp)d",
+                            "seconds=%(TS)s",
                             "state=%(Status)s"])];
          (_Host, _R) ->
               []

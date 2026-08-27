@@ -5,7 +5,7 @@
 %%% Created : 15 Nov 2005 by Magnus Henoch <henoch@dtek.chalmers.se>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,7 +27,7 @@
 
 -author('henoch@dtek.chalmers.se').
 
--protocol({xep, 50, '1.2'}).
+-protocol({xep, 50, '1.3.0', '1.1.0', "complete", ""}).
 
 -behaviour(gen_mod).
 
@@ -36,65 +36,36 @@
 	 get_local_identity/5, get_local_features/5,
 	 get_sm_commands/5, get_sm_identity/5, get_sm_features/5,
 	 ping_item/4, ping_command/4, mod_opt_type/1, depends/2,
-	 mod_options/1]).
+	 mod_options/1, mod_doc/0]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+-include("translate.hrl").
 
-start(Host, _Opts) ->
-    gen_iq_handler:add_iq_handler(ejabberd_local, Host,
-				  ?NS_COMMANDS, ?MODULE, process_local_iq),
-    gen_iq_handler:add_iq_handler(ejabberd_sm, Host,
-				  ?NS_COMMANDS, ?MODULE, process_sm_iq),
-    ejabberd_hooks:add(disco_local_identity, Host, ?MODULE,
-		       get_local_identity, 99),
-    ejabberd_hooks:add(disco_local_features, Host, ?MODULE,
-		       get_local_features, 99),
-    ejabberd_hooks:add(disco_local_items, Host, ?MODULE,
-		       get_local_commands, 99),
-    ejabberd_hooks:add(disco_sm_identity, Host, ?MODULE,
-		       get_sm_identity, 99),
-    ejabberd_hooks:add(disco_sm_features, Host, ?MODULE,
-		       get_sm_features, 99),
-    ejabberd_hooks:add(disco_sm_items, Host, ?MODULE,
-		       get_sm_commands, 99),
-    ejabberd_hooks:add(adhoc_local_items, Host, ?MODULE,
-		       ping_item, 100),
-    ejabberd_hooks:add(adhoc_local_commands, Host, ?MODULE,
-		       ping_command, 100).
+start(_Host, _Opts) ->
+    {ok, [{iq_handler, ejabberd_local, ?NS_COMMANDS, process_local_iq},
+          {iq_handler, ejabberd_sm, ?NS_COMMANDS, process_sm_iq},
+          {hook, disco_local_identity, get_local_identity, 99},
+          {hook, disco_local_features, get_local_features, 99},
+          {hook, disco_local_items, get_local_commands, 99},
+          {hook, disco_sm_identity, get_sm_identity, 99},
+          {hook, disco_sm_features, get_sm_features, 99},
+          {hook, disco_sm_items, get_sm_commands, 99},
+          {hook, adhoc_local_items, ping_item, 100},
+          {hook, adhoc_local_commands, ping_command, 100}]}.
 
-stop(Host) ->
-    ejabberd_hooks:delete(adhoc_local_commands, Host,
-			  ?MODULE, ping_command, 100),
-    ejabberd_hooks:delete(adhoc_local_items, Host, ?MODULE,
-			  ping_item, 100),
-    ejabberd_hooks:delete(disco_sm_items, Host, ?MODULE,
-			  get_sm_commands, 99),
-    ejabberd_hooks:delete(disco_sm_features, Host, ?MODULE,
-			  get_sm_features, 99),
-    ejabberd_hooks:delete(disco_sm_identity, Host, ?MODULE,
-			  get_sm_identity, 99),
-    ejabberd_hooks:delete(disco_local_items, Host, ?MODULE,
-			  get_local_commands, 99),
-    ejabberd_hooks:delete(disco_local_features, Host,
-			  ?MODULE, get_local_features, 99),
-    ejabberd_hooks:delete(disco_local_identity, Host,
-			  ?MODULE, get_local_identity, 99),
-    gen_iq_handler:remove_iq_handler(ejabberd_sm, Host,
-				     ?NS_COMMANDS),
-    gen_iq_handler:remove_iq_handler(ejabberd_local, Host,
-				     ?NS_COMMANDS).
+stop(_Host) ->
+    ok.
 
 reload(_Host, _NewOpts, _OldOpts) ->
     ok.
 
 %-------------------------------------------------------------------------
-
+-spec get_local_commands(mod_disco:items_acc(), jid(), jid(), binary(), binary()) -> mod_disco:items_acc().
 get_local_commands(Acc, _From,
 		   #jid{server = Server, lserver = LServer} = _To, <<"">>,
 		   Lang) ->
-    Display = gen_mod:get_module_opt(LServer, ?MODULE,
-				     report_commands_node),
+    Display = mod_adhoc_opt:report_commands_node(LServer),
     case Display of
       false -> Acc;
       _ ->
@@ -104,7 +75,7 @@ get_local_commands(Acc, _From,
 		  end,
 	  Nodes = [#disco_item{jid = jid:make(Server),
 			       node = ?NS_COMMANDS,
-			       name = translate:translate(Lang, <<"Commands">>)}],
+			       name = translate:translate(Lang, ?T("Commands"))}],
 	  {result, Items ++ Nodes}
     end;
 get_local_commands(_Acc, From,
@@ -118,11 +89,10 @@ get_local_commands(Acc, _From, _To, _Node, _Lang) ->
     Acc.
 
 %-------------------------------------------------------------------------
-
+-spec get_sm_commands(mod_disco:items_acc(), jid(), jid(), binary(), binary()) -> mod_disco:items_acc().
 get_sm_commands(Acc, _From,
 		#jid{lserver = LServer} = To, <<"">>, Lang) ->
-    Display = gen_mod:get_module_opt(LServer, ?MODULE,
-				     report_commands_node),
+    Display = mod_adhoc_opt:report_commands_node(LServer),
     case Display of
       false -> Acc;
       _ ->
@@ -132,7 +102,7 @@ get_sm_commands(Acc, _From,
 		  end,
 	  Nodes = [#disco_item{jid = To,
 			       node = ?NS_COMMANDS,
-			       name = translate:translate(Lang, <<"Commands">>)}],
+			       name = translate:translate(Lang, ?T("Commands"))}],
 	  {result, Items ++ Nodes}
     end;
 get_sm_commands(_Acc, From,
@@ -142,36 +112,34 @@ get_sm_commands(_Acc, From,
 get_sm_commands(Acc, _From, _To, _Node, _Lang) -> Acc.
 
 %-------------------------------------------------------------------------
-
+-spec get_local_identity([identity()], jid(), jid(), binary(), binary()) -> [identity()].
 %% On disco info request to the ad-hoc node, return automation/command-list.
 get_local_identity(Acc, _From, _To, ?NS_COMMANDS,
 		   Lang) ->
     [#identity{category = <<"automation">>,
 	       type = <<"command-list">>,
-	       name = translate:translate(Lang, <<"Commands">>)}
+	       name = translate:translate(Lang, ?T("Commands"))}
      | Acc];
 get_local_identity(Acc, _From, _To, <<"ping">>, Lang) ->
     [#identity{category = <<"automation">>,
 	       type = <<"command-node">>,
-	       name = translate:translate(Lang, <<"Ping">>)}
+	       name = translate:translate(Lang, ?T("Ping"))}
      | Acc];
 get_local_identity(Acc, _From, _To, _Node, _Lang) ->
     Acc.
 
 %-------------------------------------------------------------------------
-
+-spec get_sm_identity([identity()], jid(), jid(), binary(), binary()) -> [identity()].
 %% On disco info request to the ad-hoc node, return automation/command-list.
 get_sm_identity(Acc, _From, _To, ?NS_COMMANDS, Lang) ->
     [#identity{category = <<"automation">>,
 	       type = <<"command-list">>,
-	       name = translate:translate(Lang, <<"Commands">>)}
+	       name = translate:translate(Lang, ?T("Commands"))}
      | Acc];
 get_sm_identity(Acc, _From, _To, _Node, _Lang) -> Acc.
 
 %-------------------------------------------------------------------------
--spec get_local_features({error, stanza_error()} | {result, [binary()]} | empty,
-			 jid(), jid(), binary(), binary()) ->
-				{error, stanza_error()} | {result, [binary()]} | empty.
+-spec get_local_features(mod_disco:features_acc(), jid(), jid(), binary(), binary()) -> mod_disco:features_acc().
 get_local_features(Acc, _From, _To, <<"">>, _Lang) ->
     Feats = case Acc of
 	      {result, I} -> I;
@@ -188,7 +156,7 @@ get_local_features(Acc, _From, _To, _Node, _Lang) ->
     Acc.
 
 %-------------------------------------------------------------------------
-
+-spec get_sm_features(mod_disco:features_acc(), jid(), jid(), binary(), binary()) -> mod_disco:features_acc().
 get_sm_features(Acc, _From, _To, <<"">>, _Lang) ->
     Feats = case Acc of
 	      {result, I} -> I;
@@ -201,13 +169,15 @@ get_sm_features(_Acc, _From, _To, ?NS_COMMANDS,
 get_sm_features(Acc, _From, _To, _Node, _Lang) -> Acc.
 
 %-------------------------------------------------------------------------
-
+-spec process_local_iq(iq()) -> iq() | ignore.
 process_local_iq(IQ) ->
     process_adhoc_request(IQ, local).
 
+-spec process_sm_iq(iq()) -> iq() | ignore.
 process_sm_iq(IQ) ->
     process_adhoc_request(IQ, sm).
 
+-spec process_adhoc_request(iq(), sm | local) -> iq() | ignore.
 process_adhoc_request(#iq{from = From, to = To,
 			  type = set, lang = Lang,
 			  sub_els = [#adhoc_command{} = SubEl]} = IQ, Type) ->
@@ -215,16 +185,16 @@ process_adhoc_request(#iq{from = From, to = To,
     Res = case Type of
 	      local ->
 		  ejabberd_hooks:run_fold(adhoc_local_commands, Host, empty,
-					  [From, To, SubEl]);
+					  [From, To, fix_lang(Lang, SubEl)]);
 	      sm ->
 		  ejabberd_hooks:run_fold(adhoc_sm_commands, Host, empty,
-					  [From, To, SubEl])
+					  [From, To, fix_lang(Lang, SubEl)])
 	  end,
     case Res of
 	ignore ->
 	    ignore;
 	empty ->
-	    Txt = <<"No hook has processed this command">>,
+	    Txt = ?T("No hook has processed this command"),
 	    xmpp:make_error(IQ, xmpp:err_item_not_found(Txt, Lang));
 	{error, Error} ->
 	    xmpp:make_error(IQ, Error);
@@ -234,8 +204,7 @@ process_adhoc_request(#iq{from = From, to = To,
 process_adhoc_request(#iq{} = IQ, _Hooks) ->
     xmpp:make_error(IQ, xmpp:err_bad_request()).
 
--spec ping_item(empty | {error, stanza_error()} | {result, [disco_item()]},
-		jid(), jid(), binary()) -> {result, [disco_item()]}.
+-spec ping_item(mod_disco:items_acc(), jid(), jid(), binary()) -> {result, [disco_item()]}.
 ping_item(Acc, _From, #jid{server = Server} = _To,
 	  Lang) ->
     Items = case Acc of
@@ -244,7 +213,7 @@ ping_item(Acc, _From, #jid{server = Server} = _To,
 	    end,
     Nodes = [#disco_item{jid = jid:make(Server),
 			 node = <<"ping">>,
-			 name = translate:translate(Lang, <<"Ping">>)}],
+			 name = translate:translate(Lang, ?T("Ping"))}],
     {result, Items ++ Nodes}.
 
 -spec ping_command(adhoc_command(), jid(), jid(), adhoc_command()) ->
@@ -259,18 +228,38 @@ ping_command(_Acc, _From, _To,
 		 status = completed,
 		 notes = [#adhoc_note{
 			     type = info,
-			     data = translate:translate(Lang, <<"Pong">>)}]});
+			     data = translate:translate(Lang, ?T("Pong"))}]});
        true ->
-	    Txt = <<"Incorrect value of 'action' attribute">>,
+	    Txt = ?T("Incorrect value of 'action' attribute"),
 	    {error, xmpp:err_bad_request(Txt, Lang)}
     end;
 ping_command(Acc, _From, _To, _Request) -> Acc.
+
+-spec fix_lang(binary(), adhoc_command()) -> adhoc_command().
+fix_lang(Lang, #adhoc_command{lang = <<>>} = Cmd) ->
+    Cmd#adhoc_command{lang = Lang};
+fix_lang(_, Cmd) ->
+    Cmd.
 
 depends(_Host, _Opts) ->
     [].
 
 mod_opt_type(report_commands_node) ->
-    fun (B) when is_boolean(B) -> B end.
+    econf:bool().
 
 mod_options(_Host) ->
     [{report_commands_node, false}].
+
+mod_doc() ->
+    #{desc =>
+          [?T("def:ad-hoc command"), "",
+           ?T(": Command that can be executed by an XMPP client using XEP-0050."), "",
+           ?T("This module implements https://xmpp.org/extensions/xep-0050.html"
+             "[XEP-0050: Ad-Hoc Commands]. It's an auxiliary module and is "
+             "only needed by some of the other modules.")],
+      opts =>
+          [{report_commands_node,
+            #{value => "true | false",
+              desc =>
+                  ?T("Provide the Commands item in the Service Discovery. "
+		     "Default value: 'false'.")}}]}.

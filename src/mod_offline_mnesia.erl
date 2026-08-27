@@ -4,7 +4,7 @@
 %%% Created : 15 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -29,10 +29,11 @@
 -export([init/2, store_message/1, pop_messages/2, remove_expired_messages/1,
 	 remove_old_messages/2, remove_user/2, read_message_headers/2,
 	 read_message/3, remove_message/3, read_all_messages/2,
-	 remove_all_messages/2, count_messages/2, import/1]).
+	 remove_all_messages/2, count_messages/2, import/1,
+	 remove_old_messages_batch/4]).
 -export([need_transform/1, transform/1]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_offline.hrl").
 -include("logger.hrl").
 
@@ -63,7 +64,7 @@ pop_messages(LUser, LServer) ->
     end.
 
 remove_expired_messages(_LServer) ->
-    TimeStamp = p1_time_compat:timestamp(),
+    TimeStamp = erlang:timestamp(),
     F = fun () ->
 		mnesia:write_lock_table(offline_msg),
 		mnesia:foldl(fun (Rec, _Acc) ->
@@ -81,7 +82,7 @@ remove_expired_messages(_LServer) ->
     mnesia:transaction(F).
 
 remove_old_messages(Days, _LServer) ->
-    S = p1_time_compat:system_time(seconds) - 60 * 60 * 24 * Days,
+    S = erlang:system_time(second) - 60 * 60 * 24 * Days,
     MegaSecs1 = S div 1000000,
     Secs1 = S rem 1000000,
     TimeStamp = {MegaSecs1, Secs1, 0},
@@ -96,6 +97,47 @@ remove_old_messages(Days, _LServer) ->
 			     ok, offline_msg)
 	end,
     mnesia:transaction(F).
+
+delete_batch('$end_of_table', _LServer, _TS, Num) ->
+    {Num, '$end_of_table'};
+delete_batch(LastUS, _LServer, _TS, 0) ->
+    {0, LastUS};
+delete_batch(none, LServer, TS, Num) ->
+    delete_batch(mnesia:first(offline_msg), LServer, TS, Num);
+delete_batch({_, LServer2} = LastUS, LServer, TS, Num) when LServer /= LServer2 ->
+    delete_batch(mnesia:next(offline_msg, LastUS), LServer, TS, Num);
+delete_batch(LastUS, LServer, TS, Num) ->
+    Left =
+    lists:foldl(
+	fun(_, 0) ->
+	       0;
+	   (#offline_msg{timestamp = TS2} = O, Num2) when TS2 < TS ->
+	       mnesia:delete_object(O),
+	       Num2 - 1;
+	   (_, Num2) ->
+	       Num2
+	end, Num, mnesia:wread({offline_msg, LastUS})),
+    case Left of
+	0 -> {0, LastUS};
+	_ -> delete_batch(mnesia:next(offline_msg, LastUS), LServer, TS, Left)
+    end.
+
+remove_old_messages_batch(LServer, Days, Batch, LastUS) ->
+    S = erlang:system_time(second) - 60 * 60 * 24 * Days,
+    MegaSecs1 = S div 1000000,
+    Secs1 = S rem 1000000,
+    TimeStamp = {MegaSecs1, Secs1, 0},
+    R = mnesia:transaction(
+	fun() ->
+	    {Num, NextUS} = delete_batch(LastUS, LServer, TimeStamp, Batch),
+	    {Batch - Num, NextUS}
+	end),
+    case R of
+	{atomic, {Num, State}} ->
+	    {ok, State, Num};
+	{aborted, Err} ->
+	    {error, Err}
+    end.
 
 remove_user(LUser, LServer) ->
     US = {LUser, LServer},
@@ -156,20 +198,26 @@ count_messages(LUser, LServer) ->
     F = fun () ->
 		count_mnesia_records(US)
 	end,
-    case catch mnesia:async_dirty(F) of
-	I when is_integer(I) -> I;
-	_ -> 0
-    end.
+    {cache, case mnesia:async_dirty(F) of
+		I when is_integer(I) -> I;
+		_ -> 0
+	    end}.
 
 import(#offline_msg{} = Msg) ->
     mnesia:dirty_write(Msg).
 
-need_transform(#offline_msg{us = {U, S}}) when is_list(U) orelse is_list(S) ->
+need_transform({offline_msg, {U, S}, _, _, _, _, _})
+  when is_list(U) orelse is_list(S) ->
     ?INFO_MSG("Mnesia table 'offline_msg' will be converted to binary", []),
+    true;
+need_transform({offline_msg, _, _, _, _, _, _, _}) ->
     true;
 need_transform(_) ->
     false.
 
+transform({offline_msg, {U, S}, Timestamp, Expire, From, To, _, Packet}) ->
+    #offline_msg{us = {U, S}, timestamp = Timestamp, expire = Expire,
+		 from = From, to = To, packet = Packet};
 transform(#offline_msg{us = {U, S}, from = From, to = To,
 		       packet = El} = R) ->
     R#offline_msg{us = {iolist_to_binary(U), iolist_to_binary(S)},

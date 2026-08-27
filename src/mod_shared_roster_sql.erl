@@ -4,7 +4,7 @@
 %%% Created : 14 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,7 +24,6 @@
 
 -module(mod_shared_roster_sql).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -behaviour(mod_shared_roster).
 
@@ -35,8 +34,9 @@
 	 get_user_displayed_groups/3, is_user_in_group/3,
 	 add_user_to_group/3, remove_user_from_group/3, import/3,
 	 export/1]).
+-export([sql_schemas/0]).
 
--include("jid.hrl").
+-include_lib("xmpp/include/jid.hrl").
 -include("mod_roster.hrl").
 -include("mod_shared_roster.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -44,8 +44,39 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"sr_group">>,
+                columns =
+                    [#sql_column{name = <<"name">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"opts">>, type = text},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"server_host">>, <<"name">>],
+                              unique = true}]},
+             #sql_table{
+                name = <<"sr_user">>,
+                columns =
+                    [#sql_column{name = <<"jid">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"grp">>, type = text},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"server_host">>,
+                                         <<"jid">>, <<"grp">>],
+                              unique = true},
+                           #sql_index{
+                              columns = [<<"server_host">>, <<"grp">>]}]}]}].
 
 list_groups(Host) ->
     case ejabberd_sql:sql_query(
@@ -95,7 +126,7 @@ get_group_opts(Host, Group) ->
 		 ?SQL("select @(opts)s from sr_group"
                       " where name=%(Group)s and %(Host)H")) of
 	{selected, [{SOpts}]} ->
-	    mod_shared_roster:opts_to_binary(ejabberd_sql:decode_term(SOpts));
+            {ok, mod_shared_roster:opts_to_binary(ejabberd_sql:decode_term(SOpts))};
 	_ -> error
     end.
 

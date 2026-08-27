@@ -5,7 +5,7 @@
 %%% Created : 24 Aug 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,24 +30,17 @@
 -behaviour(gen_mod).
 
 -export([start/2, stop/1, log_user_send/1, mod_options/1,
-	 log_user_receive/1, mod_opt_type/1, depends/2]).
+	 log_user_receive/1, mod_opt_type/1, depends/2, mod_doc/0]).
 
 -include("logger.hrl").
+-include("translate.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
--include("xmpp.hrl").
+start(_Host, _Opts) ->
+    {ok, [{hook, user_send_packet, log_user_send, 50},
+          {hook, user_receive_packet, log_user_receive, 50}]}.
 
-start(Host, _Opts) ->
-    ejabberd_hooks:add(user_send_packet, Host, ?MODULE,
-		       log_user_send, 50),
-    ejabberd_hooks:add(user_receive_packet, Host, ?MODULE,
-		       log_user_receive, 50),
-    ok.
-
-stop(Host) ->
-    ejabberd_hooks:delete(user_send_packet, Host, ?MODULE,
-			  log_user_send, 50),
-    ejabberd_hooks:delete(user_receive_packet, Host,
-			  ?MODULE, log_user_receive, 50),
+stop(_Host) ->
     ok.
 
 depends(_Host, _Opts) ->
@@ -67,7 +60,7 @@ log_user_receive({Packet, C2SState}) ->
 
 -spec log_packet(stanza(), binary()) -> ok.
 log_packet(Packet, Host) ->
-    Loggers = gen_mod:get_module_opt(Host, ?MODULE, loggers),
+    Loggers = mod_service_log_opt:loggers(Host),
     ForwardedMsg = #message{from = jid:make(Host),
 			    id = p1_rand:get_string(),
 			    sub_els = [#forwarded{
@@ -78,14 +71,28 @@ log_packet(Packet, Host) ->
       end, Loggers).
 
 mod_opt_type(loggers) ->
-    fun (L) ->
-	    lists:map(fun (S) ->
-			      B = iolist_to_binary(S),
-			      N = jid:nameprep(B),
-			      if N /= error -> N end
-		      end,
-		      L)
-    end.
+    econf:list(econf:domain()).
 
 mod_options(_) ->
     [{loggers, []}].
+
+mod_doc() ->
+    #{desc =>
+          ?T("This module forwards copies of all stanzas "
+             "to remote XMPP servers or components. "
+             "Every stanza is encapsulated into <forwarded/> "
+             "element as described in "
+             "https://xmpp.org/extensions/xep-0297.html"
+             "[XEP-0297: Stanza Forwarding]."),
+      opts =>
+          [{loggers,
+            #{value => "[Domain, ...]",
+              desc =>
+                  ?T("A list of servers or connected components "
+                     "to which stanzas will be forwarded.")}}],
+      example =>
+          ["modules:",
+           "  mod_service_log:",
+           "    loggers:",
+           "      - xmpp-server.tld",
+           "      - component.domain.tld"]}.

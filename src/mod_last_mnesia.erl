@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -45,7 +45,7 @@ init(_Host, _Opts) ->
 use_cache(Host) ->
     case mnesia:table_info(last_activity, storage_type) of
 	disc_only_copies ->
-	    gen_mod:get_module_opt(Host, mod_last, use_cache);
+	    mod_last_opt:use_cache(Host);
 	_ ->
 	    false
     end.
@@ -71,7 +71,7 @@ remove_user(LUser, LServer) ->
 import(_LServer, #last_activity{} = LA) ->
     mnesia:dirty_write(LA).
 
-need_transform(#last_activity{us = {U, S}, status = Status})
+need_transform({last_activity, {U, S}, _, Status})
   when is_list(U) orelse is_list(S) orelse is_list(Status) ->
     ?INFO_MSG("Mnesia table 'last_activity' will be converted to binary", []),
     true;

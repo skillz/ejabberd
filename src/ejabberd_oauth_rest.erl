@@ -5,7 +5,7 @@
 %%% Created : 26 Jul 2016 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,17 +26,17 @@
 
 -module(ejabberd_oauth_rest).
 -behaviour(ejabberd_oauth).
--behaviour(ejabberd_config).
 
 -export([init/0,
          store/1,
          lookup/1,
          clean/1,
-         opt_type/1]).
+         lookup_client/1,
+         store_client/1, revoke/1]).
 
 -include("ejabberd_oauth.hrl").
 -include("logger.hrl").
--include("jid.hrl").
+-include_lib("xmpp/include/jid.hrl").
 
 init() ->
     rest:start(ejabberd_config:get_myname()),
@@ -50,29 +50,38 @@ store(R) ->
     case rest:with_retry(
            post,
            [ejabberd_config:get_myname(), Path, [],
-            {[{<<"token">>, R#oauth_token.token},
-              {<<"user">>, SJID},
-              {<<"scope">>, R#oauth_token.scope},
-              {<<"expire">>, R#oauth_token.expire}
-             ]}], 2, 500) of
+            #{<<"token">> => R#oauth_token.token,
+              <<"user">> => SJID,
+              <<"scope">> => R#oauth_token.scope,
+              <<"expire">> => R#oauth_token.expire
+             }], 2, 500) of
         {ok, Code, _} when Code == 200 orelse Code == 201 ->
             ok;
         Err ->
-            ?ERROR_MSG("failed to store oauth record ~p: ~p", [R, Err]),
+            ?ERROR_MSG("Failed to store oauth record ~p: ~p", [R, Err]),
             {error, db_failure}
     end.
 
 lookup(Token) ->
     Path = path(<<"lookup">>),
     case rest:with_retry(post, [ejabberd_config:get_myname(), Path, [],
-                                {[{<<"token">>, Token}]}],
+                                #{<<"token">> => Token}],
                          2, 500) of
-        {ok, 200, {Data}} ->
-            SJID = proplists:get_value(<<"user">>, Data, <<>>),
+        {ok, 200, Data} ->
+            SJID = case maps:find(<<"user">>, Data) of
+                       {ok, U} -> U;
+                       error -> <<>>
+                   end,
             JID = jid:decode(SJID),
             US = {JID#jid.luser, JID#jid.lserver},
-            Scope = proplists:get_value(<<"scope">>, Data, []),
-            Expire = proplists:get_value(<<"expire">>, Data, 0),
+            Scope = case maps:find(<<"scope">>, Data) of
+                        {ok, S} -> S;
+                        error -> []
+                    end,
+            Expire = case maps:find(<<"expire">>, Data) of
+                         {ok, E} -> E;
+                         error -> 0
+                     end,
             {ok, #oauth_token{token = Token,
 			      us = US,
 			      scope = Scope,
@@ -81,18 +90,85 @@ lookup(Token) ->
             error;
         Other ->
             ?ERROR_MSG("Unexpected response for oauth lookup: ~p", [Other]),
-	    error
+            case ejabberd_option:oauth_cache_rest_failure_life_time() of
+                infinity -> error;
+                Time -> {cache_with_timeout, error, Time}
+	    end
     end.
+
+-spec revoke(binary()) -> ok | {error, binary()}.
+revoke(_Token) ->
+    {error, <<"not available">>}.
 
 clean(_TS) ->
     ok.
 
 path(Path) ->
-    Base = ejabberd_config:get_option(ext_api_path_oauth, <<"/oauth">>),
+    Base = ejabberd_option:ext_api_path_oauth(),
     <<Base/binary, "/", Path/binary>>.
 
+store_client(#oauth_client{client_id = ClientID,
+                           client_name = ClientName,
+                           grant_type = GrantType,
+                           options = Options} = R) ->
+    Path = path(<<"store_client">>),
+    SGrantType =
+        case GrantType of
+            password -> <<"password">>;
+            implicit -> <<"implicit">>
+        end,
+    SOptions = misc:term_to_base64(Options),
+    %% Retry 2 times, with a backoff of 500millisec
+    case rest:with_retry(
+           post,
+           [ejabberd_config:get_myname(), Path, [],
+            #{<<"client_id">> => ClientID,
+              <<"client_name">> => ClientName,
+              <<"grant_type">> => SGrantType,
+              <<"options">> => SOptions
+             }], 2, 500) of
+        {ok, Code, _} when Code == 200 orelse Code == 201 ->
+            ok;
+        Err ->
+            ?ERROR_MSG("Failed to store oauth record ~p: ~p", [R, Err]),
+            {error, db_failure}
+    end.
 
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
-opt_type(ext_api_path_oauth) ->
-    fun (X) -> iolist_to_binary(X) end;
-opt_type(_) -> [ext_api_path_oauth].
+lookup_client(ClientID) ->
+    Path = path(<<"lookup_client">>),
+    case rest:with_retry(post, [ejabberd_config:get_myname(), Path, [],
+                                #{<<"client_id">> => ClientID}],
+                         2, 500) of
+        {ok, 200, Data} ->
+            ClientName = case maps:find(<<"client_name">>, Data) of
+                             {ok, CN} -> CN;
+                             error -> <<>>
+                         end,
+            SGrantType = case maps:find(<<"grant_type">>, Data) of
+                             {ok, GT} -> GT;
+                             error -> <<>>
+                         end,
+            GrantType =
+                case SGrantType of
+                    <<"password">> -> password;
+                    <<"implicit">> -> implicit
+                end,
+            SOptions = case maps:find(<<"options">>, Data) of
+                           {ok, O} -> O;
+                           error -> <<>>
+                       end,
+            case misc:base64_to_term(SOptions) of
+                {term, Options} ->
+                    {ok, #oauth_client{client_id = ClientID,
+                                       client_name = ClientName,
+                                       grant_type = GrantType,
+                                       options = Options}};
+                _ ->
+                    error
+            end;
+        {ok, 404, _Resp} ->
+            error;
+        Other ->
+            ?ERROR_MSG("Unexpected response for oauth lookup: ~p", [Other]),
+	    error
+    end.

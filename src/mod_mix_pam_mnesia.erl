@@ -3,7 +3,7 @@
 %%% Created :  4 Dec 2018 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2018   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -47,7 +47,7 @@ init(_Host, _Opts) ->
 use_cache(Host) ->
     case mnesia:table_info(mix_pam, storage_type) of
         disc_only_copies ->
-            gen_mod:get_module_opt(Host, mod_mix_pam, use_cache);
+            mod_mix_pam_opt:use_cache(Host);
         _ ->
             false
     end.
@@ -69,7 +69,7 @@ get_channel(User, Channel) ->
 
 get_channels(User) ->
     {LUser, LServer, _} = jid:tolower(User),
-    Ret = mnesia:dirty_index_read(mix_pam, #mix_pam.user, {LUser, LServer}),
+    Ret = mnesia:dirty_index_read(mix_pam, {LUser, LServer}, #mix_pam.user),
     {ok, lists:map(
 	   fun(#mix_pam{user_channel = {_, _, Chan, Service},
 			id = ID}) ->
@@ -83,7 +83,7 @@ del_channel(User, Channel) ->
 
 del_channels(User) ->
     {LUser, LServer, _} = jid:tolower(User),
-    Ret = mnesia:dirty_index_read(mix_pam, #mix_pam.user, {LUser, LServer}),
+    Ret = mnesia:dirty_index_read(mix_pam, {LUser, LServer}, #mix_pam.user),
     lists:foreach(fun mnesia:dirty_delete_object/1, Ret).
 
 %%%===================================================================

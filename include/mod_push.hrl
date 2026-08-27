@@ -1,5 +1,5 @@
 %%%----------------------------------------------------------------------
-%%% ejabberd, Copyright (C) 2017-2019 ProcessOne
+%%% ejabberd, Copyright (C) 2017-2026 ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -18,7 +18,7 @@
 %%%----------------------------------------------------------------------
 -record(push_session,
         {us = {<<"">>, <<"">>}                  :: {binary(), binary()},
-         timestamp = p1_time_compat:timestamp() :: erlang:timestamp(),
+         timestamp = erlang:timestamp()         :: erlang:timestamp(),
          service = {<<"">>, <<"">>, <<"">>}     :: ljid(),
          node = <<"">>                          :: binary(),
          xml                                    :: undefined | xmlel()}).

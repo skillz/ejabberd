@@ -5,7 +5,7 @@
 %%% Created :  1 Dec 2007 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,22 +30,23 @@
 %%% <p>PubSub node tree plugins are using the {@link gen_nodetree} behaviour.</p>
 %%% <p><strong>The API isn't stabilized yet</strong>. The pubsub plugin
 %%% development is still a work in progress. However, the system is already
-%%% useable and useful as is. Please, send us comments, feedback and
+%%% usable and useful as is. Please, send us comments, feedback and
 %%% improvements.</p>
 
 -module(nodetree_tree_sql).
 -behaviour(gen_pubsub_nodetree).
 -author('christophe.romain@process-one.net').
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -include("pubsub.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("ejabberd_sql_pt.hrl").
+-include("translate.hrl").
 
 -export([init/3, terminate/2, options/0, set_node/1,
     get_node/3, get_node/2, get_node/1, get_nodes/2,
-    get_nodes/1, get_parentnodes/3, get_parentnodes_tree/3,
+    get_nodes/1, get_all_nodes/1,
+    get_parentnodes/3, get_parentnodes_tree/3,
     get_subnodes/3, get_subnodes_tree/3, create_node/6,
     delete_node/2]).
 
@@ -81,20 +82,25 @@ set_node(Record) when is_record(Record, pubsub_node) ->
 		   " parent=%(Parent)s, plugin=%(Type)s "
 		   "where nodeid=%(OldNidx)d")),
 	    OldNidx;
-	_ ->
+	{error, not_found} ->
 	    catch
 	    ejabberd_sql:sql_query_t(
 	      ?SQL("insert into pubsub_node(host, node, parent, plugin) "
 		   "values(%(H)s, %(Node)s, %(Parent)s, %(Type)s)")),
 	    case nodeidx(Host, Node) of
 		{result, NewNidx} -> NewNidx;
-		_ -> none  % this should not happen
-	    end
+		{error, not_found} -> none;  % this should not happen
+		{error, _} -> db_error
+	    end;
+	{error, _} ->
+	    db_error
     end,
     case Nidx of
+	db_error ->
+	    {error, xmpp:err_internal_server_error(?T("Database failure"), ejabberd_option:language())};
 	none ->
-	    Txt = <<"Node index not found">>,
-	    {error, xmpp:err_internal_server_error(Txt, ejabberd_config:get_mylang())};
+	    Txt = ?T("Node index not found"),
+	    {error, xmpp:err_internal_server_error(Txt, ejabberd_option:language())};
 	_ ->
 	    lists:foreach(fun ({Key, Value}) ->
 			SKey = iolist_to_binary(atom_to_list(Key)),
@@ -121,9 +127,9 @@ get_node(Host, Node) ->
 	{selected, [RItem]} ->
 	    raw_to_node(Host, RItem);
 	{'EXIT', _Reason} ->
-	    {error, xmpp:err_internal_server_error(<<"Database failure">>, ejabberd_config:get_mylang())};
+	    {error, xmpp:err_internal_server_error(?T("Database failure"), ejabberd_option:language())};
 	_ ->
-	    {error, xmpp:err_item_not_found(<<"Node not found">>, ejabberd_config:get_mylang())}
+	    {error, xmpp:err_item_not_found(?T("Node not found"), ejabberd_option:language())}
     end.
 
 get_node(Nidx) ->
@@ -135,21 +141,58 @@ get_node(Nidx) ->
 	{selected, [{Host, Node, Parent, Type}]} ->
 	    raw_to_node(Host, {Node, Parent, Type, Nidx});
 	{'EXIT', _Reason} ->
-	    {error, xmpp:err_internal_server_error(<<"Database failure">>, ejabberd_config:get_mylang())};
+	    {error, xmpp:err_internal_server_error(?T("Database failure"), ejabberd_option:language())};
 	_ ->
-	    {error, xmpp:err_item_not_found(<<"Node not found">>, ejabberd_config:get_mylang())}
+	    {error, xmpp:err_item_not_found(?T("Node not found"), ejabberd_option:language())}
     end.
 
-get_nodes(Host, _From) ->
-    get_nodes(Host).
-
 get_nodes(Host) ->
+    get_nodes(Host, infinity).
+
+get_nodes(Host, Limit) ->
     H = node_flat_sql:encode_host(Host),
-    case catch
-	ejabberd_sql:sql_query_t(
-	  ?SQL("select @(node)s, @(parent)s, @(plugin)s, @(nodeid)d from pubsub_node "
-	       "where host=%(H)s"))
-    of
+    Query = fun(mssql, _) when is_integer(Limit), Limit>=0 ->
+		    ejabberd_sql:sql_query_t(
+		      ?SQL("select top %(Limit)d @(node)s, @(parent)s, @(plugin)s, @(nodeid)d "
+			   "from pubsub_node where host=%(H)s"));
+	       (_, _) when is_integer(Limit), Limit>=0 ->
+		    ejabberd_sql:sql_query_t(
+		      ?SQL("select @(node)s, @(parent)s, @(plugin)s, @(nodeid)d "
+			   "from pubsub_node where host=%(H)s limit %(Limit)d"));
+	       (_, _) ->
+		    ejabberd_sql:sql_query_t(
+		      ?SQL("select @(node)s, @(parent)s, @(plugin)s, @(nodeid)d "
+			   "from pubsub_node where host=%(H)s"))
+	    end,
+    case ejabberd_sql:sql_query_t(Query) of
+	{selected, RItems} ->
+	    [raw_to_node(Host, Item) || Item <- RItems];
+	_ ->
+	    []
+    end.
+
+get_all_nodes({_U, _S, _R} = JID) ->
+    SubKey = jid:tolower(JID),
+    GenKey = jid:remove_resource(SubKey),
+    EncKey = node_flat_sql:encode_jid(GenKey),
+    Pattern = <<(node_flat_sql:encode_jid_like(GenKey))/binary, "/%">>,
+    case ejabberd_sql:sql_query_t(
+	   ?SQL("select @(node)s, @(parent)s, @(plugin)s, @(nodeid)d "
+		"from pubsub_node where host=%(EncKey)s "
+		"or host like %(Pattern)s %ESCAPE")) of
+	{selected, RItems} ->
+	    [raw_to_node(GenKey, Item) || Item <- RItems];
+	_ ->
+	    []
+    end;
+get_all_nodes(Host) ->
+    Pattern1 = <<"%@", Host/binary>>,
+    Pattern2 = <<"%@", Host/binary, "/%">>,
+    case ejabberd_sql:sql_query_t(
+	   ?SQL("select @(node)s, @(parent)s, @(plugin)s, @(nodeid)d "
+		"from pubsub_node where host=%(Host)s "
+		"or host like %(Pattern1)s "
+		"or host like %(Pattern2)s %ESCAPE")) of
 	{selected, RItems} ->
 	    [raw_to_node(Host, Item) || Item <- RItems];
 	_ ->
@@ -178,16 +221,23 @@ get_parentnodes_tree(Host, Node, Level, Acc) ->
 	    Acc
     end.
 
-get_subnodes(Host, Node, _From) ->
-    get_subnodes(Host, Node).
-
-get_subnodes(Host, Node) ->
+get_subnodes(Host, Node, Limit) ->
     H = node_flat_sql:encode_host(Host),
-    case catch
-	ejabberd_sql:sql_query_t(
-	  ?SQL("select @(node)s, @(parent)s, @(plugin)s, @(nodeid)d from pubsub_node "
-	       "where host=%(H)s and parent=%(Node)s"))
-    of
+    Query = fun(mssql, _) when is_integer(Limit), Limit>=0 ->
+		    ejabberd_sql:sql_query_t(
+		      ?SQL("select top %(Limit)d @(node)s, @(parent)s, @(plugin)s, @(nodeid)d "
+			   "from pubsub_node where host=%(H)s and parent=%(Node)s"));
+	       (_, _) when is_integer(Limit), Limit>=0 ->
+		    ejabberd_sql:sql_query_t(
+		      ?SQL("select @(node)s, @(parent)s, @(plugin)s, @(nodeid)d "
+			   "from pubsub_node where host=%(H)s and parent=%(Node)s "
+			   "limit %(Limit)d"));
+	       (_, _) ->
+		    ejabberd_sql:sql_query_t(
+		      ?SQL("select @(node)s, @(parent)s, @(plugin)s, @(nodeid)d "
+			   "from pubsub_node where host=%(H)s and parent=%(Node)s"))
+	    end,
+    case ejabberd_sql:sql_query_t(Query) of
 	{selected, RItems} ->
 	    [raw_to_node(Host, Item) || Item <- RItems];
 	_ ->
@@ -204,12 +254,12 @@ get_subnodes_tree(Host, Node) ->
 	Rec ->
 	    Type = Rec#pubsub_node.type,
 	    H = node_flat_sql:encode_host(Host),
-	    N = <<(ejabberd_sql:escape_like_arg_circumflex(Node))/binary, "/%">>,
+	    N = <<(ejabberd_sql:escape_like_arg(Node))/binary, "/%">>,
 	    Sub = case catch
 		ejabberd_sql:sql_query_t(
 		?SQL("select @(node)s, @(parent)s, @(plugin)s, @(nodeid)d from pubsub_node "
 		     "where host=%(H)s and plugin=%(Type)s and"
-		     " (parent=%(Node)s or parent like %(N)s escape '^')"))
+		     " (parent=%(Node)s or parent like %(N)s %ESCAPE)"))
 	    of
 		{selected, RItems} ->
 		    [raw_to_node(Host, Item) || Item <- RItems];
@@ -259,9 +309,9 @@ create_node(Host, Node, Type, Owner, Options, Parents) ->
 		    {error, xmpp:err_forbidden()}
 	    end;
 	{result, _} ->
-	    {error, xmpp:err_conflict(<<"Node already exists">>, ejabberd_config:get_mylang())};
+	    {error, xmpp:err_conflict(?T("Node already exists"), ejabberd_option:language())};
 	{error, db_fail} ->
-	    {error, xmpp:err_internal_server_error(<<"Database failure">>, ejabberd_config:get_mylang())}
+	    {error, xmpp:err_internal_server_error(?T("Database failure"), ejabberd_option:language())}
     end.
 
 delete_node(Host, Node) ->
@@ -283,13 +333,16 @@ raw_to_node(Host, {Node, Parent, Type, Nidx}) ->
 	       "where nodeid=%(Nidx)d"))
     of
 	{selected, ROptions} ->
-	    DbOpts = lists:map(fun ({Key, Value}) ->
-			    RKey = misc:binary_to_atom(Key),
-			    Tokens = element(2, erl_scan:string(binary_to_list(<<Value/binary, ".">>))),
-			    RValue = element(2, erl_parse:parse_term(Tokens)),
-			    {RKey, RValue}
-		    end,
-		    ROptions),
+	    DbOpts = lists:map(
+		fun({<<"max_items">>, <<"infinity">>}) ->
+		       {max_items, max};
+		   ({Key, Value}) ->
+		       RKey = misc:binary_to_atom(Key),
+		       Tokens = element(2, erl_scan:string(binary_to_list(<<Value/binary, ".">>))),
+		       RValue = element(2, erl_parse:parse_term(Tokens)),
+		       {RKey, RValue}
+		end,
+		ROptions),
 	    Module = misc:binary_to_atom(<<"node_", Type/binary, "_sql">>),
 	    StdOpts = Module:options(),
 	    lists:foldl(fun ({Key, Value}, Acc) ->

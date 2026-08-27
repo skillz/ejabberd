@@ -1,0 +1,119 @@
+name: Container
+
+on:
+  push:
+    paths-ignore:
+    - '.devcontainer/**'
+    - 'lib/**'
+    - 'man/**'
+    - 'priv/**'
+    - '**.md'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+
+  build:
+    runs-on: ubuntu-24.04${{ matrix.suffix }}
+    strategy:
+      matrix:
+        platform: [amd64, arm64]
+        include:
+          - platform: amd64
+            suffix:
+          - platform: arm64
+            suffix: -arm
+    permissions:
+      packages: write
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Checkout ejabberd-contrib
+        uses: actions/checkout@v6
+        with:
+          repository: processone/ejabberd-contrib
+          path: .ejabberd-modules/sources/ejabberd-contrib
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get git describe
+        id: gitdescribe
+        run: echo "ver=$(git describe --tags)" >> $GITHUB_OUTPUT
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: suffix=--${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.gitdescribe.outputs.ver }}
+            org.opencontainers.image.licenses=GPL-2.0
+            org.opencontainers.image.vendor=ProcessOne
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          build-args: |
+            VERSION=${{ steps.gitdescribe.outputs.ver }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          context: .
+          file: .github/container/Dockerfile
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/${{ matrix.platform }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+
+  merge:
+    needs: [build]
+    runs-on: ubuntu-24.04
+    outputs:
+      image-uri: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.merge.outputs.digest }}
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta-amd
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: suffix=--amd64
+      - uses: docker/metadata-action@v5
+        id: meta-arm
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: suffix=--arm64
+      - uses: docker/metadata-action@v5
+        id: meta-result
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - uses: int128/docker-manifest-create-action@v2
+        id: merge
+        with:
+          index-annotations: ${{ steps.metadata.outputs.labels }}
+          tags: ${{ steps.meta-result.outputs.tags }}
+          sources: |
+            ${{ steps.meta-amd.outputs.tags }}
+            ${{ steps.meta-arm.outputs.tags }}
+      - uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          dry-run: true
+          delete-tags: '*--a??64'
+          delete-untagged: true
+          delete-ghost-images: true
+          delete-partial-images: true
+          delete-orphaned-images: true

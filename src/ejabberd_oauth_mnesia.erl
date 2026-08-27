@@ -5,7 +5,7 @@
 %%% Created : 20 Jul 2016 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -28,10 +28,13 @@
 -behaviour(ejabberd_oauth).
 
 -export([init/0,
-         store/1,
-         lookup/1,
-         clean/1,
-	 use_cache/0]).
+	 store/1,
+	 lookup/1,
+	 clean/1,
+	 lookup_client/1,
+	 store_client/1,
+	 remove_client/1,
+	 use_cache/0, revoke/1]).
 
 -include("ejabberd_oauth.hrl").
 
@@ -40,14 +43,16 @@ init() ->
                         [{disc_only_copies, [node()]},
                          {attributes,
                           record_info(fields, oauth_token)}]),
+    ejabberd_mnesia:create(?MODULE, oauth_client,
+                        [{disc_copies, [node()]},
+                         {attributes,
+                          record_info(fields, oauth_client)}]),
     ok.
 
 use_cache() ->
     case mnesia:table_info(oauth_token, storage_type) of
 	disc_only_copies ->
-	    ejabberd_config:get_option(
-	      oauth_use_cache,
-	      ejabberd_config:use_cache(global));
+	    ejabberd_option:oauth_use_cache();
 	_ ->
 	    false
     end.
@@ -63,6 +68,11 @@ lookup(Token) ->
             error
     end.
 
+
+-spec revoke(binary()) -> ok | {error, binary()}.
+revoke(Token) ->
+    mnesia:dirty_delete(oauth_token, Token).
+
 clean(TS) ->
     F = fun() ->
 		Ts = mnesia:select(
@@ -74,3 +84,16 @@ clean(TS) ->
         end,
     mnesia:async_dirty(F).
 
+lookup_client(ClientID) ->
+    case catch mnesia:dirty_read(oauth_client, ClientID) of
+        [R] ->
+            {ok, R};
+        _ ->
+            error
+    end.
+
+remove_client(ClientID) ->
+    mnesia:dirty_delete(oauth_client, ClientID).
+
+store_client(R) ->
+    mnesia:dirty_write(R).

@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -23,14 +23,15 @@
 %%%----------------------------------------------------------------------
 
 -module(mod_private_sql).
--compile([{parse_transform, ejabberd_sql_pt}]).
 -behaviour(mod_private).
 
 %% API
 -export([init/2, set_data/3, get_data/3, get_all_data/2, del_data/2,
-	 import/3, export/1]).
+    del_data/3, get_users_with_data/2, count_users_with_data/2,
+    import/3, export/1]).
+-export([sql_schemas/0]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_private.hrl").
 -include("ejabberd_sql_pt.hrl").
 -include("logger.hrl").
@@ -38,8 +39,27 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"private_storage">>,
+                columns =
+                    [#sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"namespace">>, type = text},
+                     #sql_column{name = <<"data">>, type = text},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"server_host">>, <<"username">>,
+                                         <<"namespace">>],
+                              unique = true}]}]}].
 
 set_data(LUser, LServer, Data) ->
     F = fun() ->
@@ -105,6 +125,42 @@ del_data(LUser, LServer) ->
 	    {error, db_failure}
     end.
 
+-spec del_data(binary(), binary(), binary()) -> ok | {error, any()}.
+del_data(LUser, LServer, NS) ->
+    case ejabberd_sql:sql_query(
+	   LServer,
+	   ?SQL("delete from private_storage"
+                " where username=%(LUser)s and namespace=%(NS)s and %(LServer)H")) of
+	{updated, _} ->
+	    ok;
+	_ ->
+	    {error, db_failure}
+    end.
+
+-spec get_users_with_data(binary(), binary()) -> {ok, [binary()]} | {error, any()}.
+get_users_with_data(LServer, NS) ->
+    case ejabberd_sql:sql_query(
+	   LServer,
+	   ?SQL("select @(username)s from private_storage"
+		" where namespace=%(NS)s and %(LServer)H")) of
+    	{selected, Value} ->
+            {ok, Value};
+        _ ->
+            {error, db_failure}
+    end.
+
+-spec count_users_with_data(binary(), binary()) -> {ok, integer()} | {error, any()}.
+count_users_with_data(LServer, NS) ->
+    case ejabberd_sql:sql_query(
+	   LServer,
+	   ?SQL("select @(count(*))d from private_storage"
+		" where namespace=%(NS)s and %(LServer)H")) of
+    	{selected, Value} ->
+            {ok, Value};
+        _ ->
+            {error, db_failure}
+    end.
+
 export(_Server) ->
     [{private_storage,
       fun(Host, #private_storage{usns = {LUser, LServer, XMLNS},
@@ -134,8 +190,8 @@ parse_element(LUser, LServer, XML) ->
 	El when is_record(El, xmlel) ->
 	    {ok, El};
 	_ ->
-	    ?ERROR_MSG("malformed XML element in SQL table "
-		       "'private_storage' for user ~s@~s: ~s",
+	    ?ERROR_MSG("Malformed XML element in SQL table "
+		       "'private_storage' for user ~ts@~ts: ~ts",
 		       [LUser, LServer, XML]),
 	    error
     end.

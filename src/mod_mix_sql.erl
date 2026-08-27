@@ -2,7 +2,7 @@
 %%% Created :  1 Dec 2018 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2018   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -21,13 +21,13 @@
 %%%----------------------------------------------------------------------
 -module(mod_mix_sql).
 -behaviour(mod_mix).
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 %% API
 -export([init/2]).
 -export([set_channel/6, get_channels/2, get_channel/3, del_channel/3]).
 -export([set_participant/6, get_participant/4, get_participants/3, del_participant/4]).
 -export([subscribe/5, unsubscribe/4, unsubscribe/5, get_subscribed/4]).
+-export([sql_schemas/0]).
 
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -35,9 +35,64 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
-    %% TODO
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"mix_channel">>,
+                columns =
+                    [#sql_column{name = <<"channel">>, type = text},
+                     #sql_column{name = <<"service">>, type = text},
+                     #sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"domain">>, type = text},
+                     #sql_column{name = <<"jid">>, type = text},
+                     #sql_column{name = <<"hidden">>, type = boolean},
+                     #sql_column{name = <<"hmac_key">>, type = text},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"channel">>, <<"service">>],
+                              unique = true},
+                           #sql_index{
+                              columns = [<<"service">>]}]},
+             #sql_table{
+                name = <<"mix_participant">>,
+                columns =
+                    [#sql_column{name = <<"channel">>, type = text},
+                     #sql_column{name = <<"service">>, type = text},
+                     #sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"domain">>, type = text},
+                     #sql_column{name = <<"jid">>, type = text},
+                     #sql_column{name = <<"id">>, type = text},
+                     #sql_column{name = <<"nick">>, type = text},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"channel">>, <<"service">>,
+                                         <<"username">>, <<"domain">>],
+                              unique = true}]},
+             #sql_table{
+                name = <<"mix_subscription">>,
+                columns =
+                    [#sql_column{name = <<"channel">>, type = text},
+                     #sql_column{name = <<"service">>, type = {text, 75}},
+                     #sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"domain">>, type = {text, 75}},
+                     #sql_column{name = <<"node">>, type = text},
+                     #sql_column{name = <<"jid">>, type = text}],
+                indices = [#sql_index{
+                              columns = [<<"channel">>, <<"service">>,
+                                         <<"username">>, <<"domain">>,
+                                         <<"node">>],
+                              unique = true},
+                           #sql_index{
+                              columns = [<<"channel">>, <<"service">>,
+                                         <<"node">>]}]}]}].
 
 set_channel(LServer, Channel, Service, CreatorJID, Hidden, Key) ->
     {User, Domain, _} = jid:tolower(CreatorJID),
@@ -112,6 +167,7 @@ set_participant(LServer, Channel, Service, JID, ID, Nick) ->
 	_Err -> {error, db_failure}
     end.
 
+-spec get_participant(binary(), binary(), binary(), jid:jid()) -> {ok, {binary(), binary()}} | {error, notfound | db_failure}.
 get_participant(LServer, Channel, Service, JID) ->
     {User, Domain, _} = jid:tolower(JID),
     case ejabberd_sql:sql_query(
@@ -230,7 +286,7 @@ unsubscribe(LServer, Channel, Service, JID, Nodes) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec report_corrupted(atom(), iolist()) -> ok.
+-spec report_corrupted(atom(), #sql_query{}) -> ok.
 report_corrupted(Column, SQL) ->
-    ?ERROR_MSG("Corrupted value of '~s' column returned by "
-	       "SQL request: ~s", [Column, SQL]).
+    ?ERROR_MSG("Corrupted value of '~ts' column returned by "
+	       "SQL request: ~ts", [Column, SQL#sql_query.hash]).

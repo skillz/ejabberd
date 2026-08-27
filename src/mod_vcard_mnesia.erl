@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,9 +31,9 @@
 	 search_fields/1, search_reported/1, remove_user/2]).
 -export([is_search_supported/1]).
 -export([need_transform/1, transform/1]).
--export([mod_opt_type/1, mod_options/1]).
+-export([mod_opt_type/1, mod_options/1, mod_doc/0]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_vcard.hrl").
 -include("logger.hrl").
 -include("translate.hrl").
@@ -155,12 +155,17 @@ import(LServer, <<"vcard_search">>,
                     orgname = OrgName, lorgname = LOrgName,
                     orgunit = OrgUnit, lorgunit = LOrgUnit}).
 
-need_transform(#vcard{us = {U, S}}) when is_list(U) orelse is_list(S) ->
+need_transform({vcard, {U, S}, _}) when is_list(U) orelse is_list(S) ->
     ?INFO_MSG("Mnesia table 'vcard' will be converted to binary", []),
     true;
-need_transform(#vcard_search{us = {U, S}}) when is_list(U) orelse is_list(S) ->
-    ?INFO_MSG("Mnesia table 'vcard_search' will be converted to binary", []),
-    true;
+need_transform(R) when element(1, R) == vcard_search ->
+    case element(2, R) of
+	{U, S} when is_list(U) orelse is_list(S) ->
+	    ?INFO_MSG("Mnesia table 'vcard_search' will be converted to binary", []),
+	    true;
+	_ ->
+	    false
+    end;
 need_transform(_) ->
     false.
 
@@ -192,8 +197,7 @@ filter_fields([{SVar, [Val]} | Ds], Match, LServer)
     LVal = mod_vcard:string2lower(Val),
     NewMatch = case SVar of
 		   <<"user">> ->
-		       case gen_mod:get_module_opt(LServer, mod_vcard,
-						   search_all_hosts) of
+		       case mod_vcard_mnesia_opt:search_all_hosts(LServer) of
 			   true -> Match#vcard_search{luser = make_val(LVal)};
 			   false ->
 			       Host = find_my_host(LServer),
@@ -234,7 +238,7 @@ make_val(Val) ->
 
 find_my_host(LServer) ->
     Parts = str:tokens(LServer, <<".">>),
-    find_my_host(Parts, ejabberd_config:get_myhosts()).
+    find_my_host(Parts, ejabberd_option:hosts()).
 
 find_my_host([], _Hosts) -> ejabberd_config:get_myname();
 find_my_host([_ | Tail] = Parts, Hosts) ->
@@ -266,7 +270,16 @@ record_to_item(R) ->
      {<<"orgunit">>, (R#vcard_search.orgunit)}].
 
 mod_opt_type(search_all_hosts) ->
-    fun (B) when is_boolean(B) -> B end.
+    econf:bool().
 
 mod_options(_) ->
     [{search_all_hosts, true}].
+
+mod_doc() ->
+    #{opts =>
+          [{search_all_hosts,
+            #{value => "true | false",
+              desc =>
+                  ?T("Whether to perform search on all "
+                     "virtual hosts or not. The default "
+                     "value is 'true'.")}}]}.

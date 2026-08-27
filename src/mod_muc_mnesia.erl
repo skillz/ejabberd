@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,29 +24,35 @@
 
 -module(mod_muc_mnesia).
 
+
 -behaviour(mod_muc).
 -behaviour(mod_muc_room).
+-behaviour(ejabberd_db_serialize).
 
 %% API
--export([init/2, import/3, store_room/5, restore_room/3, forget_room/3,
-	 can_use_nick/4, get_rooms/2, get_nick/3, set_nick/4]).
+-export([init/2, import/3, store_room/5, restore_room/3, forget_room/3, forget_rooms/3,
+	 can_use_nick/4, get_rooms/2, get_nick/3, get_nicks/2, set_nick/4]).
 -export([register_online_room/4, unregister_online_room/4, find_online_room/3,
 	 get_online_rooms/3, count_online_rooms/2, rsm_supported/0,
 	 register_online_user/4, unregister_online_user/4,
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
-	 get_subscribed_rooms/3]).
--export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
+	 find_online_room_by_pid/2]).
+-export([set_affiliation/6, set_affiliations/4, get_affiliation/5, get_affiliation/2,
 	 get_affiliations/3, get_affiliations/1, search_affiliation/4,
 	 disable_affiliation/2, insert_affiliation/3]).
 %% gen_server callbacks
 -export([start_link/2, init/1, handle_cast/2, handle_call/3, handle_info/2,
 	 terminate/2, code_change/3]).
 -export([need_transform/1, transform/1]).
+-export([serialize/3, deserialize_start/1, deserialize/2]).
 
 -include("mod_muc.hrl").
 -include("logger.hrl").
--include("xmpp.hrl").
+
+-include_lib("xmpp/include/xmpp.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
+
+-include("ejabberd_db_serialize.hrl").
 
 -record(state, {}).
 
@@ -58,6 +64,10 @@ init(Host, Opts) ->
 	    transient, 5000, worker, [?MODULE]},
     case supervisor:start_child(ejabberd_backend_sup, Spec) of
 	{ok, _Pid} -> ok;
+        %% Maybe started for a vhost which only wanted mnesia for ram
+        %% and this vhost wants mnesia for persitent storage too
+        {error, {already_started, _Pid}} ->
+            init([Host, Opts]);
 	Err -> Err
     end.
 
@@ -73,9 +83,11 @@ store_room(_LServer, Host, Name, Opts, _) ->
     mnesia:transaction(F).
 
 restore_room(_LServer, Host, Name) ->
-    case catch mnesia:dirty_read(muc_room, {Name, Host}) of
+    try mnesia:dirty_read(muc_room, {Name, Host}) of
 	[#muc_room{opts = Opts}] -> Opts;
 	_ -> error
+    catch
+	_:_ -> {error, db_failure}
     end.
 
 forget_room(_LServer, Host, Name) ->
@@ -83,13 +95,22 @@ forget_room(_LServer, Host, Name) ->
 	end,
     mnesia:transaction(F).
 
-can_use_nick(_LServer, Host, JID, Nick) ->
+forget_rooms(LServer, Host, Rooms) ->
+    lists:foreach(fun(Name) -> forget_room(LServer, Host, Name) end, Rooms).
+
+can_use_nick(_LServer, ServiceOrRoom, JID, Nick) ->
     {LUser, LServer, _} = jid:tolower(JID),
     LUS = {LUser, LServer},
+    MatchSpec = case (jid:decode(ServiceOrRoom))#jid.lserver of
+        ServiceOrRoom -> [{'==', {element, 2, '$1'}, ServiceOrRoom}];
+        Service -> [{'orelse',
+                    {'==', {element, 2, '$1'}, Service},
+                    {'==', {element, 2, '$1'}, ServiceOrRoom} }]
+                end,
     case catch mnesia:dirty_select(muc_registered,
 				   [{#muc_registered{us_host = '$1',
 						     nick = Nick, _ = '_'},
-				     [{'==', {element, 2, '$1'}, Host}],
+				     MatchSpec,
 				     ['$_']}])
 	of
       {'EXIT', _Reason} -> true;
@@ -111,31 +132,54 @@ get_nick(_LServer, Host, From) ->
 	[#muc_registered{nick = Nick}] -> Nick
     end.
 
-set_nick(_LServer, Host, From, Nick) ->
+get_nicks(_LServer, Host) ->
+    mnesia:dirty_select(muc_registered,
+                        [{#muc_registered{us_host = {{'$1', '$2'}, Host},
+                                          nick = '$3', _ = '_'},
+                          [],
+                          [{{'$1', '$2', '$3'}}]
+                         }]).
+
+set_nick(_LServer, ServiceOrRoom, From, Nick) ->
     {LUser, LServer, _} = jid:tolower(From),
     LUS = {LUser, LServer},
     F = fun () ->
 		case Nick of
 		    <<"">> ->
-			mnesia:delete({muc_registered, {LUS, Host}}),
+			mnesia:delete({muc_registered, {LUS, ServiceOrRoom}}),
 			ok;
 		    _ ->
+                        Service = (jid:decode(ServiceOrRoom))#jid.lserver,
+                        MatchSpec = case (ServiceOrRoom == Service) of
+                            true -> [{'==', {element, 2, '$1'}, ServiceOrRoom}];
+                            false -> [{'orelse',
+                                        {'==', {element, 2, '$1'}, Service},
+                                        {'==', {element, 2, '$1'}, ServiceOrRoom} }]
+                                    end,
 			Allow = case mnesia:select(
 				       muc_registered,
-				       [{#muc_registered{us_host =
-							     '$1',
-							 nick = Nick,
-							 _ = '_'},
-					 [{'==', {element, 2, '$1'},
-					   Host}],
+				       [{#muc_registered{us_host = '$1', nick = Nick, _ = '_'},
+					 MatchSpec,
 					 ['$_']}]) of
+				    [] when (ServiceOrRoom == Service) ->
+			                NickRegistrations = mnesia:select(
+				            muc_registered,
+				            [{#muc_registered{us_host = '$1', nick = Nick, _ = '_'},
+					        [],
+					        ['$_']}]),
+                                        not lists:any(fun({_, {_NRUS, NRServiceOrRoom}, _Nick}) ->
+                                                              Service == (jid:decode(NRServiceOrRoom))#jid.lserver end,
+                                                      NickRegistrations);
 				    [] -> true;
+				    [#muc_registered{us_host = {_U, Host}}]
+                                      when (Host == Service) and (ServiceOrRoom /= Service) ->
+					false;
 				    [#muc_registered{us_host = {U, _Host}}] ->
 					U == LUS
 				end,
 			if Allow ->
 				mnesia:write(#muc_registered{
-						us_host = {LUS, Host},
+						us_host = {LUS, ServiceOrRoom},
 						nick = Nick}),
 				ok;
 			   true ->
@@ -169,6 +213,9 @@ disable_affiliation(_Host, _LUser) ->
 search_affiliation(_ServerHost, _Room, _Host, _Affiliation) ->
     {error, not_implemented}.
 
+get_affiliation(_ServerHost, _LUser) ->
+    none.
+
 register_online_room(_ServerHost, Room, Host, Pid) ->
     F = fun() ->
 		mnesia:write(
@@ -190,6 +237,19 @@ find_online_room(Room, Host) ->
     case mnesia:dirty_read(muc_online_room, {Room, Host}) of
 	[] -> error;
 	[#muc_online_room{pid = Pid}] -> {ok, Pid}
+    end.
+
+find_online_room_by_pid(_ServerHost, Pid) ->
+    Res =
+    mnesia:dirty_select(
+	muc_online_room,
+	ets:fun2ms(
+	    fun(#muc_online_room{name_host = {Name, Host}, pid = PidS})
+		   when PidS == Pid -> {Name, Host}
+	    end)),
+    case Res of
+	[{Name, Host}] -> {ok, Name, Host};
+	_ -> error
     end.
 
 count_online_rooms(_ServerHost, Host) ->
@@ -274,7 +334,7 @@ unregister_online_user(_ServerHost, {U, S, R}, Room, Host) ->
 					room = Room, host = Host}).
 
 count_online_rooms_by_user(ServerHost, U, S) ->
-    MucHost = gen_mod:get_module_opt_host(ServerHost, mod_muc, <<"conference.@HOST@">>),
+    MucHost = hd(gen_mod:get_module_opt_hosts(ServerHost, mod_muc)),
     ets:select_count(
       muc_online_users,
       ets:fun2ms(
@@ -283,7 +343,7 @@ count_online_rooms_by_user(ServerHost, U, S) ->
 	end)).
 
 get_online_rooms_by_user(ServerHost, U, S) ->
-    MucHost = gen_mod:get_module_opt_host(ServerHost, mod_muc, <<"conference.@HOST@">>),
+    MucHost = hd(gen_mod:get_module_opt_hosts(ServerHost, mod_muc)),
     ets:select(
       muc_online_users,
       ets:fun2ms(
@@ -307,9 +367,9 @@ import(_LServer, <<"muc_registered">>,
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
-init([Host, Opts]) ->
-    MyHosts = proplists:get_value(hosts, Opts),
-    case gen_mod:db_mod(Host, Opts, mod_muc) of
+init([_Host, Opts]) ->
+    MyHosts = mod_muc_opt:hosts(Opts),
+    case gen_mod:db_mod(Opts, mod_muc) of
 	?MODULE ->
 	    ejabberd_mnesia:create(?MODULE, muc_room,
 				   [{disc_copies, [node()]},
@@ -323,7 +383,7 @@ init([Host, Opts]) ->
 	_ ->
 	    ok
     end,
-    case gen_mod:ram_db_mod(Host, Opts, mod_muc) of
+    case gen_mod:ram_db_mod(Opts, mod_muc) of
 	?MODULE ->
 	    ejabberd_mnesia:create(?MODULE, muc_online_room,
 				   [{ram_copies, [node()]},
@@ -340,11 +400,12 @@ init([Host, Opts]) ->
     end,
     {ok, #state{}}.
 
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
@@ -353,7 +414,7 @@ handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
 handle_info({mnesia_system_event, {mnesia_up, _Node}}, State) ->
     {noreply, State};
 handle_info(Info, State) ->
-    ?ERROR_MSG("unexpected info: ~p", [Info]),
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -393,24 +454,170 @@ clean_table_from_bad_node(Node, Host) ->
         end,
     mnesia:async_dirty(F).
 
-need_transform(#muc_room{name_host = {N, H}})
+need_transform({muc_room, {N, H}, _})
   when is_list(N) orelse is_list(H) ->
     ?INFO_MSG("Mnesia table 'muc_room' will be converted to binary", []),
     true;
-need_transform(#muc_registered{us_host = {{U, S}, H}, nick = Nick})
+need_transform({muc_room, {_N, _H}, Opts}) ->
+    case {lists:keymember(allow_private_messages, 1, Opts),
+          lists:keymember(hats_defs, 1, Opts)} of
+        {true, _} ->
+            ?INFO_MSG("Mnesia table 'muc_room' will be converted to allowpm", []),
+            true;
+        {false, false} ->
+            ?INFO_MSG("Mnesia table 'muc_room' will be converted to Hats 0.3.0", []),
+            true;
+        {false, true} ->
+            false
+    end;
+
+need_transform({muc_registered, {{U, S}, H}, Nick})
   when is_list(U) orelse is_list(S) orelse is_list(H) orelse is_list(Nick) ->
     ?INFO_MSG("Mnesia table 'muc_registered' will be converted to binary", []),
     true;
 need_transform(_) ->
     false.
 
-transform(#muc_room{name_host = {N, H}, opts = Opts} = R) ->
+transform({muc_room, {N, H}, Opts} = R)
+  when is_list(N) orelse is_list(H) ->
     R#muc_room{name_host = {iolist_to_binary(N), iolist_to_binary(H)},
 	       opts = mod_muc:opts_to_binary(Opts)};
+transform(#muc_room{opts = Opts} = R) ->
+    Opts2 = case lists:keyfind(allow_private_messages, 1, Opts) of
+        {_, Value} when is_boolean(Value) ->
+            Value2 = case Value of
+                         true -> anyone;
+                         false -> none
+                     end,
+            lists:keyreplace(allow_private_messages, 1, Opts, {allowpm, Value2});
+        _ ->
+            Opts
+    end,
+    Opts4 =
+        case {lists:keyfind(hats_defs, 1, Opts2),
+              lists:keyfind(hats_users, 1, Opts2)} of
+            {false, false} ->
+                [{hats_defs, []}, {hats_users, []} | Opts2];
+            {false, {hats_users, HatsUsers}} ->
+                {HatsDefs, HatsUsers2} =
+                    lists:foldl(fun({Jid, UriTitleList}, {Defs, Assigns}) ->
+                                   Defs2 =
+                                       lists:foldl(fun({Uri, Title}, AccDef) ->
+                                                      maps:put(Uri, {Title, <<"">>}, AccDef)
+                                                   end,
+                                                   Defs,
+                                                   UriTitleList),
+                                   Assigns2 =
+                                       maps:put(Jid,
+                                                [Uri || {Uri, _Title} <- UriTitleList],
+                                                Assigns),
+                                   {Defs2, Assigns2}
+                                end,
+                                {maps:new(), maps:new()},
+                                HatsUsers),
+                Opts3 =
+                    lists:keyreplace(hats_users, 1, Opts2, {hats_users, maps:to_list(HatsUsers2)}),
+                [{hats_defs, maps:to_list(HatsDefs)} | Opts3];
+            {{hats_defs, _}, {hats_users, _}} ->
+                Opts2
+        end,
+    R#muc_room{opts = Opts4};
 transform(#muc_registered{us_host = {{U, S}, H}, nick = Nick} = R) ->
     R#muc_registered{us_host = {{iolist_to_binary(U), iolist_to_binary(S)},
 				iolist_to_binary(H)},
 		     nick = iolist_to_binary(Nick)}.
 
-get_subscribed_rooms(_, _, _) ->
-    not_implemented.
+
+serialize(LServer, BatchSize, undefined) ->
+    Hosts = gen_mod:get_module_opt_hosts(LServer, mod_muc),
+    MucRoomConv =
+        fun([]) -> skip;
+           ([#muc_room{name_host = {Name, Host}, opts = Opts}]) ->
+                case lists:member(Host, Hosts) of
+                    true ->
+                        {ok, #serialize_muc_room_v1{
+                               serverhost = LServer,
+                               host = Host,
+                               name = Name,
+                               options = mod_muc:opts_to_binary(
+                                           Opts)
+                              }};
+                    _ -> skip
+                end;
+           (_) -> skip
+        end,
+    RegistrationsConv =
+        fun([]) -> skip;
+           ([#muc_registered{us_host = {{U, S}, Host}, nick = Nick}]) ->
+                case lists:member(Host, Hosts) of
+                    true ->
+                        {ok, #serialize_muc_registrations_v1{
+                               serverhost = LServer,
+                               host = Host,
+                               jid = jid:encode({U, S, <<>>}),
+                               nick = Nick
+                              }};
+                    _ -> skip
+                end;
+           (_) -> skip
+        end,
+    ejabberd_db_serialize:iter_records([ejabberd_db_serialize:mnesia_iter(muc_room, MucRoomConv),
+                                        ejabberd_db_serialize:mnesia_iter(muc_registered, RegistrationsConv)],
+                                       [],
+                                       BatchSize);
+serialize(_LServer, BatchSize, Key) ->
+    ejabberd_db_serialize:iter_records(Key, [], BatchSize).
+
+
+is_subdomain(Domain, SubDomain) ->
+    LenDiff = byte_size(SubDomain) - byte_size(Domain) - 1,
+    case SubDomain of
+        _ when SubDomain == Domain -> true;
+        _ when LenDiff =< 0 -> false;
+        <<_:LenDiff/binary, ".", SPart/binary>> when SPart == Domain -> true;
+        _ -> false
+    end.
+
+
+deserialize_start(LServer) ->
+    mnesia:transaction(fun() ->
+                               RoomKeys = lists:filter(fun({_, Service}) ->
+                                                               is_subdomain(LServer, Service)
+                                                       end,
+                                                       mnesia:all_keys(muc_room)),
+                               NickKeys = lists:filter(fun({_, Service}) ->
+                                                               is_subdomain(LServer, Service)
+                                                       end,
+                                                       mnesia:all_keys(muc_registered)),
+                               lists:foreach(fun(Key) -> mnesia:delete(muc_room, Key, write) end, RoomKeys),
+                               lists:foreach(fun(Key) -> mnesia:delete(muc_registered, Key, write) end, NickKeys)
+		       end),
+    ok.
+
+
+deserialize(LServer, Batch) ->
+    lists:foldl(
+      fun(_, {error, _} = Err) ->
+              Err;
+         (#serialize_muc_room_v1{name = Name, host = Host, options = Opts}, _) ->
+              case store_room(LServer, Host, Name, Opts, undefined) of
+                  {atomic, _} ->
+                      ok;
+                  _ -> {error, io_lib:format("Error when writing muc room data", [])}
+              end;
+         (#serialize_muc_registrations_v1{host = Host, jid = Jid, nick = Nick}, _) ->
+              #jid{luser = L, lserver = S} = jid:decode(Jid),
+              case mnesia:transaction(
+                     fun() ->
+                             mnesia:write(#muc_registered{
+                                            us_host = {{L, S}, Host},
+                                            nick = Nick
+                                           })
+                     end) of
+                  {atomic, _} ->
+                      ok;
+                  _ -> {error, io_lib:format("Error when writing muc registration data", [])}
+              end
+      end,
+      ok,
+      Batch).

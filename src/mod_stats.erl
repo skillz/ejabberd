@@ -5,7 +5,7 @@
 %%% Created : 11 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,31 +27,31 @@
 
 -author('alexey@process-one.net').
 
--protocol({xep, 39, '0.6.0'}).
+-protocol({xep, 39, '0.6.0', '0.1.0', "complete", ""}).
 
 -behaviour(gen_mod).
 
 -export([start/2, stop/1, reload/3, process_iq/1,
-	 mod_options/1, depends/2]).
+	 mod_options/1, depends/2, mod_doc/0]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+-include("translate.hrl").
 
-start(Host, _Opts) ->
-    gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_STATS,
-				  ?MODULE, process_iq).
+start(_Host, _Opts) ->
+    {ok, [{iq_handler, ejabberd_local, ?NS_STATS, process_iq}]}.
 
-stop(Host) ->
-    gen_iq_handler:remove_iq_handler(ejabberd_local, Host, ?NS_STATS).
+stop(_Host) ->
+    ok.
 
-reload(Host, NewOpts, _OldOpts) ->
-    start(Host, NewOpts).
+reload(_Host, _NewOpts, _OldOpts) ->
+    ok.
 
 depends(_Host, _Opts) ->
     [].
 
 process_iq(#iq{type = set, lang = Lang} = IQ) ->
-    Txt = <<"Value 'set' of 'type' attribute is not allowed">>,
+    Txt = ?T("Value 'set' of 'type' attribute is not allowed"),
     xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
 process_iq(#iq{type = get, to = To, lang = Lang,
 	       sub_els = [#stats{} = Stats]} = IQ) ->
@@ -89,7 +89,7 @@ get_local_stats(_Server, [<<"running nodes">>, ENode],
 		Names, Lang) ->
     case search_running_node(ENode) of
       false ->
-	    Txt = <<"No running node found">>,
+	    Txt = ?T("No running node found"),
 	    {error, xmpp:err_item_not_found(Txt, Lang)};
       Node ->
 	  {result,
@@ -97,7 +97,7 @@ get_local_stats(_Server, [<<"running nodes">>, ENode],
 		     Names)}
     end;
 get_local_stats(_Server, _, _, Lang) ->
-    Txt = <<"No statistics found for this item">>,
+    Txt = ?T("No statistics found for this item"),
     {error, xmpp:err_feature_not_implemented(Txt, Lang)}.
 
 -define(STATVAL(Val, Unit), #stat{name = Name, units = Unit, value = Val}).
@@ -136,7 +136,7 @@ get_local_stat(_Server, [], Name)
 				   ejabberd_auth:count_users(Host)
 				     + Total
 			   end,
-			   0, ejabberd_config:get_myhosts()),
+			   0, ejabberd_option:hosts()),
     ?STATVAL((integer_to_binary(NumUsers)),
 	     <<"users">>);
 get_local_stat(_Server, _, Name) ->
@@ -234,3 +234,23 @@ search_running_node(SNode, [Node | Nodes]) ->
 
 mod_options(_Host) ->
     [].
+
+mod_doc() ->
+    #{desc =>
+          [?T("This module adds support for "
+              "https://xmpp.org/extensions/xep-0039.html"
+              "[XEP-0039: Statistics Gathering]. This protocol "
+              "allows you to retrieve the following statistics "
+              "from your ejabberd server:"), "",
+           ?T("- Total number of registered users on the current "
+              "virtual host (users/total)."), "",
+           ?T("- Total number of registered users on all virtual "
+              "hosts (users/all-hosts/total)."), "",
+           ?T("- Total number of online users on the current "
+              "virtual host (users/online)."), "",
+           ?T("- Total number of online users on all virtual "
+              "hosts (users/all-hosts/online)."), "",
+           ?T("NOTE: The protocol extension is deferred and seems "
+              "like even a few clients that were supporting it "
+              "are now abandoned. So using this module makes "
+              "very little sense.")]}.

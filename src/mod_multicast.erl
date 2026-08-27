@@ -5,7 +5,7 @@
 %%% Created : 29 May 2007 by Badlop <badlop@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,7 +27,7 @@
 
 -author('badlop@process-one.net').
 
--protocol({xep, 33, '1.1'}).
+-protocol({xep, 33, '1.1', '15.04', "complete", ""}).
 
 -behaviour(gen_server).
 
@@ -35,26 +35,21 @@
 
 %% API
 -export([start/2, stop/1, reload/3,
-         user_send_packet/1]).
+	 user_send_packet/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_info/2, handle_call/3,
 	 handle_cast/2, terminate/2, code_change/3]).
 
--export([purge_loop/1, mod_opt_type/1, mod_options/1, depends/2]).
+-export([purge_loop/1, mod_opt_type/1, mod_options/1, depends/2, mod_doc/0]).
 
 -include("logger.hrl").
 -include("translate.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 -record(multicastc, {rserver :: binary(),
 		     response,
 		     ts :: integer()}).
-
--record(dest, {jid_string :: binary() | none,
-	       jid_jid :: jid(),
-	       type :: to | cc | bcc,
-	       address :: address()}).
 
 -type limit_value() :: {default | custom, integer()}.
 -record(limits, {message :: limit_value(),
@@ -63,14 +58,6 @@
 -record(service_limits, {local :: #limits{},
 			 remote :: #limits{}}).
 
--type routing() :: route_single | {route_multicast, binary(), #service_limits{}}.
-
--record(group, {server :: binary(),
-		dests :: [#dest{}],
-		multicast :: routing(),
-		others :: [#address{}],
-		addresses :: [#address{}]}).
-
 -record(state, {lserver :: binary(),
 		lservice :: binary(),
 		access :: atom(),
@@ -78,8 +65,6 @@
 -type state() :: #state{}.
 
 %% All the elements are of type value()
-
--define(VERSION_MULTICAST, <<"$Revision: 440 $ ">>).
 
 -define(PURGE_PROCNAME,
 	ejabberd_mod_multicast_purgeloop).
@@ -91,8 +76,6 @@
 -define(MAXTIME_CACHE_NEGOTIATING, 600).
 
 -define(CACHE_PURGE_TIMER, 86400000).
-
--define(DISCO_QUERY_TIMEOUT, 10000).
 
 -define(DEFAULT_LIMIT_LOCAL_MESSAGE, 100).
 
@@ -117,7 +100,7 @@ reload(LServerS, NewOpts, OldOpts) ->
 user_send_packet({#presence{} = Packet, C2SState} = Acc) ->
     case xmpp:get_subtag(Packet, #addresses{}) of
         #addresses{list = Addresses} ->
-            {ToDeliver, _Delivereds} = split_addresses_todeliver(Addresses),
+            {CC, BCC, _Invalid, _Delivered} = partition_addresses(Addresses),
             NewState =
                 lists:foldl(
                   fun(Address, St) ->
@@ -138,7 +121,7 @@ user_send_packet({#presence{} = Packet, C2SState} = Acc) ->
                               undefined ->
                                   St
                           end
-                  end, C2SState, ToDeliver),
+                  end, C2SState, CC ++ BCC),
             {Packet, NewState};
 	false ->
 	    Acc
@@ -151,11 +134,12 @@ user_send_packet(Acc) ->
 %%====================================================================
 
 -spec init(list()) -> {ok, state()}.
-init([LServerS, Opts]) ->
+init([LServerS|_]) ->
     process_flag(trap_exit, true),
-    [LServiceS|_] = gen_mod:get_opt_hosts(LServerS, Opts),
-    Access = gen_mod:get_opt(access, Opts),
-    SLimits = build_service_limit_record(gen_mod:get_opt(limits, Opts)),
+    Opts = gen_mod:get_module_opts(LServerS, ?MODULE),
+    [LServiceS|_] = gen_mod:get_opt_hosts(Opts),
+    Access = mod_multicast_opt:access(Opts),
+    SLimits = build_service_limit_record(mod_multicast_opt:limits(Opts)),
     create_cache(),
     try_start_loop(),
     ejabberd_router_multicast:register_route(LServerS),
@@ -171,9 +155,9 @@ handle_call(stop, _From, State) ->
 
 handle_cast({reload, NewOpts, NewOpts},
 	    #state{lserver = LServerS, lservice = OldLServiceS} = State) ->
-    Access = gen_mod:get_opt(access, NewOpts),
-    SLimits = build_service_limit_record(gen_mod:get_opt(limits, NewOpts)),
-    [NewLServiceS|_] = gen_mod:get_opt_hosts(LServerS, NewOpts),
+    Access = mod_multicast_opt:access(NewOpts),
+    SLimits = build_service_limit_record(mod_multicast_opt:limits(NewOpts)),
+    [NewLServiceS|_] = gen_mod:get_opt_hosts(NewOpts),
     if NewLServiceS /= OldLServiceS ->
 	    ejabberd_router:register_route(NewLServiceS, LServerS),
 	    ejabberd_router:unregister_route(OldLServiceS);
@@ -183,7 +167,7 @@ handle_cast({reload, NewOpts, NewOpts},
     {noreply, State#state{lservice = NewLServiceS,
 			  access = Access, service_limits = SLimits}};
 handle_cast(Msg, State) ->
-    ?WARNING_MSG("unexpected cast: ~p", [Msg]),
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -273,17 +257,15 @@ process_iq(#iq{type = get, lang = Lang, from = From,
     {result, iq_disco_info(From, Lang, State)};
 process_iq(#iq{type = get, sub_els = [#disco_items{}]}, _) ->
     {result, #disco_items{}};
-process_iq(#iq{type = get, lang = Lang, sub_els = [#vcard_temp{}]}, _) ->
-    {result, iq_vcard(Lang)};
+process_iq(#iq{type = get, lang = Lang, sub_els = [#vcard_temp{}]}, State) ->
+    {result, iq_vcard(Lang, State)};
 process_iq(#iq{type = T}, _) when T == set; T == get ->
     {error, xmpp:err_service_unavailable()};
 process_iq(_, _) ->
     reply.
 
--define(FEATURE(Feat), Feat).
-
 iq_disco_info(From, Lang, State) ->
-    Name = gen_mod:get_module_opt(State#state.lserver, ?MODULE, name),
+    Name = mod_multicast_opt:name(State#state.lserver),
     #disco_info{
        identities = [#identity{category = <<"service">>,
 			       type = <<"multicast">>,
@@ -291,29 +273,26 @@ iq_disco_info(From, Lang, State) ->
        features = [?NS_DISCO_INFO, ?NS_DISCO_ITEMS, ?NS_VCARD, ?NS_ADDRESS],
        xdata = iq_disco_info_extras(From, State)}.
 
-iq_vcard(Lang) ->
-    #vcard_temp{fn = <<"ejabberd/mod_multicast">>,
-		url = ejabberd_config:get_uri(),
-		desc = misc:get_descr(Lang, ?T("ejabberd Multicast service"))}.
+-spec iq_vcard(binary(), state()) -> #vcard_temp{}.
+iq_vcard(Lang, State) ->
+    case mod_multicast_opt:vcard(State#state.lserver) of
+	undefined ->
+	    #vcard_temp{fn = <<"ejabberd/mod_multicast">>,
+			url = ejabberd_config:get_uri(),
+			desc = misc:get_descr(Lang, ?T("ejabberd Multicast service"))};
+	VCard ->
+	    VCard
+    end.
 
 %%%-------------------------
 %%% Route
 %%%-------------------------
 
 -spec route_trusted(binary(), binary(), jid(), [jid()], stanza()) -> 'ok'.
-route_trusted(LServiceS, LServerS, FromJID,
-	      Destinations, Packet) ->
-    Packet_stripped = Packet,
-    Delivereds = [],
-    Dests2 = lists:map(
-	       fun(D) ->
-		       #dest{jid_string = jid:encode(D),
-			     jid_jid    = D, type = bcc,
-			     address    = #address{type = bcc, jid = D}}
-	       end, Destinations),
-    Groups = group_dests(Dests2),
-    route_common(LServerS, LServiceS, FromJID, Groups,
-		 Delivereds, Packet_stripped).
+route_trusted(LServiceS, LServerS, FromJID, Destinations, Packet) ->
+    Addresses = [#address{type = bcc, jid = D} || D <- Destinations],
+    Groups = group_by_destinations(Addresses, #{}),
+    route_grouped(LServerS, LServiceS, FromJID, Groups, [], Packet).
 
 -spec route_untrusted(binary(), binary(), atom(), #service_limits{}, stanza()) -> 'ok'.
 route_untrusted(LServiceS, LServerS, Access, SLimits, Packet) ->
@@ -322,76 +301,115 @@ route_untrusted(LServiceS, LServerS, Access, SLimits, Packet) ->
     catch
       adenied ->
 	  route_error(Packet, forbidden,
-		      <<"Access denied by service policy">>);
+		      ?T("Access denied by service policy"));
       eadsele ->
 	  route_error(Packet, bad_request,
-		      <<"No addresses element found">>);
+		      ?T("No addresses element found"));
       eadeles ->
 	  route_error(Packet, bad_request,
-		      <<"No address elements found">>);
+		      ?T("No address elements found"));
       ewxmlns ->
 	  route_error(Packet, bad_request,
-		      <<"Wrong xmlns">>);
+		      ?T("Wrong xmlns"));
       etoorec ->
 	  route_error(Packet, not_acceptable,
-		      <<"Too many receiver fields were specified">>);
+		      ?T("Too many receiver fields were specified"));
       edrelay ->
 	  route_error(Packet, forbidden,
-		      <<"Packet relay is denied by service policy">>);
+		      ?T("Packet relay is denied by service policy"));
       EType:EReason ->
 	  ?ERROR_MSG("Multicast unknown error: Type: ~p~nReason: ~p",
 		     [EType, EReason]),
 	  route_error(Packet, internal_server_error,
-		      <<"Unknown problem">>)
+		      ?T("Internal server error"))
     end.
 
 -spec route_untrusted2(binary(), binary(), atom(), #service_limits{}, stanza()) -> 'ok'.
 route_untrusted2(LServiceS, LServerS, Access, SLimits, Packet) ->
     FromJID = xmpp:get_from(Packet),
     ok = check_access(LServerS, Access, FromJID),
-    {ok, Packet_stripped, Addresses} = strip_addresses_element(Packet),
-    {To_deliver, Delivereds} = split_addresses_todeliver(Addresses),
-    Dests = convert_dest_record(To_deliver),
-    {Dests2, Not_jids} = split_dests_jid(Dests),
-    report_not_jid(FromJID, Packet, Not_jids),
-    ok = check_limit_dests(SLimits, FromJID, Packet, Dests2),
-    Groups = group_dests(Dests2),
+    {ok, PacketStripped, Addresses} = strip_addresses_element(Packet),
+    {CC, BCC, NotJids, Rest} = partition_addresses(Addresses),
+    report_not_jid(FromJID, Packet, NotJids),
+    ok = check_limit_dests(SLimits, FromJID, Packet, length(CC) + length(BCC)),
+    Groups0 = group_by_destinations(CC, #{}),
+    Groups = group_by_destinations(BCC, Groups0),
     ok = check_relay(FromJID#jid.server, LServerS, Groups),
-    route_common(LServerS, LServiceS, FromJID, Groups,
-		 Delivereds, Packet_stripped).
+    route_grouped(LServerS, LServiceS, FromJID, Groups, Rest, PacketStripped).
 
--spec route_common(binary(), binary(), jid(), [#group{}],
-		   [address()], stanza()) -> 'ok'.
-route_common(LServerS, LServiceS, FromJID, Groups,
-	     Delivereds, Packet_stripped) ->
-    Groups2 = look_cached_servers(LServerS, LServiceS, Groups),
-    Groups3 = build_others_xml(Groups2),
-    Groups4 = add_addresses(Delivereds, Groups3),
-    AGroups = decide_action_groups(Groups4),
-    act_groups(FromJID, Packet_stripped, LServiceS,
-	       AGroups).
+-spec mark_as_delivered([address()]) -> [address()].
+mark_as_delivered(Addresses) ->
+    [A#address{delivered = true} || A <- Addresses].
 
--spec act_groups(jid(), stanza(), binary(), [{routing(), #group{}}]) -> 'ok'.
-act_groups(FromJID, Packet_stripped, LServiceS, AGroups) ->
+-spec route_individual(jid(), [address()], [address()], [address()], stanza()) -> ok.
+route_individual(From, CC, BCC, Other, Packet) ->
+    CCDelivered = mark_as_delivered(CC),
+    Addresses = CCDelivered ++ Other,
+    PacketWithAddresses = xmpp:append_subtags(Packet, [#addresses{list = Addresses}]),
     lists:foreach(
-	fun(AGroup) ->
-	    perform(FromJID, Packet_stripped, LServiceS,
-		    AGroup)
-	end, AGroups).
-
--spec perform(jid(), stanza(), binary(),
-	      {routing(), #group{}}) -> 'ok'.
-perform(From, Packet, _,
-	{route_single, Group}) ->
+	fun(#address{jid = To}) ->
+	    ejabberd_router:route(xmpp:set_from_to(PacketWithAddresses, From, To))
+	end, CC),
     lists:foreach(
-	fun(ToUser) ->
-	    route_packet(From, ToUser, Packet,
-			 Group#group.others, Group#group.addresses)
-	end, Group#group.dests);
-perform(From, Packet, _,
-	{{route_multicast, JID, RLimits}, Group}) ->
-    route_packet_multicast(From, JID, Packet,
-			   Group#group.dests, Group#group.addresses, RLimits).
+	fun(#address{jid = To} = Address) ->
+	    Packet2 = case Addresses of
+			  [] ->
+			      Packet;
+			  _ ->
+			      xmpp:append_subtags(Packet, [#addresses{list = [Address | Addresses]}])
+		      end,
+	    ejabberd_router:route(xmpp:set_from_to(Packet2, From, To))
+	end, BCC).
+
+-spec route_chunk(jid(), jid(), stanza(), [address()]) -> ok.
+route_chunk(From, To, Packet, Addresses) ->
+    PacketWithAddresses = xmpp:append_subtags(Packet, [#addresses{list = Addresses}]),
+    ejabberd_router:route(xmpp:set_from_to(PacketWithAddresses, From, To)).
+
+-spec route_in_chunks(jid(), jid(), stanza(), integer(), [address()], [address()], [address()]) -> ok.
+route_in_chunks(_From, _To, _Packet, _Limit, [], [], _) ->
+    ok;
+route_in_chunks(From, To, Packet, Limit, CC, BCC, RestOfAddresses) when length(CC) > Limit ->
+    {Chunk, Rest} = lists:split(Limit, CC),
+    route_chunk(From, To, Packet, Chunk ++ RestOfAddresses),
+    route_in_chunks(From, To, Packet, Limit, Rest, BCC, RestOfAddresses);
+route_in_chunks(From, To, Packet, Limit, [], BCC, RestOfAddresses) when length(BCC) > Limit ->
+    {Chunk, Rest} = lists:split(Limit, BCC),
+    route_chunk(From, To, Packet, Chunk ++ RestOfAddresses),
+    route_in_chunks(From, To, Packet, Limit, [], Rest, RestOfAddresses);
+route_in_chunks(From, To, Packet, Limit, CC, BCC, RestOfAddresses) when length(BCC) + length(CC) > Limit ->
+    {Chunk, Rest} = lists:split(Limit - length(CC), BCC),
+    route_chunk(From, To, Packet, CC ++ Chunk ++ RestOfAddresses),
+    route_in_chunks(From, To, Packet, Limit, [], Rest, RestOfAddresses);
+route_in_chunks(From, To, Packet, _Limit, CC, BCC, RestOfAddresses) ->
+    route_chunk(From, To, Packet, CC ++ BCC ++ RestOfAddresses).
+
+-spec route_multicast(jid(), jid(), [address()], [address()], [address()], stanza(), #limits{}) -> ok.
+route_multicast(From, To, CC, BCC, RestOfAddresses, Packet, Limits) ->
+    {_Type, Limit} = get_limit_number(element(1, Packet),
+				      Limits),
+    route_in_chunks(From, To, Packet, Limit, CC, BCC, RestOfAddresses).
+
+-spec route_grouped(binary(), binary(), jid(), #{}, [address()], stanza()) -> ok.
+route_grouped(LServer, LService, From, Groups, RestOfAddresses, Packet) ->
+    maps:fold(
+	fun(Server, {CC, BCC}, _) ->
+	    OtherCC = maps:fold(
+		fun(Server2, _, Res) when Server2 == Server ->
+			Res;
+		   (_, {CC2, _}, Res) ->
+			mark_as_delivered(CC2) ++ Res
+		end, [], Groups),
+	    case search_server_on_cache(Server,
+					LServer, LService,
+					{?MAXTIME_CACHE_POSITIVE,
+					 ?MAXTIME_CACHE_NEGATIVE}) of
+		route_single ->
+		    route_individual(From, CC, BCC, OtherCC ++ RestOfAddresses, Packet);
+		{route_multicast, Service, Limits} ->
+		    route_multicast(From, jid:make(Service), CC, BCC, OtherCC ++ RestOfAddresses, Packet, Limits)
+	    end
+	end, ok, Groups).
 
 %%%-------------------------
 %%% Check access permission
@@ -421,224 +439,84 @@ strip_addresses_element(Packet) ->
 %%% Split Addresses
 %%%-------------------------
 
--spec split_addresses_todeliver([address()]) -> {[address()], [address()]}.
-split_addresses_todeliver(Addresses) ->
-    lists:partition(
-      fun(#address{delivered = true}) ->
-	      false;
-	 (#address{type = Type}) ->
-	      case Type of
-		  to -> true;
-		  cc -> true;
-		  bcc -> true;
-		  _ -> false
-	      end
-      end, Addresses).
+partition_addresses(Addresses) ->
+    lists:foldl(
+	fun(#address{delivered = true} = A, {C, B, I, D}) ->
+	    {C, B, I, [A | D]};
+	   (#address{type = T, jid = undefined} = A, {C, B, I, D})
+	       when T == to; T == cc; T == bcc ->
+	       {C, B, [A | I], D};
+	   (#address{type = T} = A, {C, B, I, D})
+	       when T == to; T == cc ->
+	       {[A | C], B, I, D};
+	   (#address{type = bcc} = A, {C, B, I, D}) ->
+	       {C, [A | B], I, D};
+	   (A, {C, B, I, D}) ->
+	       {C, B, I, [A | D]}
+	end, {[], [], [], []}, Addresses).
 
 %%%-------------------------
 %%% Check does not exceed limit of destinations
 %%%-------------------------
 
--spec check_limit_dests(#service_limits{}, jid(), stanza(), [address()]) -> ok.
-check_limit_dests(SLimits, FromJID, Packet,
-		  Addresses) ->
+-spec check_limit_dests(#service_limits{}, jid(), stanza(), integer()) -> ok.
+check_limit_dests(SLimits, FromJID, Packet, NumOfAddresses) ->
     SenderT = sender_type(FromJID),
     Limits = get_slimit_group(SenderT, SLimits),
-    Type_of_stanza = type_of_stanza(Packet),
-    {_Type, Limit_number} = get_limit_number(Type_of_stanza,
-					     Limits),
-    case length(Addresses) > Limit_number of
+    StanzaType = type_of_stanza(Packet),
+    {_Type, Limit} = get_limit_number(StanzaType,
+				      Limits),
+    case NumOfAddresses > Limit of
       false -> ok;
       true -> throw(etoorec)
     end.
 
-%%%-------------------------
-%%% Convert Destination XML to record
-%%%-------------------------
 
--spec convert_dest_record([address()]) -> [#dest{}].
-convert_dest_record(Addrs) ->
-    lists:map(
-      fun(#address{jid = undefined} = Addr) ->
-	      #dest{jid_string = none, address = Addr};
-	 (#address{jid = JID, type = Type} = Addr) ->
-	      #dest{jid_string = jid:encode(JID), jid_jid = JID,
-		    type = Type, address = Addr}
-      end, Addrs).
-
-%%%-------------------------
-%%% Split destinations by existence of JID
-%%% and send error messages for other dests
-%%%-------------------------
-
--spec split_dests_jid([#dest{}]) -> {[#dest{}], [#dest{}]}.
-split_dests_jid(Dests) ->
-    lists:partition(fun (Dest) ->
-			    case Dest#dest.jid_string of
-			      none -> false;
-			      _ -> true
-			    end
-		    end,
-		    Dests).
-
--spec report_not_jid(jid(), stanza(), [#dest{}]) -> any().
-report_not_jid(From, Packet, Dests) ->
-    Dests2 = [fxml:element_to_binary(xmpp:encode(Dest#dest.address))
-	      || Dest <- Dests],
-    [route_error(xmpp:set_from_to(Packet, From, From), jid_malformed,
-		 <<"This service can not process the address: ",
-		   D/binary>>)
-     || D <- Dests2].
+-spec report_not_jid(jid(), stanza(), [address()]) -> any().
+report_not_jid(From, Packet, Addresses) ->
+    lists:foreach(
+	fun(Address) ->
+	    route_error(
+		xmpp:set_from_to(Packet, From, From), jid_malformed,
+		str:format(?T("This service can not process the address: ~s"),
+			   [fxml:element_to_binary(xmpp:encode(Address))]))
+	end, Addresses).
 
 %%%-------------------------
 %%% Group destinations by their servers
 %%%-------------------------
 
--spec group_dests([#dest{}]) -> [#group{}].
-group_dests(Dests) ->
-    D = lists:foldl(fun (Dest, Dict) ->
-			    ServerS = (Dest#dest.jid_jid)#jid.server,
-			    dict:append(ServerS, Dest, Dict)
-		    end,
-		    dict:new(), Dests),
-    Keys = dict:fetch_keys(D),
-    [#group{server = Key, dests = dict:fetch(Key, D)}
-     || Key <- Keys].
-
-%%%-------------------------
-%%% Look for cached responses
-%%%-------------------------
-
-look_cached_servers(LServerS, LServiceS, Groups) ->
-    [look_cached(LServerS, LServiceS, Group) || Group <- Groups].
-
-look_cached(LServerS, LServiceS, G) ->
-    Maxtime_positive = (?MAXTIME_CACHE_POSITIVE),
-    Maxtime_negative = (?MAXTIME_CACHE_NEGATIVE),
-    Cached_response = search_server_on_cache(G#group.server,
-					     LServerS, LServiceS,
-					     {Maxtime_positive,
-					      Maxtime_negative}),
-    G#group{multicast = Cached_response}.
-
-%%%-------------------------
-%%% Build delivered XML element
-%%%-------------------------
-
-build_others_xml(Groups) ->
-    [Group#group{others =
-		     build_other_xml(Group#group.dests)}
-     || Group <- Groups].
-
-build_other_xml(Dests) ->
-    lists:foldl(fun (Dest, R) ->
-			XML = Dest#dest.address,
-			case Dest#dest.type of
-			  to -> [add_delivered(XML) | R];
-			  cc -> [add_delivered(XML) | R];
-			  bcc -> R;
-			  _ -> [XML | R]
-			end
-		end,
-		[], Dests).
-
--spec add_delivered(address()) -> address().
-add_delivered(Addr) ->
-    Addr#address{delivered = true}.
-
-%%%-------------------------
-%%% Add preliminary packets
-%%%-------------------------
-
-add_addresses(Delivereds, Groups) ->
-    Ps = [Group#group.others || Group <- Groups],
-    add_addresses2(Delivereds, Groups, [], [], Ps).
-
-add_addresses2(_, [], Res, _, []) -> Res;
-add_addresses2(Delivereds, [Group | Groups], Res, Pa,
-	       [Pi | Pz]) ->
-    Addresses = lists:append([Delivereds] ++ Pa ++ Pz),
-    Group2 = Group#group{addresses = Addresses},
-    add_addresses2(Delivereds, Groups, [Group2 | Res],
-		   [Pi | Pa], Pz).
-
-%%%-------------------------
-%%% Decide action groups
-%%%-------------------------
-
--spec decide_action_groups([#group{}]) -> [{routing(), #group{}}].
-decide_action_groups(Groups) ->
-    [{Group#group.multicast, Group}
-     || Group <- Groups].
+group_by_destinations(Addrs, Map) ->
+    lists:foldl(
+	fun
+	    (#address{type = Type, jid = #jid{lserver = Server}} = Addr, Map2) when Type == to; Type == cc ->
+		maps:update_with(Server,
+		    fun({CC, BCC}) ->
+			{[Addr | CC], BCC}
+		    end, {[Addr], []}, Map2);
+	    (#address{type = bcc, jid = #jid{lserver = Server}} = Addr, Map2) ->
+		maps:update_with(Server,
+		    fun({CC, BCC}) ->
+			{CC, [Addr | BCC]}
+		    end, {[], [Addr]}, Map2)
+	end, Map, Addrs).
 
 %%%-------------------------
 %%% Route packet
 %%%-------------------------
 
--spec route_packet(jid(), #dest{}, stanza(), [addresses()], [addresses()]) -> 'ok'.
-route_packet(From, ToDest, Packet, Others, Addresses) ->
-    Dests = case ToDest#dest.type of
-	      bcc -> [];
-	      _ -> [ToDest]
-	    end,
-    route_packet2(From, ToDest#dest.jid_string, Dests,
-		  Packet, {Others, Addresses}).
-
--spec route_packet_multicast(jid(), binary(), stanza(), [#dest{}], [address()], #limits{}) -> 'ok'.
-route_packet_multicast(From, ToS, Packet, Dests,
-		       Addresses, Limits) ->
-    Type_of_stanza = type_of_stanza(Packet),
-    {_Type, Limit_number} = get_limit_number(Type_of_stanza,
-					     Limits),
-    Fragmented_dests = fragment_dests(Dests, Limit_number),
-    lists:foreach(fun(DFragment) ->
-	route_packet2(From, ToS, DFragment, Packet,
-		      Addresses)
-	end, Fragmented_dests).
-
--spec route_packet2(jid(), binary(), [#dest{}], stanza(), {[address()], [address()]} | [address()]) -> 'ok'.
-route_packet2(From, ToS, Dests, Packet, Addresses) ->
-    Els = case append_dests(Dests, Addresses) of
-	      [] ->
-		  xmpp:get_els(Packet);
-	      ACs ->
-		  [#addresses{list = ACs}|xmpp:get_els(Packet)]
-	  end,
-    Packet2 = xmpp:set_els(Packet, Els),
-    ToJID = stj(ToS),
-    ejabberd_router:route(xmpp:set_from_to(Packet2, From, ToJID)).
-
--spec append_dests([#dest{}], {[address()], [address()]} | [address()]) -> [address()].
-append_dests(_Dests, {Others, Addresses}) ->
-    Addresses ++ Others;
-append_dests([], Addresses) -> Addresses;
-append_dests([Dest | Dests], Addresses) ->
-    append_dests(Dests, [Dest#dest.address | Addresses]).
-
 %%%-------------------------
 %%% Check relay
 %%%-------------------------
 
--spec check_relay(binary(), binary(), [#group{}]) -> ok.
+-spec check_relay(binary(), binary(), #{}) -> ok.
 check_relay(RS, LS, Gs) ->
-    case check_relay_required(RS, LS, Gs) of
-      false -> ok;
-      true -> throw(edrelay)
+    case lists:suffix(str:tokens(LS, <<".">>),
+		      str:tokens(RS, <<".">>)) orelse
+	(maps:is_key(LS, Gs) andalso maps:size(Gs) == 1) of
+	true -> ok;
+	_ -> throw(edrelay)
     end.
-
--spec check_relay_required(binary(), binary(), [#group{}]) -> boolean().
-check_relay_required(RServer, LServerS, Groups) ->
-    case lists:suffix(str:tokens(LServerS, <<".">>),
-                      str:tokens(RServer, <<".">>)) of
-      true -> false;
-      false -> check_relay_required(LServerS, Groups)
-    end.
-
--spec check_relay_required(binary(), [#group{}]) -> boolean().
-check_relay_required(LServerS, Groups) ->
-    lists:any(fun (Group) -> Group#group.server /= LServerS
-	      end,
-	      Groups).
 
 %%%-------------------------
 %%% Check protocol support: Send request
@@ -1036,20 +914,6 @@ get_slimit_group(local, SLimits) ->
 get_slimit_group(remote, SLimits) ->
     SLimits#service_limits.remote.
 
-fragment_dests(Dests, Limit_number) ->
-    {R, _} = lists:foldl(fun (Dest, {Res, Count}) ->
-				 case Count of
-				   Limit_number ->
-				       Head2 = [Dest], {[Head2 | Res], 0};
-				   _ ->
-				       [Head | Tail] = Res,
-				       Head2 = [Dest | Head],
-				       {[Head2 | Tail], Count + 1}
-				 end
-			 end,
-			 {[[]], 0}, Dests),
-    R.
-
 %%%-------------------------
 %%% Limits: XEP-0128 Service Discovery Extensions
 %%%-------------------------
@@ -1068,13 +932,13 @@ iq_disco_info_extras(From, State) ->
     case iq_disco_info_extras2(SenderT, Service_limits) of
       [] -> [];
       List_limits_xmpp ->
-	    #xdata{type = result,
+	    [#xdata{type = result,
 		   fields = [?RFIELDT(hidden, <<"FORM_TYPE">>, ?NS_ADDRESS)
-			     | List_limits_xmpp]}
+			     | List_limits_xmpp]}]
     end.
 
 sender_type(From) ->
-    Local_hosts = ejabberd_config:get_myhosts(),
+    Local_hosts = ejabberd_option:hosts(),
     case lists:member(From#jid.lserver, Local_hosts) of
       true -> local;
       false -> remote
@@ -1124,23 +988,109 @@ depends(_Host, _Opts) ->
     [].
 
 mod_opt_type(access) ->
-    fun acl:access_rules_validator/1;
-mod_opt_type(host) -> fun ejabberd_config:v_host/1;
-mod_opt_type(hosts) -> fun ejabberd_config:v_hosts/1;
-mod_opt_type(name) -> fun iolist_to_binary/1;
-mod_opt_type({limits, Type}) when (Type == local) or (Type == remote) ->
-    fun(L) ->
-	    lists:map(
-		fun ({message, infinite} = O) -> O;
-		    ({presence, infinite} = O) -> O;
-		    ({message, I} = O) when is_integer(I) -> O;
-		    ({presence, I} = O) when is_integer(I) -> O
-		end, L)
-    end.
+    econf:acl();
+mod_opt_type(name) ->
+    econf:binary();
+mod_opt_type(limits) ->
+    econf:options(
+      #{local =>
+	    econf:options(
+	      #{message => econf:non_neg_int(infinite),
+		presence => econf:non_neg_int(infinite)}),
+	remote =>
+	    econf:options(
+	      #{message => econf:non_neg_int(infinite),
+		presence => econf:non_neg_int(infinite)})});
+mod_opt_type(host) ->
+    econf:host();
+mod_opt_type(hosts) ->
+    econf:hosts();
+mod_opt_type(vcard) ->
+    econf:vcard_temp().
 
-mod_options(_Host) ->
+mod_options(Host) ->
     [{access, all},
-     {host, <<"multicast.@HOST@">>},
+     {host, <<"multicast.", Host/binary>>},
      {hosts, []},
      {limits, [{local, []}, {remote, []}]},
+     {vcard, undefined},
      {name, ?T("Multicast")}].
+
+mod_doc() ->
+    #{desc =>
+	  [?T("This module implements a service for "
+	      "https://xmpp.org/extensions/xep-0033.html"
+	      "[XEP-0033: Extended Stanza Addressing].")],
+      opts =>
+          [{access,
+            #{value => "Access",
+              desc =>
+                  ?T("The access rule to restrict who can send packets to "
+		     "the multicast service. Default value: 'all'.")}},
+           {host,
+            #{desc => ?T("Deprecated. Use 'hosts' instead.")}},
+           {hosts,
+            #{value => ?T("[Host, ...]"),
+              desc =>
+                  [?T("This option defines the Jabber IDs of the service. "
+		      "If the 'hosts' option is not specified, the only "
+		      "Jabber ID will be the hostname of the virtual host "
+		      "with the prefix \"multicast.\". The keyword '@HOST@' "
+		      "is replaced with the real virtual host name."),
+		   ?T("The default value is 'multicast.@HOST@'.")]}},
+	   {limits,
+	    #{value => "Sender: Stanza: Number",
+	      desc =>
+		  [?T("Specify a list of custom limits which override the "
+		      "default ones defined in XEP-0033. Limits are defined "
+		      "per sender type and stanza type, where:"), "",
+		   ?T("- 'sender' can be: 'local' or 'remote'."),
+		   ?T("- 'stanza' can be: 'message' or 'presence'."),
+		   ?T("- 'number' can be a positive integer or 'infinite'.")],
+              example =>
+                    ["# Default values:",
+                     "local:",
+		     "  message: 100",
+		     "  presence: 100",
+		     "remote:",
+		     "  message: 20",
+		     "  presence: 20"]
+		  }},
+           {name,
+            #{desc => ?T("Service name to provide in the Info query to the "
+			 "Service Discovery. Default is '\"Multicast\"'.")}},
+           {vcard,
+            #{desc => ?T("vCard element to return when queried. "
+			 "Default value is 'undefined'.")}}],
+      example =>
+          ["# Only admins can send packets to multicast service",
+	   "access_rules:",
+	   "  multicast:",
+	   "    - allow: admin",
+	   "",
+	   "# If you want to allow all your users:",
+	   "access_rules:",
+	   "  multicast:",
+	   "    - allow",
+	   "",
+	   "# This allows both admins and remote users to send packets,",
+	   "# but does not allow local users",
+	   "acl:",
+	   "  allservers:",
+	   "    server_glob: \"*\"",
+	   "access_rules:",
+	   "  multicast:",
+	   "    - allow: admin",
+	   "    - deny: local",
+	   "    - allow: allservers",
+	   "",
+	   "modules:",
+	   "  mod_multicast:",
+	   "     host: multicast.example.org",
+	   "     access: multicast",
+	   "     limits:",
+	   "       local:",
+	   "         message: 40",
+	   "         presence: infinite",
+	   "       remote:",
+	   "         message: 150"]}.

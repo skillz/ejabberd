@@ -5,7 +5,7 @@
 %%% Created : 25 Dec 2016 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -29,38 +29,50 @@
 -behaviour(gen_mod).
 
 %% API
--export([start/2, stop/1, reload/3,
+-export([start/2, stop/1, reload/3, mod_doc/0,
          depends/2, mod_opt_type/1, mod_options/1]).
 
--export([filter_packet/1, filter_offline_msg/1, filter_subscription/2]).
+-export([filter_packet/1, filter_offline_msg/1, filter_subscription/2,
+         get_sm_features/5]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("logger.hrl").
+-include("translate.hrl").
 
 -define(SETS, gb_sets).
+
+-define(NS_BLOCK_STRANGERS, <<"urn:ejabberd:block-strangers">>).
+
+-type c2s_state() :: ejabberd_c2s:state().
 
 %%%===================================================================
 %%% Callbacks and hooks
 %%%===================================================================
-start(Host, _Opts) ->
-    ejabberd_hooks:add(user_receive_packet, Host,
-                       ?MODULE, filter_packet, 25),
-    ejabberd_hooks:add(roster_in_subscription, Host,
-		       ?MODULE, filter_subscription, 25),
-    ejabberd_hooks:add(offline_message_hook, Host,
-		       ?MODULE, filter_offline_msg, 25).
+start(_Host, _Opts) ->
+    {ok, [{hook, disco_local_features, get_sm_features, 50},
+          {hook, disco_sm_features, get_sm_features, 50},
+          {hook, user_receive_packet, filter_packet, 25},
+          {hook, roster_in_subscription, filter_subscription, 25},
+          {hook, offline_message_hook, filter_offline_msg, 25}]}.
 
-stop(Host) ->
-    ejabberd_hooks:delete(user_receive_packet, Host,
-                          ?MODULE, filter_packet, 25),
-    ejabberd_hooks:delete(roster_in_subscription, Host,
-			  ?MODULE, filter_subscription, 25),
-    ejabberd_hooks:delete(offline_message_hook, Host,
-			  ?MODULE, filter_offline_msg, 25).
+stop(_Host) ->
+    ok.
 
 reload(_Host, _NewOpts, _OldOpts) ->
     ok.
 
+get_sm_features(Acc, _From, _To, <<"">>, _Lang) ->
+    Features = case Acc of
+		{result, I} -> I;
+		_ -> []
+	    end,
+    {result, [?NS_BLOCK_STRANGERS | Features]};
+
+get_sm_features(Acc, _From, _To, _Node, _Lang) ->
+    Acc.
+
+-spec filter_packet({stanza(), c2s_state()}) -> {stanza(), c2s_state()} |
+						{stop, {drop, c2s_state()}}.
 filter_packet({#message{from = From} = Msg, State} = Acc) ->
     LFrom = jid:tolower(From),
     LBFrom = jid:remove_resource(LFrom),
@@ -79,22 +91,24 @@ filter_packet({#message{from = From} = Msg, State} = Acc) ->
 filter_packet(Acc) ->
     Acc.
 
+-spec filter_offline_msg({_, message()}) -> {_, message()} | {stop, {drop, message()}}.
 filter_offline_msg({_Action, #message{} = Msg} = Acc) ->
     case check_message(Msg) of
 	allow -> Acc;
 	deny -> {stop, {drop, Msg}}
     end.
 
+-spec filter_subscription(boolean(), presence()) -> boolean() | {stop, false}.
 filter_subscription(Acc, #presence{meta = #{captcha := passed}}) ->
     Acc;
 filter_subscription(Acc, #presence{from = From, to = To, lang = Lang,
 				   id = SID, type = subscribe} = Pres) ->
     LServer = To#jid.lserver,
-    case gen_mod:get_module_opt(LServer, ?MODULE, drop) andalso
-	 gen_mod:get_module_opt(LServer, ?MODULE, captcha) andalso
+    case mod_block_strangers_opt:drop(LServer) andalso
+	 mod_block_strangers_opt:captcha(LServer) andalso
 	 need_check(Pres) of
-	true ->
-	    case check_subscription(From, To) of
+	{true, Origin} ->
+	    case check_subscription(Origin, To) of
 		false ->
 		    BFrom = jid:remove_resource(From),
 		    BTo = jid:remove_resource(To),
@@ -106,10 +120,10 @@ filter_subscription(Acc, #presence{from = From, to = To, lang = Lang,
 			    Msg = #message{from = BTo, to = From,
 					   id = ID, body = Body,
 					   sub_els = CaptchaEls},
-			    case gen_mod:get_module_opt(LServer, ?MODULE, log) of
+			    case mod_block_strangers_opt:log(LServer) of
 				true ->
 				    ?INFO_MSG("Challenge subscription request "
-					      "from stranger ~s to ~s with "
+					      "from stranger ~ts to ~ts with "
 					      "CAPTCHA",
 					      [jid:encode(From), jid:encode(To)]);
 				false ->
@@ -117,11 +131,11 @@ filter_subscription(Acc, #presence{from = From, to = To, lang = Lang,
 			    end,
 			    ejabberd_router:route(Msg);
 			{error, limit} ->
-			    ErrText = <<"Too many CAPTCHA requests">>,
+			    ErrText = ?T("Too many CAPTCHA requests"),
 			    Err = xmpp:err_resource_constraint(ErrText, Lang),
 			    ejabberd_router:route_error(Pres, Err);
 			_ ->
-			    ErrText = <<"Unable to generate a CAPTCHA">>,
+			    ErrText = ?T("Unable to generate a CAPTCHA"),
 			    Err = xmpp:err_internal_server_error(ErrText, Lang),
 			    ejabberd_router:route_error(Pres, Err)
 		    end,
@@ -135,37 +149,45 @@ filter_subscription(Acc, #presence{from = From, to = To, lang = Lang,
 filter_subscription(Acc, _) ->
     Acc.
 
+-spec handle_captcha_result(captcha_succeed | captcha_failed, presence()) -> ok.
 handle_captcha_result(captcha_succeed, Pres) ->
     Pres1 = xmpp:put_meta(Pres, captcha, passed),
     ejabberd_router:route(Pres1);
 handle_captcha_result(captcha_failed, #presence{lang = Lang} = Pres) ->
-    Txt = <<"The CAPTCHA verification has failed">>,
+    Txt = ?T("The CAPTCHA verification has failed"),
     ejabberd_router:route_error(Pres, xmpp:err_not_allowed(Txt, Lang)).
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec check_message(message()) -> allow | deny.
 check_message(#message{from = From, to = To, lang = Lang} = Msg) ->
     LServer = To#jid.lserver,
     case need_check(Msg) of
-	true ->
-	    case check_subscription(From, To) of
+	{true, Origin} ->
+	    case check_subscription(Origin, To) of
 		false ->
-		    Drop = gen_mod:get_module_opt(LServer, ?MODULE, drop),
-		    Log = gen_mod:get_module_opt(LServer, ?MODULE, log),
+		    Drop = mod_block_strangers_opt:drop(LServer),
+		    Log = mod_block_strangers_opt:log(LServer),
 		    if
-			Log ->
-			    ?INFO_MSG("~s message from stranger ~s to ~s",
+			Log andalso Origin == From ->
+			    ?INFO_MSG("~ts message from stranger ~ts to ~ts",
 				      [if Drop -> "Rejecting";
 					  true -> "Allow"
 				       end,
 				       jid:encode(From), jid:encode(To)]);
+			Log ->
+			    ?INFO_MSG("~ts message from stranger ~ts to ~ts (via ~ts)",
+				      [if Drop -> "Rejecting";
+					   true -> "Allow"
+				       end,
+				       jid:encode(Origin), jid:encode(To), jid:encode(From)]);
 			true ->
 			    ok
 		    end,
 		    if
 			Drop ->
-			    Txt = <<"Messages from strangers are rejected">>,
+			    Txt = ?T("Messages from strangers are rejected"),
 			    Err = xmpp:err_policy_violation(Txt, Lang),
 			    Msg1 = maybe_adjust_from(Msg),
 			    ejabberd_router:route_error(Msg1, Err),
@@ -186,7 +208,7 @@ maybe_adjust_from(#message{type = groupchat, from = From} = Msg) ->
 maybe_adjust_from(#message{} = Msg) ->
     Msg.
 
--spec need_check(presence() | message()) -> boolean().
+-spec need_check(presence() | message()) -> {true, #jid{}} | false.
 need_check(Pkt) ->
     To = xmpp:get_to(Pkt),
     From = xmpp:get_from(Pkt),
@@ -199,12 +221,32 @@ need_check(Pkt) ->
 		  _ ->
 		      false
 	      end,
-    AllowLocalUsers = gen_mod:get_module_opt(LServer, ?MODULE, allow_local_users),
-    Access = gen_mod:get_module_opt(LServer, ?MODULE, access),
-    not (IsSelf orelse IsEmpty
-	 orelse acl:match_rule(LServer, Access, From) == allow
-	 orelse ((AllowLocalUsers orelse From#jid.luser == <<"">>)
-		 andalso ejabberd_router:is_my_host(From#jid.lserver))).
+    IsError = (error == xmpp:get_type(Pkt)),
+    AllowLocalUsers = mod_block_strangers_opt:allow_local_users(LServer),
+    Access = mod_block_strangers_opt:access(LServer),
+    NeedCheck = not (IsSelf orelse IsEmpty orelse IsError
+		     orelse acl:match_rule(LServer, Access, From) == allow
+		     orelse ((AllowLocalUsers orelse From#jid.luser == <<"">>)
+			     andalso ejabberd_router:is_my_host(From#jid.lserver))),
+    case {NeedCheck, Pkt} of
+	{false, _} ->
+	    false;
+	{_, #message{}} ->
+	    case xmpp:get_subtag(Pkt, #muc_user{}) of
+		#muc_user{invites = [#muc_invite{from = #jid{} = InvFrom}]}->
+		    case acl:match_rule(LServer, Access, InvFrom) == allow orelse
+			 (AllowLocalUsers andalso ejabberd_router:is_my_host(InvFrom#jid.lserver)) of
+			true ->
+			    false;
+			_ ->
+			    {true, InvFrom}
+		    end;
+		_ ->
+		    {true, From}
+	    end;
+	_ ->
+	    {true, From}
+    end.
 
 -spec check_subscription(jid(), jid()) -> boolean().
 check_subscription(From, To) ->
@@ -215,12 +257,13 @@ check_subscription(From, To) ->
 	    false;
 	false ->
 	    %% Check if the contact's server is in the roster
-	    gen_mod:get_module_opt(LocalServer, ?MODULE, allow_transports)
+	    mod_block_strangers_opt:allow_transports(LocalServer)
 		andalso mod_roster:is_subscribed(jid:make(RemoteServer), To);
 	true ->
 	    true
     end.
 
+-spec sets_bare_member(ljid(), ?SETS:set()) -> boolean().
 sets_bare_member({U, S, <<"">>} = LBJID, Set) ->
     case ?SETS:next(?SETS:iterator_from(LBJID, Set)) of
         {{U, S, _}, _} -> true;
@@ -230,19 +273,18 @@ sets_bare_member({U, S, <<"">>} = LBJID, Set) ->
 depends(_Host, _Opts) ->
     [].
 
-mod_opt_type(drop) ->
-    fun (B) when is_boolean(B) -> B end;
-mod_opt_type(log) ->
-    fun (B) when is_boolean(B) -> B end;
-mod_opt_type(allow_local_users) ->
-    fun (B) when is_boolean(B) -> B end;
-mod_opt_type(allow_transports) ->
-    fun (B) when is_boolean(B) -> B end;
-mod_opt_type(captcha) ->
-    fun (B) when is_boolean(B) -> B end;
 mod_opt_type(access) ->
-    fun acl:access_rules_validator/1.
-
+    econf:acl();
+mod_opt_type(drop) ->
+    econf:bool();
+mod_opt_type(log) ->
+    econf:bool();
+mod_opt_type(captcha) ->
+    econf:bool();
+mod_opt_type(allow_local_users) ->
+    econf:bool();
+mod_opt_type(allow_transports) ->
+    econf:bool().
 
 mod_options(_) ->
     [{access, none},
@@ -251,3 +293,54 @@ mod_options(_) ->
      {captcha, false},
      {allow_local_users, true},
      {allow_transports, true}].
+
+mod_doc() ->
+    #{desc =>
+          ?T("This module blocks and logs any messages coming from an "
+             "unknown entity. If a writing entity is not in your roster, "
+             "you can let this module drop and/or log the message. "
+             "By default you'll just not receive message from that entity. "
+             "Enable this module if you want to drop SPAM messages."),
+      opts =>
+          [{access,
+            #{value => ?T("AccessName"),
+              desc =>
+                  ?T("The option is supposed to be used when 'allow_local_users' "
+                     "and 'allow_transports' are not enough. It's an Access Rule where "
+                     "'deny' means the stanza will be rejected; there's an exception "
+                     "if option 'captcha' is configured. And "
+                     "'allow' means the sender is whitelisted and the stanza "
+                     "will pass through. The default value is 'none', which "
+                     "means nothing is whitelisted.")}},
+           {drop,
+            #{value => "true | false",
+              desc =>
+                  ?T("This option specifies if strangers messages should "
+                     "be dropped or not. The default value is 'true'.")}},
+           {log,
+            #{value => "true | false",
+              desc =>
+                  ?T("This option specifies if strangers' messages should "
+                     "be logged (as info message) in ejabberd.log. "
+                     "The default value is 'false'.")}},
+           {allow_local_users,
+            #{value => "true | false",
+              desc =>
+                  ?T("This option specifies if strangers from the same "
+                     "local host should be accepted or not. "
+                     "The default value is 'true'.")}},
+           {allow_transports,
+            #{value => "true | false",
+              desc =>
+                  ?T("If set to 'true' and some server's JID is in user's "
+                     "roster, then messages from any user of this server "
+                     "are accepted even if no subscription present. "
+                     "The default value is 'true'.")}},
+           {captcha,
+            #{value => "true | false",
+              desc =>
+                  ?T("Whether to generate CAPTCHA challenges in response to "
+                     "incoming presence subscription requests from strangers. "
+                     "See also section _`basic.md#captcha|CAPTCHA`_"
+                     " of the Configuration Guide. "
+                     "The default value is 'false'.")}}]}.

@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -26,14 +26,14 @@
 
 -behaviour(mod_announce).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 %% API
 -export([init/2, set_motd_users/2, set_motd/2, delete_motd/1,
 	 get_motd/1, is_motd_user/2, set_motd_user/2, import/3,
 	 export/1]).
+-export([sql_schemas/0]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_announce.hrl").
 -include("ejabberd_sql_pt.hrl").
 -include("logger.hrl").
@@ -41,8 +41,25 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"motd">>,
+                columns =
+                    [#sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"xml">>, type = text},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"server_host">>, <<"username">>],
+                              unique = true}]}]}].
 
 set_motd_users(LServer, USRs) ->
     F = fun() ->
@@ -155,7 +172,7 @@ parse_element(XML) ->
         El when is_record(El, xmlel) ->
             {ok, El};
         _ ->
-            ?ERROR_MSG("malformed XML element in SQL table "
-                       "'motd' for username='': ~s", [XML]),
+            ?ERROR_MSG("Malformed XML element in SQL table "
+                       "'motd' for username='': ~ts", [XML]),
             {error, db_failure}
     end.

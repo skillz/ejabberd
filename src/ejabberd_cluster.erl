@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
-%%% @author Evgeny Khramtsov <ekhramtsov@process-one.net>
+%%% Author  : Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%% Created :  5 Jul 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -21,19 +21,19 @@
 %%%
 %%%-------------------------------------------------------------------
 -module(ejabberd_cluster).
--behaviour(ejabberd_config).
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, call/4, multicall/3, multicall/4, eval_everywhere/3,
-	 eval_everywhere/4]).
+-export([start_link/0, call/4, call/5, multicall/3, multicall/4, multicall/5,
+	 eval_everywhere/3, eval_everywhere/4]).
 %% Backend dependent API
 -export([get_nodes/0, get_known_nodes/0, join/1, leave/1, subscribe/0,
 	 subscribe/1, node_id/0, get_node_by_id/1, send/2, wait_for_sync/1]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
--export([opt_type/1]).
+%% hooks
+-export([set_ticktime/0]).
 
 -include("logger.hrl").
 
@@ -60,7 +60,11 @@ start_link() ->
 
 -spec call(node(), module(), atom(), [any()]) -> any().
 call(Node, Module, Function, Args) ->
-    rpc:call(Node, Module, Function, Args, rpc_timeout()).
+    call(Node, Module, Function, Args, rpc_timeout()).
+
+-spec call(node(), module(), atom(), [any()], timeout()) -> any().
+call(Node, Module, Function, Args, Timeout) ->
+    rpc:call(Node, Module, Function, Args, Timeout).
 
 -spec multicall(module(), atom(), [any()]) -> {list(), [node()]}.
 multicall(Module, Function, Args) ->
@@ -68,7 +72,11 @@ multicall(Module, Function, Args) ->
 
 -spec multicall([node()], module(), atom(), list()) -> {list(), [node()]}.
 multicall(Nodes, Module, Function, Args) ->
-    rpc:multicall(Nodes, Module, Function, Args, rpc_timeout()).
+    multicall(Nodes, Module, Function, Args, rpc_timeout()).
+
+-spec multicall([node()], module(), atom(), list(), timeout()) -> {list(), [node()]}.
+multicall(Nodes, Module, Function, Args, Timeout) ->
+    rpc:multicall(Nodes, Module, Function, Args, Timeout).
 
 -spec eval_everywhere(module(), atom(), [any()]) -> ok.
 eval_everywhere(Module, Function, Args) ->
@@ -151,42 +159,59 @@ subscribe(Proc) ->
     Mod:subscribe(Proc).
 
 %%%===================================================================
+%%% Hooks
+%%%===================================================================
+set_ticktime() ->
+    Ticktime = ejabberd_option:net_ticktime() div 1000,
+    case net_kernel:set_net_ticktime(Ticktime) of
+	{ongoing_change_to, Time} when Time /= Ticktime ->
+	    ?ERROR_MSG("Failed to set new net_ticktime because "
+		       "the net kernel is busy changing it to the "
+		       "previously configured value. Please wait for "
+		       "~B seconds and retry", [Time]);
+	_ ->
+	    ok
+    end.
+
+%%%===================================================================
 %%% gen_server API
 %%%===================================================================
 init([]) ->
-    Ticktime = ejabberd_config:get_option(net_ticktime, 60),
-    Nodes = ejabberd_config:get_option(cluster_nodes, []),
-    net_kernel:set_net_ticktime(Ticktime),
+    set_ticktime(),
+    Nodes = ejabberd_option:cluster_nodes(),
     lists:foreach(fun(Node) ->
                           net_kernel:connect_node(Node)
                   end, Nodes),
     Mod = get_mod(),
     case Mod:init() of
 	ok ->
+	    ejabberd_hooks:add(config_reloaded, ?MODULE, set_ticktime, 50),
 	    Mod:subscribe(?MODULE),
 	    {ok, #state{}};
 	{error, Reason} ->
 	    {stop, Reason}
     end.
 
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 handle_info({node_up, Node}, State) ->
-    ?INFO_MSG("Node ~s has joined", [Node]),
+    ?INFO_MSG("Node ~ts has joined", [Node]),
     {noreply, State};
 handle_info({node_down, Node}, State) ->
-    ?INFO_MSG("Node ~s has left", [Node]),
+    ?INFO_MSG("Node ~ts has left", [Node]),
     {noreply, State};
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
-    ok.
+    ejabberd_hooks:delete(config_reloaded, ?MODULE, set_ticktime, 50).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -195,19 +220,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 get_mod() ->
-    Backend = ejabberd_config:get_option(cluster_backend, mnesia),
-    list_to_atom("ejabberd_cluster_" ++ atom_to_list(Backend)).
+    Backend = ejabberd_option:cluster_backend(),
+    list_to_existing_atom("ejabberd_cluster_" ++ atom_to_list(Backend)).
 
 rpc_timeout() ->
-    timer:seconds(ejabberd_config:get_option(rpc_timeout, 5)).
-
-opt_type(net_ticktime) ->
-    fun (P) when is_integer(P), P > 0 -> P end;
-opt_type(cluster_nodes) ->
-    fun (Ns) -> true = lists:all(fun is_atom/1, Ns), Ns end;
-opt_type(rpc_timeout) ->
-    fun (T) when is_integer(T), T > 0 -> T end;
-opt_type(cluster_backend) ->
-    fun (T) -> ejabberd_config:v_db(?MODULE, T) end;
-opt_type(_) ->
-    [rpc_timeout, cluster_backend, cluster_nodes, net_ticktime].
+    ejabberd_option:rpc_timeout().

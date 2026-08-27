@@ -5,7 +5,7 @@
 %%% Created : 12 Nov 2006 by Evgeniy Khramtsov <xram@jabber.ru>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -48,14 +48,14 @@ modify_passwd(PoolName, DN, Passwd) ->
 start_link(Name, Hosts, Backups, Port, Rootdn, Passwd,
 	   Opts) ->
     PoolName = make_id(Name),
-    pg2:create(PoolName),
+    pg:start_link(),
     lists:foreach(fun (Host) ->
 			  ID = list_to_binary(erlang:ref_to_list(make_ref())),
 			  case catch eldap:start_link(ID, [Host | Backups],
 						      Port, Rootdn, Passwd,
 						      Opts)
 			      of
-			    {ok, Pid} -> pg2:join(PoolName, Pid);
+			    {ok, Pid} -> pg:join(PoolName, Pid);
 			    Err ->
                                   ?ERROR_MSG("Err = ~p", [Err]),
                                   error
@@ -67,7 +67,7 @@ start_link(Name, Hosts, Backups, Port, Rootdn, Passwd,
 %% Internal functions
 %%====================================================================
 do_request(Name, {F, Args}) ->
-    case pg2:get_closest_pid(make_id(Name)) of
+    case pg_get_closest_pid(make_id(Name)) of
       Pid when is_pid(Pid) ->
 	  case catch apply(eldap, F, [Pid | Args]) of
 	    {'EXIT', {timeout, _}} ->
@@ -79,6 +79,16 @@ do_request(Name, {F, Args}) ->
 	    Reply -> Reply
 	  end;
       Err -> Err
+    end.
+
+pg_get_closest_pid(Group) ->
+    case pg:get_local_members(Group) of
+        [] ->
+            case pg:get_members(Group) of
+                [] -> {error, {no_process, Group}};
+                [Pid | _] -> Pid
+            end;
+        [Pid | _] -> Pid
     end.
 
 make_id(Name) ->

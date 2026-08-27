@@ -5,7 +5,7 @@
 %%% Created : 11 Jul 2009 by Brian Cully <bjc@kublai.com>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -27,7 +27,7 @@
 
 -author('bjc@kublai.com').
 
--protocol({xep, 199, '2.0'}).
+-protocol({xep, 199, '2.0.1', '2.1.0', "complete", ""}).
 
 -behaviour(gen_mod).
 
@@ -35,7 +35,9 @@
 
 -include("logger.hrl").
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+
+-include("translate.hrl").
 
 %% API
 -export([start_ping/2, stop_ping/2]).
@@ -47,16 +49,17 @@
 -export([init/1, terminate/2, handle_call/3,
 	 handle_cast/2, handle_info/2, code_change/3]).
 
--export([iq_ping/1, user_online/3, user_offline/3,
-	 user_send/1, mod_opt_type/1, mod_options/1, depends/2]).
+-export([iq_ping/1, user_online/3, user_offline/3, mod_doc/0, user_send/1,
+	 c2s_handle_cast/2, mod_opt_type/1, mod_options/1, depends/2]).
 
 -record(state,
-	{host = <<"">>       :: binary(),
+	{host                :: binary(),
          send_pings          :: boolean(),
-	 ping_interval       :: non_neg_integer(),
-	 ping_ack_timeout    :: undefined | non_neg_integer(),
-	 timeout_action      ::none | kill,
-         timers = maps:new() :: map()}).
+	 ping_interval       :: pos_integer(),
+	 timeout_action      :: none | kill,
+         timers              :: timers()}).
+
+-type timers() :: #{ljid() => reference()}.
 
 %%====================================================================
 %% API
@@ -87,8 +90,9 @@ reload(Host, NewOpts, OldOpts) ->
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
-init([Host, Opts]) ->
+init([Host|_]) ->
     process_flag(trap_exit, true),
+    Opts = gen_mod:get_module_opts(Host, ?MODULE),
     State = init_state(Host, Opts),
     register_iq_handlers(Host),
     case State#state.send_pings of
@@ -103,8 +107,9 @@ terminate(_Reason, #state{host = Host}) ->
 
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State};
-handle_call(_Req, _From, State) ->
-    {reply, {error, badarg}, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
 handle_cast({reload, Host, NewOpts, _OldOpts},
 	    #state{timers = Timers} = OldState) ->
@@ -123,41 +128,53 @@ handle_cast({stop_ping, JID}, State) ->
     Timers = del_timer(JID, State#state.timers),
     {noreply, State#state{timers = Timers}};
 handle_cast(Msg, State) ->
-    ?WARNING_MSG("unexpected cast: ~p", [Msg]),
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
-handle_info({iq_reply, #iq{type = error}, JID}, State) ->
-    handle_info({iq_reply, timeout, JID}, State);
+handle_info({iq_reply, #iq{type = error} = IQ, JID}, State) ->
+    Timers = case xmpp:get_error(IQ) of
+		 #stanza_error{type=cancel, reason='service-unavailable'} ->
+		     del_timer(JID, State#state.timers);
+		 _ ->
+		     State#state.timers
+	     end,
+    {noreply, State#state{timers = Timers}};
 handle_info({iq_reply, #iq{}, _JID}, State) ->
     {noreply, State};
 handle_info({iq_reply, timeout, JID}, State) ->
-    Timers = del_timer(JID, State#state.timers),
     ejabberd_hooks:run(user_ping_timeout, State#state.host,
 		       [JID]),
-    case State#state.timeout_action of
-      kill ->
-	  #jid{user = User, server = Server,
-	       resource = Resource} =
-	      JID,
-	  case ejabberd_sm:get_session_pid(User, Server, Resource)
-	      of
-	    Pid when is_pid(Pid) -> ejabberd_c2s:close(Pid, ping_timeout);
-	    _ -> ok
-	  end;
-      _ -> ok
-    end,
+    Timers = case State#state.timeout_action of
+		 kill ->
+		     #jid{user = User, server = Server,
+			  resource = Resource} =
+			 JID,
+		     case ejabberd_sm:get_session_pid(User, Server, Resource) of
+			 Pid when is_pid(Pid) ->
+			     ejabberd_c2s:close(Pid, ping_timeout);
+			 _ ->
+			     ok
+		     end,
+		     del_timer(JID, State#state.timers);
+		 _ ->
+		     State#state.timers
+	     end,
     {noreply, State#state{timers = Timers}};
 handle_info({timeout, _TRef, {ping, JID}}, State) ->
-    Host = State#state.host,
-    From = jid:remove_resource(JID),
-    IQ = #iq{from = From, to = JID, type = get, sub_els = [#ping{}]},
-    ejabberd_router:route_iq(IQ, JID,
-			     gen_mod:get_module_proc(Host, ?MODULE),
-			     State#state.ping_ack_timeout),
-    Timers = add_timer(JID, State#state.ping_interval,
-		       State#state.timers),
+    Timers = case ejabberd_sm:get_session_pid(JID#jid.luser,
+					      JID#jid.lserver,
+					      JID#jid.lresource) of
+		 none ->
+		     del_timer(JID, State#state.timers);
+		 Pid ->
+		     ejabberd_c2s:cast(Pid, send_ping),
+		     add_timer(JID, State#state.ping_interval,
+			       State#state.timers)
+	     end,
     {noreply, State#state{timers = Timers}};
-handle_info(_Info, State) -> {noreply, State}.
+handle_info(Info, State) ->
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
+    {noreply, State}.
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
@@ -168,7 +185,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 iq_ping(#iq{type = get, sub_els = [#ping{}]} = IQ) ->
     xmpp:make_iq_result(IQ);
 iq_ping(#iq{lang = Lang} = IQ) ->
-    Txt = <<"Ping query is incorrect">>,
+    Txt = ?T("Ping query is incorrect"),
     xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang)).
 
 -spec user_online(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> ok.
@@ -177,27 +194,44 @@ user_online(_SID, JID, _Info) ->
 
 -spec user_offline(ejabberd_sm:sid(), jid(), ejabberd_sm:info()) -> ok.
 user_offline(_SID, JID, _Info) ->
-    stop_ping(JID#jid.lserver, JID).
+    case ejabberd_sm:get_session_pid(JID#jid.luser,
+                                     JID#jid.lserver,
+                                     JID#jid.lresource) of
+        PID when PID =:= none; node(PID) /= node() ->
+            stop_ping(JID#jid.lserver, JID);
+        _ ->
+            ok
+    end.
 
 -spec user_send({stanza(), ejabberd_c2s:state()}) -> {stanza(), ejabberd_c2s:state()}.
 user_send({Packet, #{jid := JID} = C2SState}) ->
     start_ping(JID#jid.lserver, JID),
     {Packet, C2SState}.
 
+-spec c2s_handle_cast(ejabberd_c2s:state(), send_ping | term())
+      -> ejabberd_c2s:state() | {stop, ejabberd_c2s:state()}.
+c2s_handle_cast(#{lserver := Host, jid := JID} = C2SState, send_ping) ->
+    From = jid:make(Host),
+    IQ = #iq{from = From, to = JID, type = get, sub_els = [#ping{}]},
+    Proc = gen_mod:get_module_proc(Host, ?MODULE),
+    PingAckTimeout = mod_ping_opt:ping_ack_timeout(Host),
+    ejabberd_router:route_iq(IQ, JID, Proc, PingAckTimeout),
+    {stop, C2SState};
+c2s_handle_cast(C2SState, _Msg) ->
+    C2SState.
+
 %%====================================================================
 %% Internal functions
 %%====================================================================
 init_state(Host, Opts) ->
-    SendPings = gen_mod:get_opt(send_pings, Opts),
-    PingInterval = gen_mod:get_opt(ping_interval, Opts),
-    PingAckTimeout = gen_mod:get_opt(ping_ack_timeout, Opts),
-    TimeoutAction = gen_mod:get_opt(timeout_action, Opts),
+    SendPings = mod_ping_opt:send_pings(Opts),
+    PingInterval = mod_ping_opt:ping_interval(Opts),
+    TimeoutAction = mod_ping_opt:timeout_action(Opts),
     #state{host = Host,
 	   send_pings = SendPings,
 	   ping_interval = PingInterval,
 	   timeout_action = TimeoutAction,
-	   ping_ack_timeout = PingAckTimeout,
-	   timers = maps:new()}.
+	   timers = #{}}.
 
 register_hooks(Host) ->
     ejabberd_hooks:add(sm_register_connection_hook, Host,
@@ -205,7 +239,9 @@ register_hooks(Host) ->
     ejabberd_hooks:add(sm_remove_connection_hook, Host,
 		       ?MODULE, user_offline, 100),
     ejabberd_hooks:add(user_send_packet, Host, ?MODULE,
-		       user_send, 100).
+		       user_send, 100),
+    ejabberd_hooks:add(c2s_handle_cast, Host, ?MODULE,
+		       c2s_handle_cast, 99).
 
 unregister_hooks(Host) ->
     ejabberd_hooks:delete(sm_remove_connection_hook, Host,
@@ -213,7 +249,9 @@ unregister_hooks(Host) ->
     ejabberd_hooks:delete(sm_register_connection_hook, Host,
 			  ?MODULE, user_online, 100),
     ejabberd_hooks:delete(user_send_packet, Host, ?MODULE,
-			  user_send, 100).
+			  user_send, 100),
+    ejabberd_hooks:delete(c2s_handle_cast, Host, ?MODULE,
+			  c2s_handle_cast, 99).
 
 register_iq_handlers(Host) ->
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PING,
@@ -225,47 +263,96 @@ unregister_iq_handlers(Host) ->
     gen_iq_handler:remove_iq_handler(ejabberd_local, Host, ?NS_PING),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_PING).
 
--spec add_timer(jid(), non_neg_integer(), map()) -> map().
+-spec add_timer(jid(), pos_integer(), timers()) -> timers().
 add_timer(JID, Interval, Timers) ->
     LJID = jid:tolower(JID),
     NewTimers = case maps:find(LJID, Timers) of
-      {ok, OldTRef} ->
-		      misc:cancel_timer(OldTRef),
-          maps:remove(LJID, Timers);
-      _ -> Timers
+		    {ok, OldTRef} ->
+			misc:cancel_timer(OldTRef),
+			maps:remove(LJID, Timers);
+		    _ -> Timers
 		end,
-    TRef = erlang:start_timer(Interval * 1000, self(),
-			      {ping, JID}),
+    TRef = erlang:start_timer(Interval, self(), {ping, JID}),
     maps:put(LJID, TRef, NewTimers).
 
--spec del_timer(jid(), map()) -> map().
+-spec del_timer(jid(), timers()) -> timers().
 del_timer(JID, Timers) ->
     LJID = jid:tolower(JID),
     case maps:find(LJID, Timers) of
-      {ok, TRef} ->
-	  misc:cancel_timer(TRef),
-    maps:remove(LJID, Timers);
-      _ -> Timers
+	{ok, TRef} ->
+	    misc:cancel_timer(TRef),
+	    maps:remove(LJID, Timers);
+	_ -> Timers
     end.
 
 depends(_Host, _Opts) ->
     [].
 
 mod_opt_type(ping_interval) ->
-    fun (I) when is_integer(I), I > 0 -> I end;
+    econf:timeout(second);
 mod_opt_type(ping_ack_timeout) ->
-    fun(undefined) -> undefined;
-       (I) when is_integer(I), I>0 -> timer:seconds(I)
-    end;
+    econf:timeout(second);
 mod_opt_type(send_pings) ->
-    fun (B) when is_boolean(B) -> B end;
+    econf:bool();
 mod_opt_type(timeout_action) ->
-    fun (none) -> none;
-	(kill) -> kill
-    end.
+    econf:enum([none, kill]).
 
 mod_options(_Host) ->
-    [{ping_interval, 60},
+    [{ping_interval, timer:minutes(1)},
      {ping_ack_timeout, undefined},
      {send_pings, false},
      {timeout_action, none}].
+
+mod_doc() ->
+    #{desc =>
+          ?T("This module implements support for "
+             "https://xmpp.org/extensions/xep-0199.html"
+             "[XEP-0199: XMPP Ping] and periodic keepalives. "
+             "When this module is enabled ejabberd responds "
+             "correctly to ping requests, as defined by the protocol."),
+      opts =>
+          [{ping_interval,
+            #{value => "timeout()",
+              desc =>
+                  ?T("How often to send pings to connected clients, "
+                     "if option 'send_pings' is set to 'true'. If a client "
+                     "connection does not send or receive any stanza "
+                     "within this interval, a ping request is sent to "
+                     "the client. The default value is '1' minute.")}},
+           {ping_ack_timeout,
+            #{value => "timeout()",
+              desc =>
+                  ?T("How long to wait before deeming that a client "
+                     "has not answered a given server ping request. NOTE: when "
+                     "_`mod_stream_mgmt`_ is loaded and stream management is "
+                     "enabled by a client, this value is ignored, and the "
+                     "`ack_timeout` applies instead. "
+                     "The default value is 'undefined'.")}},
+           {send_pings,
+            #{value => "true | false",
+              desc =>
+                  ?T("If this option is set to 'true', the server "
+                     "sends pings to connected clients that are not "
+                     "active in a given interval defined in 'ping_interval' "
+                     "option. This is useful to keep client connections "
+                     "alive or checking availability. "
+                     "The default value is 'false'.")}},
+           {timeout_action,
+            #{value => "none | kill",
+              desc =>
+                  ?T("What to do when a client does not answer to a "
+                     "server ping request in less than period defined "
+                     "in 'ping_ack_timeout' option: "
+                     "'kill' means destroying the underlying connection, "
+                     "'none' means to do nothing. NOTE: when _`mod_stream_mgmt`_ "
+                     "is loaded and stream management is enabled by "
+                     "a client, killing the client connection doesn't mean "
+                     "killing the client session - the session will be kept "
+                     "alive in order to give the client a chance to resume it. "
+                     "The default value is 'none'.")}}],
+      example =>
+          ["modules:",
+           "  mod_ping:",
+           "    send_pings: true",
+           "    ping_interval: 4 min",
+           "    timeout_action: kill"]}.

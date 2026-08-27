@@ -3,7 +3,7 @@
 %%% Created :  4 Dec 2018 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2018   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2026   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -22,11 +22,11 @@
 %%%----------------------------------------------------------------------
 -module(mod_mix_pam_sql).
 -behaviour(mod_mix_pam).
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 %% API
 -export([init/2, add_channel/3, get_channel/2,
 	 get_channels/1, del_channel/2, del_channels/1]).
+-export([sql_schemas/0]).
 
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -34,9 +34,28 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-init(_Host, _Opts) ->
-    %% TODO
+init(Host, _Opts) ->
+    ejabberd_sql_schema:update_schema(Host, ?MODULE, sql_schemas()),
     ok.
+
+sql_schemas() ->
+    [#sql_schema{
+        version = 1,
+        tables =
+            [#sql_table{
+                name = <<"mix_pam">>,
+                columns =
+                    [#sql_column{name = <<"username">>, type = text},
+                     #sql_column{name = <<"server_host">>, type = text},
+                     #sql_column{name = <<"channel">>, type = text},
+                     #sql_column{name = <<"service">>, type = text},
+                     #sql_column{name = <<"id">>, type = text},
+                     #sql_column{name = <<"created_at">>, type = timestamp,
+                                 default = true}],
+                indices = [#sql_index{
+                              columns = [<<"username">>, <<"server_host">>,
+                                         <<"channel">>, <<"service">>],
+                              unique = true}]}]}].
 
 add_channel(User, Channel, ID) ->
     {LUser, LServer, _} = jid:tolower(User),
@@ -109,6 +128,7 @@ del_channels(User) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec report_corrupted(iolist()) -> ok.
+-spec report_corrupted(#sql_query{}) -> ok.
 report_corrupted(SQL) ->
-    ?ERROR_MSG("Corrupted values returned by SQL request: ~s", [SQL]).
+    ?ERROR_MSG("Corrupted values returned by SQL request: ~ts",
+	       [SQL#sql_query.hash]).
