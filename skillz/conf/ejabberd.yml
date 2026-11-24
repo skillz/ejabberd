@@ -25,6 +25,7 @@ install_contrib_modules:
   - mod_kick_sessions
   - mod_vcard_multi
   - mod_global_affiliation
+  - mod_privacy_mute
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -147,6 +148,7 @@ modules:
     access_max_user_messages: max_user_offline_messages
   mod_ping: {}
   mod_privacy: {}
+  mod_privacy_mute: {}
   mod_roster: {}
   mod_vcard:
     search: true

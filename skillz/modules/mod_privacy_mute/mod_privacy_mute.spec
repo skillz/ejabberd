@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "privacy"
+summary: "Fork-compatible XEP-0016 mute/block semantics for shipped native clients"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

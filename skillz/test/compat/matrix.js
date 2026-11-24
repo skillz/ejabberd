@@ -182,6 +182,20 @@ process.on('uncaughtException', (e) => { thrown.push(String(e && e.message)); })
   w1.send('game message from a blocked user');
   await sleep(1200);
   cell('block: blocked user\'s room messages hidden (fork matches item to occupant nick)', n2.msgs(GAME).length === c2, `delivered=${n2.msgs(GAME).length > c2}`);
+  // Mute vs offline storage: a muted room's messages must not be stored for an offline subscriber (no push).
+  const opt = await api('change_room_option', {room: CLUB, service: MUC, option: 'allow_subscription', value: 'true'});
+  const n6 = nativeUser('1004');
+  await n6.connected;
+  const sub6 = await call((cb) => n6.c.client.subscribeToRoom(`${CLUB}@${MUC}`, `1004@${DOMAIN}`, cb));
+  const mute6 = await call((cb) => n6.c.setMuteStatus(CLUB, true, cb));
+  n6.c.disconnectFromServer();
+  await sleep(500);
+  w1Club.send('club message while the muted subscriber is offline');
+  await sleep(600);
+  const n6b = nativeUser('1004');
+  await n6b.connected;
+  const clubHeaders = (n6b.c.getChatStore().getUnreadMessageContentCache?.() || []).filter((h) => String(h.name).startsWith(CLUB));
+  cell('mute: muted room not stored offline for a subscriber (no push)', clubHeaders.length === 0, `room option=${opt.status} subscribe=${sub6.err ? 'ERR' : 'ok'} mute=${mute6.err ? 'ERR' : 'ok'} offline headers for the room=${clubHeaders.length}`);
   const pl = await call((cb) => n2.c.client.getPrivacyList(cb));
   cell('privacy list read back (native parses muted/blocked)', null, JSON.stringify(pl.data?.privacy?.privacyLists?.[0]?.privacyItems || pl.err).slice(0, 200));
 
