@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "muc"
+summary: "Destroyed MUC rooms keep their archive and can be created again (fork behaviour)"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

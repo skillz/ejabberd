@@ -27,6 +27,7 @@ install_contrib_modules:
   - mod_global_affiliation
   - mod_privacy_mute
   - mod_mucsub_order
+  - mod_muc_keep_archive
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -113,7 +114,9 @@ modules:
   mod_global_affiliation: {}
   mod_http_api: {}
   mod_admin_api_compat: {}
-  mod_mam: {}
+  mod_mam:
+    clear_archive_on_room_destroy: false
+  mod_muc_keep_archive: {}
   mod_muc:
     access: all
     access_admin:

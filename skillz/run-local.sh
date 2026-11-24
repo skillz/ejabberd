@@ -3,7 +3,7 @@
 # usage: run-local.sh up [internal|http] | down | ctl <ejabberdctl args>
 set -eu
 DIR=$(cd "$(dirname "$0")" && pwd)
-IMG=ghcr.io/processone/ejabberd:26.09
+IMG=${IMG:-ghcr.io/processone/ejabberd:26.09}
 NET=ejproof
 
 case "${1:-}" in
