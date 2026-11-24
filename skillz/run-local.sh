@@ -15,6 +15,8 @@ stub() {
     --network-alias lb-api.prod.skillz.com -v "$DIR/test/service-stub.js:/stub.js:ro" node:20-alpine node /stub.js >/dev/null
 }
 
+stub_ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ejproof-stub; }
+
 case "${1:-}" in
 up)
   AUTH=${2:-internal}
@@ -30,7 +32,7 @@ up)
     docker run -d --name ejproof-authstub --network $NET -v "$DIR/test/auth-stub.js:/stub.js:ro" node:20-alpine node /stub.js >/dev/null
   fi
   docker rm -f ejproof-ejabberd >/dev/null 2>&1 || true
-  sed "s/@AUTH_METHOD@/$AUTH/" "$DIR/conf/ejabberd.yml" > "$DIR/conf/.ejabberd.rendered.yml"
+  sed -e "s/@AUTH_METHOD@/$AUTH/" -e "s/@STATSD_IP@/$(stub_ip)/" "$DIR/conf/ejabberd.yml" > "$DIR/conf/.ejabberd.rendered.yml"
   docker run -d --name ejproof-ejabberd --network $NET --add-host host.docker.internal:host-gateway \
     -p 127.0.0.1:15222:5222 -p 127.0.0.1:15280:5280 -p 127.0.0.1:15443:5290 \
     -v "$DIR/conf/.ejabberd.rendered.yml:/opt/ejabberd/conf/ejabberd.yml:ro" \
@@ -50,7 +52,7 @@ up-fork)
   # on a node name that the fork's skillz_util reads as production (chat.skillz.com, chat-admin.skillz.com).
   docker rm -f ejproof-ejabberd >/dev/null 2>&1 || true
   stub
-  cp "$DIR/test/compat/fork-baseline.yml" "$DIR/conf/.fork.rendered.yml"
+  sed "s/@STATSD_IP@/$(stub_ip)/" "$DIR/test/compat/fork-baseline.yml" > "$DIR/conf/.fork.rendered.yml"
   if [ -n "${FORK_PLUGINS:-}" ]; then
     cat "$DIR/test/compat/fork-plugins.yml" >> "$DIR/conf/.fork.rendered.yml"
     FORK_IMAGE=${FORK_IMAGE:-ejproof-fork-plugins:f505dbe46}

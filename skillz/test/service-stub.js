@@ -1,6 +1,7 @@
 // Stand-in for the HTTP services the plugin modules call, for local tests only: push-notification-service
 // (/v1/triggered_events), user-details-service (/chat/quarantines, /profile/show) and the support-ticket
-// endpoints. Listens on 80, 8080 and 9100; GET /calls returns every call as JSON lines, DELETE /calls clears.
+// endpoints, and the statsd-exporter sidecar (UDP 11111). Listens on 80, 8080 and 9100; GET /calls returns
+// every call and statsd line as JSON lines, DELETE /calls clears.
 // /profile/show: user 1002 is staff, user 1003 is a chat moderator.
 const http = require('http');
 let calls = [];
@@ -22,3 +23,4 @@ const handler = (port) => (req, res) => {
   });
 };
 for (const port of [80, 8080, 9100]) http.createServer(handler(port)).listen(port);
+require('dgram').createSocket('udp4').on('message', (m) => calls.push({port: 11111, method: 'UDP', path: '', headers: {}, body: String(m)})).bind(11111);

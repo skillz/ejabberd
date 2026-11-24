@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "statistics"
+summary: "mod_metrics events in statsd format plus port/process/session gauges, for the statsd-exporter sidecar"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

@@ -34,6 +34,7 @@ install_contrib_modules:
   - mod_block_nonfriends
   - mod_push_skillz
   - mod_pottymouth
+  - mod_metrics_statsd
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -124,6 +125,8 @@ modules:
   mod_global_affiliation: {}
   mod_http_api: {}
   mod_admin_api_compat: {}
+  mod_metrics_statsd:
+    ip: "@STATSD_IP@"
   mod_mam:
     clear_archive_on_room_destroy: false
   mod_muc_keep_archive: {}

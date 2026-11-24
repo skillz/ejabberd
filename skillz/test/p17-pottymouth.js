@@ -15,7 +15,7 @@ const post = (cmd, body) => fetch(`${API}/${cmd}`, {method: 'POST', body: JSON.s
 const sh = (...a) => execFileSync('docker', a, {stdio: ['ignore', 'pipe', 'ignore']}).toString();
 const sql = (q) => sh('exec', 'ejproof-mysql', 'mysql', '-uroot', '-proot', '-N', DB, '-e', q);
 const ctl = (...a) => { try { sh('exec', 'ejproof-ejabberd', process.env.EJCTL || 'ejabberdctl', ...a); } catch { /* absent item */ } };
-const calls = () => sh('exec', 'ejproof-stub', 'wget', '-qO-', 'http://127.0.0.1:8080/calls').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+const calls = () => sh('exec', 'ejproof-stub', 'wget', '-qO-', 'http://127.0.0.1:8080/calls').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((c) => c.method !== 'UDP');
 // The fork writes support-ticket JSON by hand with raw newlines; parse both the same way, sorted keys.
 const norm = (c) => {
   let b = c.body;

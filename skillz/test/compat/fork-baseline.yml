@@ -88,6 +88,8 @@ modules:
   mod_admin_extra: {}
   mod_http_bind: {}
   mod_mam: {}
+  mod_metrics:
+    ip: "@STATSD_IP@"
   mod_muc:
     access:
       - allow
