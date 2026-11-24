@@ -1380,7 +1380,7 @@ get_participant_data(From, StateData) ->
 		#subscriber{nick = FromNick} ->
 		    {FromNick, none}
 	    catch _:{badkey, _} ->
-		    {From#jid.luser, moderator}
+		    {<<"">>, moderator}
 	    end
     end.
 
