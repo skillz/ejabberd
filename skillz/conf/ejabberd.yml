@@ -29,6 +29,8 @@ install_contrib_modules:
   - mod_mucsub_order
   - mod_muc_keep_archive
   - mod_mucsub_offline
+  - mod_block_incoming
+  - mod_block_nonfriends
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -111,6 +113,9 @@ max_fsm_queue: 1000
 modules:
   mod_admin_extra: {}
   mod_blocking: {}
+  mod_block_incoming:
+    blocking_users: ["1003"]
+  mod_block_nonfriends: {}
   mod_disco: {}
   mod_global_affiliation: {}
   mod_http_api: {}

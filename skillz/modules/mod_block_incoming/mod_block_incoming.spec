@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "roster"
+summary: "Staff/VIP accounts that refuse friend requests from non-friends (fork module, unchanged logic)"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

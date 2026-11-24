@@ -77,7 +77,7 @@ shaper_rules:
 modules:
   mod_blocking: {}
   mod_block_incoming:
-    blocking_users: ["11338313"]
+    blocking_users: ["11338313", "1003"]
   mod_block_nonfriends: {}
   mod_disco: {}
   mod_privacy: {}

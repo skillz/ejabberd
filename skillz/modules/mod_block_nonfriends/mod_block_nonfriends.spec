@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "muc"
+summary: "Drops two-user DM room messages between users who are not friends (fork module, prod version)"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"
