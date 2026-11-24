@@ -12,7 +12,7 @@
 -behaviour(gen_mod).
 
 -export([start/2, stop/1, depends/2, mod_options/1, mod_opt_type/1, mod_doc/0,
-         user_send_packet/1, set_user_affiliation/3, get_user_affiliation/2]).
+         user_send_packet/1, set_user_affiliation/3]).
 
 -include_lib("xmpp/include/xmpp.hrl").
 -include("ejabberd_commands.hrl").
@@ -47,14 +47,7 @@ commands() ->
                         args = [{host, binary}, {user, binary}, {affiliation, binary}],
                         args_example = [<<"chat.skillz.com">>, <<"1234">>, <<"muted">>],
                         args_desc = ["Server host", "User name", "muted, outcast or none"],
-                        result = {res, rescode}},
-     #ejabberd_commands{name = get_user_affiliation, tags = [muc_room],
-                        desc = "Get a user's game-room affiliation",
-                        module = ?MODULE, function = get_user_affiliation,
-                        args = [{host, binary}, {user, binary}],
-                        args_example = [<<"chat.skillz.com">>, <<"1234">>],
-                        args_desc = ["Server host", "User name"],
-                        result = {affiliation, string}}].
+                        result = {res, rescode}}].
 
 %%% Enforcement
 
@@ -85,31 +78,29 @@ is_game_room(_To, _LServer) ->
 %%% Storage (the fork's MySQL table, read through a cluster-wide cache)
 
 affiliation(LUser, LServer) ->
-    case ets_cache:lookup(?CACHE, {LUser, LServer}, fun() -> {ok, select(LUser, LServer)} end) of
+    case ets_cache:lookup(?CACHE, {LUser, LServer}, fun() -> select(LUser, LServer) end) of
         {ok, Aff} -> Aff;
         error -> none
     end.
 
-get_user_affiliation(Host, User) ->
-    atom_to_list(select(jid:nodeprep(User), jid:nameprep(Host))).
-
 set_user_affiliation(Host, User, Aff) when Aff == <<"muted">>; Aff == <<"outcast">>; Aff == <<"none">> ->
     LUser = jid:nodeprep(User),
     LServer = jid:nameprep(Host),
-    ejabberd_sql:sql_query(
-      LServer,
-      ?SQL("update user_affiliation set version = version + 1, enabled = 0, last_updated = now() "
-           "where nick = %(LUser)s and enabled = 1")),
-    case Aff of
-        <<"none">> -> ok;
-        _ ->
-            ejabberd_sql:sql_query(
-              LServer,
-              ?SQL("insert into user_affiliation (version, enabled, nick, affiliation, date_created, last_updated) "
-                   "values (0, 1, %(LUser)s, %(Aff)s, now(), now())"))
-    end,
+    F = fun() ->
+                ejabberd_sql:sql_query_t(
+                  ?SQL("update user_affiliation set version = version + 1, enabled = 0, last_updated = now() "
+                       "where nick = %(LUser)s and enabled = 1")),
+                Aff == <<"none">> orelse
+                    ejabberd_sql:sql_query_t(
+                      ?SQL("insert into user_affiliation (version, enabled, nick, affiliation, date_created, last_updated) "
+                           "values (0, 1, %(LUser)s, %(Aff)s, now(), now())"))
+        end,
+    Result = ejabberd_sql:sql_transaction(LServer, F),
     ets_cache:delete(?CACHE, {LUser, LServer}, ejabberd_cluster:get_nodes()),
-    ok;
+    case Result of
+        {atomic, _} -> ok;
+        {aborted, Reason} -> {error, io_lib:format("~p", [Reason])}
+    end;
 set_user_affiliation(_Host, _User, _Aff) ->
     {error, "affiliation must be muted, outcast or none"}.
 
@@ -117,9 +108,10 @@ select(LUser, LServer) ->
     case ejabberd_sql:sql_query(
            LServer,
            ?SQL("select @(affiliation)s from user_affiliation where nick = %(LUser)s and enabled = 1")) of
-        {selected, [{<<"muted">>} | _]} -> muted;
-        {selected, [{<<"outcast">>} | _]} -> outcast;
-        _ -> none
+        {selected, [{<<"muted">>} | _]} -> {ok, muted};
+        {selected, [{<<"outcast">>} | _]} -> {ok, outcast};
+        {selected, _} -> {ok, none};
+        _ -> error
     end.
 
 %% shortcut: MySQL DDL copied from the fork's 2019-07-26 migration; prod already has the table.

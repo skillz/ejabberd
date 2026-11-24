@@ -11,6 +11,10 @@
 
 -include_lib("xmpp/include/xmpp.hrl").
 
+%% Bounds the lookups one IQ can cause; must stay above the client property
+%% player chat contacts batch size, which sets the native batch size.
+-define(MAX_USERS, 1000).
+
 %% Takes over mod_vcard's user-JID handler, so this module must start after mod_vcard.
 start(Host, _Opts) ->
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_VCARD, ?MODULE, process_sm_iq).
@@ -27,7 +31,7 @@ mod_doc() -> #{desc => ["Multi-vCard fetch for Skillz native clients."]}.
 process_sm_iq(#iq{type = get, sub_els = [#vcard_temp{jabberid = Ids}], to = #jid{lserver = LServer}} = IQ)
   when is_binary(Ids), Ids /= <<>> ->
     Cards = [tag(VCard, User)
-             || User <- binary:split(Ids, <<"+">>, [global]),
+             || User <- lists:sublist(binary:split(Ids, <<"+">>, [global]), ?MAX_USERS),
                 LUser <- [jid:nodeprep(User)], is_binary(LUser),
                 [VCard] <- [mod_vcard:get_vcard(LUser, LServer)]],
     xmpp:make_iq_result(IQ, #xmlel{name = <<"vCards">>, attrs = [{<<"xmlns">>, <<"jabber:client">>}],
