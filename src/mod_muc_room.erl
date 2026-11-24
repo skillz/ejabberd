@@ -342,19 +342,19 @@ init([Host, ServerHost, Access, Room, HistorySize, RoomShaper, Opts, QueueType])
     ejabberd_hooks:run(start_room, ServerHost, [ServerHost, Room, Host]),
     State1 = cleanup_affiliations(State),
     State2 =
-    case {lists:keyfind(hibernation_time, 1, Opts),
-	  (State1#state.config)#config.mam,
+    case {(State1#state.config)#config.mam,
 	  (State1#state.history)#lqueue.max} of
-	{{_, V}, true, L} when is_integer(V), L > 0 ->
+	{true, L} when L > 0 ->
 	    {Msgs, _, _} = mod_mam:select(ServerHost, Jid, Jid, [],
 					 #rsm_set{max = L, before = <<"9999999999999999">>},
 					 groupchat, only_messages),
 	    Hist2 =
 	    lists:foldl(
 		fun({_, TS, #forwarded{sub_els = [#message{meta = #{archive_nick := Nick}} = Msg]}}, Hist) ->
-		    Pkt = xmpp:set_from_to(Msg, jid:replace_resource(Jid, Nick), Jid),
+		    Stamp = misc:usec_to_now(TS),
+		    Pkt = misc:add_delay_info(xmpp:set_from_to(Msg, jid:replace_resource(Jid, Nick), Jid), Jid, Stamp),
 		    Size = element_size(Pkt),
-		    lqueue_in({Nick, Pkt, false, misc:usec_to_now(TS), Size}, Hist)
+		    lqueue_in({Nick, Pkt, false, Stamp, Size}, Hist)
 		end, State1#state.history, Msgs),
 	    State1#state{history = Hist2};
 	_ ->
