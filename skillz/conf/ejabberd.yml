@@ -35,6 +35,7 @@ install_contrib_modules:
   - mod_push_skillz
   - mod_pottymouth
   - mod_metrics_statsd
+  - mod_muc_subject_unarchived
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -130,6 +131,7 @@ modules:
   mod_mam:
     clear_archive_on_room_destroy: false
   mod_muc_keep_archive: {}
+  mod_muc_subject_unarchived: {}
   mod_muc:
     access: all
     access_admin:
@@ -138,6 +140,7 @@ modules:
     access_persistent: muc_create
     access_mam: all
     hibernation_timeout: 300
+    preload_rooms: false
     history_size: 300
     max_users: 10000
     max_user_conferences: 200

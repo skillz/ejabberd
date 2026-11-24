@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "muc"
+summary: "Room subject changes are not archived in MAM (fork behaviour)"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

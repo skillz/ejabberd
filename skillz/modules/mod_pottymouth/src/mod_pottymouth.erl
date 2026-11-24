@@ -147,11 +147,8 @@ on_user_send_packet({#message{type = Type, body = [_ | _] = Body, from = From, t
     case xmpp:get_text(Body) of
         <<>> -> ok;
         Text ->
-            try filter_text(lang(Pkt), Text, {Game, From#jid.user, Users, From#jid.lserver}) of
-                {{Action, Strikes, Word}, _} -> act(Action, From#jid.user, From#jid.lserver, Game, Users, Word, Text, Strikes)
-            catch C:R:St ->
-                ?ERROR_MSG("mod_pottymouth automod failed: ~p", [{C, R, St}])
-            end
+            {{Action, Strikes, Word}, _} = filter_text(lang(Pkt), Text, {Game, From#jid.user, Users, From#jid.lserver}),
+            act(Action, From#jid.user, From#jid.lserver, Game, Users, Word, Text, Strikes)
     end,
     Acc;
 on_user_send_packet(Acc) ->
