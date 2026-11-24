@@ -1,5 +1,5 @@
 author: "Skillz"
 category: "admin"
-summary: "Fork-compatible kick_session: kick every resource of a user with a reason"
+summary: "Fork-compatible admin HTTP API: pinned API version and 3-argument kick_session"
 home: "https://github.com/skillz/ejabberd"
 url: "https://github.com/skillz/ejabberd"

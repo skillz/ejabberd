@@ -22,7 +22,7 @@ update_sql_schema: true
 allow_contrib_modules: true
 install_contrib_modules:
   - ejabberd_auth_http
-  - mod_kick_sessions
+  - mod_admin_api_compat
   - mod_vcard_multi
   - mod_global_affiliation
   - mod_privacy_mute
@@ -48,8 +48,7 @@ listen:
   - port: 5290
     module: ejabberd_http
     request_handlers:
-      /api/kick_session: mod_kick_sessions
-      /api: mod_http_api
+      /api: mod_admin_api_compat
 
 acl:
   local:
@@ -112,11 +111,12 @@ modules:
   mod_disco: {}
   mod_global_affiliation: {}
   mod_http_api: {}
-  mod_kick_sessions: {}
+  mod_admin_api_compat: {}
   mod_mam: {}
   mod_muc:
     access: all
-    access_admin: admin
+    access_admin:
+      allow: admin
     access_create: muc_create
     access_persistent: muc_create
     access_mam: all

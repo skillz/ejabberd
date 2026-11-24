@@ -65,7 +65,7 @@ user_send_packet({#presence{type = available} = Pkt, State} = Acc) ->
 user_send_packet(Acc) ->
     Acc.
 
-check(Pkt, #{lserver := LServer, jid := #jid{luser = LUser}} = State, Acc, Refused) ->
+check(Pkt, #{jid := #jid{luser = LUser, lserver = LServer}} = State, Acc, Refused) ->
     case is_game_room(xmpp:get_to(Pkt), LServer)
          andalso lists:member(affiliation(LUser, LServer), Refused) of
         true ->
