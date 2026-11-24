@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "vcard"
+summary: "Fork-compatible multi-vCard fetch (JABBERID a+b+c) for shipped native clients"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

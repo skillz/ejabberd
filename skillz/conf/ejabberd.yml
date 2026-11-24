@@ -23,6 +23,7 @@ allow_contrib_modules: true
 install_contrib_modules:
   - ejabberd_auth_http
   - mod_kick_sessions
+  - mod_vcard_multi
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -147,3 +148,4 @@ modules:
   mod_roster: {}
   mod_vcard:
     search: true
+  mod_vcard_multi: {}
