@@ -14,7 +14,7 @@ post "cbs send_stanza into a room never started"        send_stanza "{\"from\":\
 post "uds get_roster {user,server}"                      get_roster '{"user":"1001","server":"chat.skillz.com"}'
 post "old-arg set_room_affiliation {name,service,jid}"   set_room_affiliation "{\"name\":\"$R\",\"service\":\"conference.chat.skillz.com\",\"jid\":\"1001@chat.skillz.com\",\"affiliation\":\"member\"}"
 post "get_room_occupants {name,service}"                 get_room_occupants "{\"name\":\"$R\",\"service\":\"conference.chat.skillz.com\"}"
-post "public get_room_summary"                           get_room_summary "{\"name\":\"$R\",\"service\":\"conference.chat.skillz.com\"}"
+call "public get_room_summary GET ?room&limit&last_message_id" "$API/get_room_summary?room=$R&limit=10&last_message_id="
 post "unsubscribe_room {user,room}"                      unsubscribe_room "{\"user\":\"1004@chat.skillz.com\",\"room\":\"$R@conference.chat.skillz.com\"}"
 post "cron rooms_unused_destroy {host,days}"             rooms_unused_destroy '{"host":"chat.skillz.com","days":3}'
 post "26.09 form rooms_unused_destroy {service,days}"    rooms_unused_destroy '{"service":"conference.chat.skillz.com","days":3}'
