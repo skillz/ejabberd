@@ -22,6 +22,7 @@ update_sql_schema: true
 allow_contrib_modules: true
 install_contrib_modules:
   - ejabberd_auth_http
+  - mod_kick_sessions
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -44,6 +45,7 @@ listen:
   - port: 5290
     module: ejabberd_http
     request_handlers:
+      /api/kick_session: mod_kick_sessions
       /api: mod_http_api
 
 acl:
@@ -105,6 +107,8 @@ modules:
   mod_admin_extra: {}
   mod_blocking: {}
   mod_disco: {}
+  mod_http_api: {}
+  mod_kick_sessions: {}
   mod_mam: {}
   mod_muc:
     access: all

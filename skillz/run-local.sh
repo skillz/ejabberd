@@ -44,6 +44,7 @@ up-fork)
     docker ps --format "{{.Names}}" | grep -qx ejproof-ejabberd || { docker logs ejproof-ejabberd 2>&1 | tail -5; exit 1; }
     sleep 2
   done
+  for u in skillz-cas mod1 1001 1002 1003 1004; do docker exec ejproof-ejabberd /opt/chat-service/sbin/ejabberdctl register $u chat.skillz.com pw-$u >/dev/null 2>&1 || true; done
   ;;
 down)
   docker rm -f ejproof-ejabberd ejproof-authstub ejproof-mysql >/dev/null 2>&1 || true

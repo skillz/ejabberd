@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "admin"
+summary: "Fork-compatible kick_session: kick every resource of a user with a reason"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"
