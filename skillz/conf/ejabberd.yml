@@ -24,6 +24,7 @@ install_contrib_modules:
   - ejabberd_auth_http
   - mod_kick_sessions
   - mod_vcard_multi
+  - mod_global_affiliation
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -108,6 +109,7 @@ modules:
   mod_admin_extra: {}
   mod_blocking: {}
   mod_disco: {}
+  mod_global_affiliation: {}
   mod_http_api: {}
   mod_kick_sessions: {}
   mod_mam: {}

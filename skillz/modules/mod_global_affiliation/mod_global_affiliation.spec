@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "muc"
+summary: "Fork-compatible global mute/ban (set_user_affiliation) for game rooms"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

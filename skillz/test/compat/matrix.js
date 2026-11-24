@@ -197,6 +197,9 @@ process.on('uncaughtException', (e) => { thrown.push(String(e && e.message)); })
   // 6b. Global mute/ban (P2): fork command set_user_affiliation; applies to rooms with no '-' only.
   const gm = await post('set_user_affiliation', {host: DOMAIN, user: '1003', affiliation: 'muted'});
   cell('set_user_affiliation muted (fork command, P2)', gm.status === 200, gm.body.slice(0, 120));
+  w3.send('muted while already in the room');
+  await sleep(800);
+  cell('global mute: user already in the room when muted', null, `can still post=${w1.events.some((e) => e.kind === 'message' && e.message.body === 'muted while already in the room')} (fork: yes until rejoin; callers kick the session)`);
   const w3m = webUser('1003', GAME);
   await waitFor(() => w3m.events.some((e) => e.kind === 'joined' || e.kind === 'join-error'));
   const mh = w3m.events.find((e) => e.kind === 'history');
