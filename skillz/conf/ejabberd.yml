@@ -3,6 +3,7 @@
 
 hosts:
   - chat.skillz.com
+  - chat-admin.skillz.com
 
 loglevel: info
 certfiles:
@@ -32,6 +33,7 @@ install_contrib_modules:
   - mod_block_incoming
   - mod_block_nonfriends
   - mod_push_skillz
+  - mod_pottymouth
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -65,6 +67,7 @@ acl:
   admin:
     user:
       - "skillz-cas@chat.skillz.com"
+      - "skillz-cas@chat-admin.skillz.com"
 
 access_rules:
   local:
@@ -162,6 +165,16 @@ modules:
   mod_ping: {}
   mod_privacy: {}
   mod_privacy_mute: {}
+  mod_pottymouth:
+    blacklists:
+      default: /opt/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/blacklist_en.txt
+      en: /opt/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/blacklist_en.txt
+      public_mute_en: /opt/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/public_mute_en.txt
+      public_ban_en: /opt/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/public_ban_en.txt
+      private_ban_en: /opt/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/private_ban_en.txt
+    charmaps:
+      default: /opt/ejabberd/.ejabberd-modules/sources/mod_pottymouth/charmap/charmap_en.txt
+      en: /opt/ejabberd/.ejabberd-modules/sources/mod_pottymouth/charmap/charmap_en.txt
   mod_push_skillz:
     push_notification_url: "http://ejproof-stub:8080/v1/triggered_events"
   mod_roster: {}

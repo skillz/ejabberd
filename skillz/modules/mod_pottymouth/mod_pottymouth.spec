@@ -1,0 +1,5 @@
+author: "Skillz (from Tom Quackenbush's mod_pottymouth)"
+category: "data"
+summary: "Word masking, strike automod and staff-impersonation filter (port of skillz/mod_pottymouth)"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

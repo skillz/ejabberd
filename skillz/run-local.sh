@@ -42,6 +42,7 @@ up)
   done
   # auth_method internal keeps accounts in Mnesia, which this container does not persist.
   for u in skillz-cas mod1 1001 1002 1003 1004; do docker exec ejproof-ejabberd ejabberdctl register $u chat.skillz.com pw-$u >/dev/null 2>&1 || true; done
+  docker exec ejproof-ejabberd ejabberdctl register skillz-cas chat-admin.skillz.com pw-skillz-cas >/dev/null 2>&1 || true
   ;;
 up-fork)
   # Baseline: the 19.02 fork image built from Dockerfile.fork-baseline (core only) on the same MySQL, db

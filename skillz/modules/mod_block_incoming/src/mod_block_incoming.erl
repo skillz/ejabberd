@@ -35,7 +35,10 @@
 %%% Callbacks and hooks
 %%%===================================================================
 start(Host, Opts) ->
-  ejabberd_commands:register_commands(get_commands_spec()),
+  case gen_mod:is_loaded_elsewhere(Host, ?MODULE) of
+    false -> ejabberd_commands:register_commands(get_commands_spec());
+    true -> ok
+  end,
   gen_mod:start_child(?MODULE, Host, Opts)
 .
 
