@@ -26,6 +26,7 @@ install_contrib_modules:
   - mod_vcard_multi
   - mod_global_affiliation
   - mod_privacy_mute
+  - mod_mucsub_order
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -144,6 +145,7 @@ modules:
       public_list: false
       presence_broadcast: []
   mod_muc_admin: {}
+  mod_mucsub_order: {}
   mod_offline:
     access_max_user_messages: max_user_offline_messages
   mod_ping: {}

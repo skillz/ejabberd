@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "muc"
+summary: "MUC/Sub subscriptions list ordered by latest archived message (fork behaviour)"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"
