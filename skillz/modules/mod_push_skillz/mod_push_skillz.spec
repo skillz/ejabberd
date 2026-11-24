@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "offline messages"
+summary: "Push notifications through push-notification-service for MUC/Sub offline messages and friend requests (Erlang port of ModPushSkillz)"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

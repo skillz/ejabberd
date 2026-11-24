@@ -3,6 +3,7 @@
 loglevel: 4
 hosts:
   - "chat.skillz.com"
+  - "chat-admin.skillz.com"
 listen:
   - port: 5280
     module: ejabberd_http
@@ -33,6 +34,7 @@ acl:
       - "127.0.0.0/8"
   admin:
     - user: "skillz-cas@chat.skillz.com"
+    - user: "skillz-cas@chat-admin.skillz.com"
 access_rules:
   local:
     - allow: local

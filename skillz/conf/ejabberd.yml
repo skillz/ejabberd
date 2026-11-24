@@ -31,6 +31,7 @@ install_contrib_modules:
   - mod_mucsub_offline
   - mod_block_incoming
   - mod_block_nonfriends
+  - mod_push_skillz
 
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
@@ -161,6 +162,8 @@ modules:
   mod_ping: {}
   mod_privacy: {}
   mod_privacy_mute: {}
+  mod_push_skillz:
+    push_notification_url: "http://ejproof-stub:8080/v1/triggered_events"
   mod_roster: {}
   mod_vcard:
     search: true

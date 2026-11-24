@@ -1,0 +1,16 @@
+  ## Appended to fork-baseline.yml by `run-local.sh up-fork` when FORK_PLUGINS=1 (image ejproof-fork-plugins).
+  ModPushSkillz:
+    push_notification_url: "http://ejproof-stub:8080/v1/triggered_events"
+  mod_pottymouth:
+    blacklists:
+      default: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/blacklist_en.txt
+      en: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/blacklist_en.txt
+      public_mute_en: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/public_mute_en.txt
+      public_ban_en: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/public_ban_en.txt
+      private_ban_en: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/blacklist/private_ban_en.txt
+    charmaps:
+      default: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/charmap/charmap_en.txt
+      en: /home/ejabberd/.ejabberd-modules/sources/mod_pottymouth/charmap/charmap_en.txt
+    automod:
+      private_message_moderation_enabled: false
+      moderated_games: []
