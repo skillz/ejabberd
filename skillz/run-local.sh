@@ -11,7 +11,7 @@ up)
   AUTH=${2:-internal}
   docker network inspect $NET >/dev/null 2>&1 || docker network create $NET >/dev/null
   if ! docker ps --format '{{.Names}}' | grep -qx ejproof-mysql; then
-    docker run -d --name ejproof-mysql --network $NET -p 127.0.0.1:15306:3306 \
+    docker run -d --name ejproof-mysql --network $NET -p 127.0.0.1:${MYSQL_PORT:-15306}:3306 \
       -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=ejabberd -e MYSQL_USER=ejabberd -e MYSQL_PASSWORD=ejabberd \
       mysql:8.0 >/dev/null
     until docker exec ejproof-mysql mysql -uejabberd -pejabberd -e 'select 1' ejabberd >/dev/null 2>&1; do sleep 2; done

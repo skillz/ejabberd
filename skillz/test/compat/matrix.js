@@ -149,9 +149,9 @@ process.on('uncaughtException', (e) => { thrown.push(String(e && e.message)); })
   await sleep(300);
   const n4Before = n4.msgs(GAME).length;
   w1.send('to subscribers while 1004 is out of the room');
-  await waitFor(() => n4.msgs(GAME).length > n4Before);
-  const subRaw = n4.raw.find((x) => x.includes('while 1004 is out')) || '';
-  cell('MUC/Sub live delivery to subscriber not in room (native renders it)', n4.msgs(GAME).length > n4Before, subRaw ? `wrapped in pubsub event: ${subRaw.includes('urn:xmpp:mucsub:nodes:messages')}` : 'not received');
+  await waitFor(() => n4.msgs(GAME).length > n4Before, 1500);
+  // P7: the fork sends it to offline storage (push) instead of a live event, even to an online subscriber.
+  cell('MUC/Sub to an online subscriber not in the room: no live event, stored offline (fork P7)', n4.msgs(GAME).length === n4Before, `live events=${n4.msgs(GAME).length - n4Before}`);
 
   // offline subscriber: store + retrieve via XEP-0013 headers
   n4.c.disconnectFromServer();

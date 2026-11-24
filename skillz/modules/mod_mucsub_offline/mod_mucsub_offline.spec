@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "muc"
+summary: "MUC/Sub messages to subscribers not in the room go to offline storage (and push), as on the fork"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"
