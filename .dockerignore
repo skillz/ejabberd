@@ -44,3 +44,6 @@ Mnesia.nonode@nohost/
 /ejabberd-*.run
 /ejabberd-*.tar.gz
 /.github/container/Dockerfile
+/skillz/modules/*/ebin/
+/skillz/conf/.*.rendered.yml
+/skillz/test/
