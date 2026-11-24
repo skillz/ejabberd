@@ -19,8 +19,16 @@ sql_pool_size: 10
 sql_keepalive_interval: 60
 update_sql_schema: true
 
+allow_contrib_modules: true
+install_contrib_modules:
+  - ejabberd_auth_http
+
 auth_method: '@AUTH_METHOD@'
 auth_use_cache: false
+auth_opts:
+  host: "http://ejproof-authstub:8080"
+  path_prefix: "/chat-auth/"
+  connection_pool_size: 8
 
 listen:
   - port: 5222

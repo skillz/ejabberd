@@ -1,1 +1,2 @@
 conf/.ejabberd.rendered.yml
+modules/*/ebin/

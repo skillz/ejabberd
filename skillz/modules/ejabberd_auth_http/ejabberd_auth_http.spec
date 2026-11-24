@@ -1,0 +1,5 @@
+author: "Skillz"
+category: "auth"
+summary: "Password check against the Skillz /chat-auth/ HTTP endpoints"
+home: "https://github.com/skillz/ejabberd"
+url: "https://github.com/skillz/ejabberd"

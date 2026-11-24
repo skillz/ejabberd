@@ -16,18 +16,20 @@ up)
       mysql:8.0 >/dev/null
     until docker exec ejproof-mysql mysql -uejabberd -pejabberd -e 'select 1' ejabberd >/dev/null 2>&1; do sleep 2; done
   fi
+  if [ "$AUTH" = http ] && ! docker ps --format '{{.Names}}' | grep -qx ejproof-authstub; then
+    docker run -d --name ejproof-authstub --network $NET -v "$DIR/test/auth-stub.js:/stub.js:ro" node:20-alpine node /stub.js >/dev/null
+  fi
   docker rm -f ejproof-ejabberd >/dev/null 2>&1 || true
   sed "s/@AUTH_METHOD@/$AUTH/" "$DIR/conf/ejabberd.yml" > "$DIR/conf/.ejabberd.rendered.yml"
   docker run -d --name ejproof-ejabberd --network $NET --add-host host.docker.internal:host-gateway \
     -p 127.0.0.1:15222:5222 -p 127.0.0.1:15280:5280 -p 127.0.0.1:15443:5290 \
     -v "$DIR/conf/.ejabberd.rendered.yml:/opt/ejabberd/conf/ejabberd.yml:ro" \
-    -v "$DIR/modules:/opt/ejabberd/.ejabberd-modules/sources:ro" \
+    -v "$DIR/modules:/opt/ejabberd/.ejabberd-modules/sources" \
     $IMG >/dev/null
   until docker exec ejproof-ejabberd ejabberdctl status >/dev/null 2>&1; do
     docker ps --format "{{.Names}}" | grep -qx ejproof-ejabberd || { docker logs ejproof-ejabberd 2>&1 | tail -5; exit 1; }
     sleep 2
   done
-  for m in $(ls "$DIR/modules"); do docker exec ejproof-ejabberd ejabberdctl module_install "$m"; done
   # auth_method internal keeps accounts in Mnesia, which this container does not persist.
   for u in skillz-cas mod1 1001 1002 1003 1004; do docker exec ejproof-ejabberd ejabberdctl register $u chat.skillz.com pw-$u >/dev/null 2>&1 || true; done
   ;;
@@ -44,7 +46,7 @@ up-fork)
   done
   ;;
 down)
-  docker rm -f ejproof-ejabberd ejproof-mysql >/dev/null 2>&1 || true
+  docker rm -f ejproof-ejabberd ejproof-authstub ejproof-mysql >/dev/null 2>&1 || true
   docker network rm $NET >/dev/null 2>&1 || true
   ;;
 ctl)
