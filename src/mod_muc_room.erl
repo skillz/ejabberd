@@ -1382,28 +1382,27 @@ set_affiliation(JID, Affiliation,
 set_affiliation(JID, Affiliation, StateData, Reason) ->
     ServerHost = StateData#state.server_host,
     Room = StateData#state.room,
+    NewAffiliation = case {Affiliation, Reason} of
+    {outcast, <<"muted">>} ->
+        muted;
+    _ ->
+        Affiliation
+    end,
     case lists:member($-, binary_to_list(Room)) of
     true ->
-        set_affiliation_fallback(JID, Affiliation, StateData, Reason);
+        set_affiliation_fallback(JID, NewAffiliation, StateData, Reason);
     false ->
-        Host = StateData#state.host,
         Mod = gen_mod:db_mod(ServerHost, mod_muc),
         LUser = JID#jid.luser,
-        NewAffiliation = case {Affiliation, Reason} of
-        {outcast, <<"muted">>} ->
-            muted;
-        _ ->
-            Affiliation
-        end,
         case NewAffiliation of
         none ->
             Mod:disable_affiliation(ServerHost, LUser);
         _ ->
             Mod:disable_affiliation(ServerHost, LUser),
             Mod:insert_affiliation(ServerHost, LUser, NewAffiliation)
-        end
-    end,
-    StateData.
+        end,
+        StateData
+    end.
 
 %% @doc set user affiliation for all rooms globally
 %% ServerHost is the host, eg, chat.skillz.com
