@@ -7,6 +7,8 @@ FROM alpine AS builder
 
 ARG REBAR_VERSION=2.6.4
 ARG ICONV_VERSION=1.0.10
+ARG MIX_REBAR3_VERSION=3.18.0
+ARG MIX_REBAR3_SHA256=f3e2641be923ce23076ce4843ee61c63fb392bc6c44dc9d129e4b31f7e136ff0
 
 # Install required dependencies from package manager
 RUN apk upgrade --update musl \
@@ -54,7 +56,11 @@ RUN ./autogen.sh \
 WORKDIR /home/ejabberd
 RUN mkdir -p .ejabberd-modules/sources
 RUN mix local.hex --force \
-    && mix local.rebar --force
+    && mix local.rebar --force \
+    && wget -q https://github.com/erlang/rebar3/releases/download/${MIX_REBAR3_VERSION}/rebar3 -O /tmp/rebar3 \
+    && echo "${MIX_REBAR3_SHA256}  /tmp/rebar3" | sha256sum -c - \
+    && mix local.rebar rebar3 /tmp/rebar3 --force \
+    && rm /tmp/rebar3
 
 # Module push skillz
 WORKDIR /home/ejabberd/.ejabberd-modules/sources
